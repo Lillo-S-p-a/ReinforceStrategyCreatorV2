@@ -12,6 +12,7 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 from typing import Tuple, Dict, Any, Optional, Union, List
+from collections import deque
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -31,17 +32,18 @@ class TradingEnv(gym.Env):
         observation_space (gym.spaces.Space): The observation space of the environment.
     """
     
-    def __init__(self, df: pd.DataFrame, initial_balance: float = 10000.0, transaction_fee_percent: float = 0.1, window_size: int = 5):
+    def __init__(self, df: pd.DataFrame, initial_balance: float = 10000.0, transaction_fee_percent: float = 0.1, window_size: int = 5, sharpe_window_size: int = 20):
         """
         Initialize the trading environment.
         
         Args:
             df (pd.DataFrame): Historical market data for simulation, including pre-calculated technical indicators.
-                              Assumes the DataFrame already contains indicator columns calculated by
-                              technical_analyzer.calculate_indicators().
+                               Assumes the DataFrame already contains indicator columns calculated by
+                               technical_analyzer.calculate_indicators().
             initial_balance (float): Initial account balance.
             transaction_fee_percent (float): Fee percentage for each transaction (default: 0.1%).
             window_size (int): Number of time steps to include in each observation (default: 5).
+            sharpe_window_size (int): Number of time steps to use for Sharpe ratio calculation (default: 20).
         """
         super(TradingEnv, self).__init__()
         
@@ -49,6 +51,7 @@ class TradingEnv(gym.Env):
         self.initial_balance = initial_balance
         self.transaction_fee_percent = transaction_fee_percent
         self.window_size = window_size
+        self.sharpe_window_size = sharpe_window_size
         
         # Placeholder for current step in the environment
         self.current_step = 0
@@ -59,6 +62,9 @@ class TradingEnv(gym.Env):
         self.current_price = 0
         self.portfolio_value = initial_balance
         self.last_portfolio_value = initial_balance
+        
+        # Portfolio value history for Sharpe ratio calculation
+        self._portfolio_value_history = deque(maxlen=sharpe_window_size)
         
         # Current position state: 0 = Flat, 1 = Long, -1 = Short
         self.current_position = 0
@@ -111,6 +117,9 @@ class TradingEnv(gym.Env):
         self.portfolio_value = self.initial_balance
         self.last_portfolio_value = self.initial_balance
         self.current_position = 0  # Reset to Flat position
+        
+        # Clear portfolio value history
+        self._portfolio_value_history.clear()
         
         if len(self.df) == 0:
             error_msg = "DataFrame is empty. Cannot reset environment."
@@ -203,7 +212,10 @@ class TradingEnv(gym.Env):
         # Calculate the current portfolio value
         self.portfolio_value = self.balance + self.shares_held * self.current_price
         
-        # Calculate reward as the change in portfolio value
+        # Add current portfolio value to history for Sharpe ratio calculation
+        self._portfolio_value_history.append(self.portfolio_value)
+        
+        # Calculate reward as the Sharpe ratio
         reward = self._calculate_reward()
         
         # Get the new observation
@@ -398,22 +410,47 @@ class TradingEnv(gym.Env):
     
     def _calculate_reward(self) -> float:
         """
-        Calculate the reward based on the change in portfolio value.
+        Calculate the reward based on the Sharpe ratio of portfolio returns.
+        
+        The Sharpe ratio is a measure of risk-adjusted return, calculated as:
+        Sharpe ratio = (mean of returns - risk-free rate) / standard deviation of returns
+        
+        For simplicity, we assume a risk-free rate of 0.
         
         Returns:
-            float: The calculated reward.
+            float: The calculated Sharpe ratio as the reward.
         """
-        # Calculate the change in portfolio value
-        portfolio_change = self.portfolio_value - self.last_portfolio_value
+        # Check if we have enough history to calculate the Sharpe ratio
+        if len(self._portfolio_value_history) < self.sharpe_window_size:
+            # Not enough data, return 0.0
+            return 0.0
         
-        # Calculate percentage change for scaling
-        percentage_change = portfolio_change / self.last_portfolio_value if self.last_portfolio_value > 0 else 0
+        # Calculate returns from portfolio values
+        returns = []
+        for i in range(1, len(self._portfolio_value_history)):
+            prev_value = self._portfolio_value_history[i-1]
+            curr_value = self._portfolio_value_history[i]
+            if prev_value > 0:  # Avoid division by zero
+                returns.append((curr_value - prev_value) / prev_value)
+            else:
+                returns.append(0.0)
         
-        # Scale the reward (multiplying by 100 to make it more meaningful)
-        reward = percentage_change * 100
+        # Convert to numpy array for calculations
+        returns = np.array(returns)
         
-        # Ensure the reward is always a float
-        return float(reward)
+        # Calculate mean and standard deviation of returns
+        mean_return = np.mean(returns)
+        std_return = np.std(returns)
+        
+        # Handle numerical instability (avoid division by zero)
+        if std_return < 1e-8:  # Near-zero standard deviation
+            return 0.0
+        
+        # Calculate Sharpe ratio (assuming risk-free rate = 0)
+        sharpe_ratio = mean_return / std_return
+        
+        # Return the Sharpe ratio as the reward
+        return float(sharpe_ratio)
     
     def _get_observation(self) -> np.ndarray:
         """
