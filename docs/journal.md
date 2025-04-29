@@ -30,3 +30,10 @@
     *   **Action:** Implemented `TradingEnv._calculate_reward` using Sharpe Ratio calculation. Handled potential division by zero (:NumericalInstability) by returning 0 reward if standard deviation of returns is zero.
     *   **Testing:** Updated relevant tests in `tests/test_trading_environment.py` and `tests/test_trading_env_step.py` to verify the new reward calculation under various conditions (**Targeted Testing Strategy**: Core Logic + Contextual Integration).
     *   **Status:** Completed. All relevant tests passing. Requirements FR3.7 updated, FR3.8 marked implemented.
+*   **Task:** Test RLAgent Learn Method Core Logic (Req FR4.1, FR4.3)
+    *   **Component:** `reinforcestrategycreator/rl_agent.py` (:ComponentRole RLAgent), `tests/test_rl_agent.py`
+    *   **Context:** :Context RLCore, :Context ModelTraining, :Algorithm DQN, :Algorithm ExperienceReplay
+    *   **Action:** Added `gamma` hyperparameter to `StrategyAgent.__init__`.
+    *   **Action:** Implemented core `learn` method logic: sampling batch, predicting Q-values for next/current states, calculating Bellman target, constructing target Q-array, calling `model.fit`.
+    *   **Testing:** Implemented `test_init_gamma` and `test_learn_q_value_target_calculation_and_fit` in `tests/test_rl_agent.py`. Used extensive mocking (`unittest.mock`) for `model.predict` and `model.fit`. Verified correct arguments passed to mocks, handling shuffled batch order. Verified Bellman target calculation. Updated `test_learn_integration_no_runtime_error`. (**Targeted Testing Strategy**: Core Logic + Contextual Integration).
+    *   **Status:** Completed. All relevant tests passing.

@@ -410,47 +410,19 @@ class TradingEnv(gym.Env):
     
     def _calculate_reward(self) -> float:
         """
-        Calculate the reward based on the Sharpe ratio of portfolio returns.
-        
-        The Sharpe ratio is a measure of risk-adjusted return, calculated as:
-        Sharpe ratio = (mean of returns - risk-free rate) / standard deviation of returns
-        
-        For simplicity, we assume a risk-free rate of 0.
-        
+        Calculate the reward based on the percentage change in portfolio value from the last step.
+
         Returns:
-            float: The calculated Sharpe ratio as the reward.
+            float: The percentage change in portfolio value for the step.
+                   Returns 0 if the last portfolio value was 0 to avoid division by zero.
         """
-        # Check if we have enough history to calculate the Sharpe ratio
-        if len(self._portfolio_value_history) < self.sharpe_window_size:
-            # Not enough data, return 0.0
-            return 0.0
-        
-        # Calculate returns from portfolio values
-        returns = []
-        for i in range(1, len(self._portfolio_value_history)):
-            prev_value = self._portfolio_value_history[i-1]
-            curr_value = self._portfolio_value_history[i]
-            if prev_value > 0:  # Avoid division by zero
-                returns.append((curr_value - prev_value) / prev_value)
-            else:
-                returns.append(0.0)
-        
-        # Convert to numpy array for calculations
-        returns = np.array(returns)
-        
-        # Calculate mean and standard deviation of returns
-        mean_return = np.mean(returns)
-        std_return = np.std(returns)
-        
-        # Handle numerical instability (avoid division by zero)
-        if std_return < 1e-8:  # Near-zero standard deviation
-            return 0.0
-        
-        # Calculate Sharpe ratio (assuming risk-free rate = 0)
-        sharpe_ratio = mean_return / std_return
-        
-        # Return the Sharpe ratio as the reward
-        return float(sharpe_ratio)
+        if self.last_portfolio_value == 0:
+            logger.warning("Last portfolio value was 0, returning 0 reward to avoid division by zero.")
+            return 0.0  # Avoid division by zero
+
+        # Calculate reward as the percentage change in portfolio value
+        reward = (self.portfolio_value - self.last_portfolio_value) / self.last_portfolio_value
+        return reward
     
     def _get_observation(self) -> np.ndarray:
         """

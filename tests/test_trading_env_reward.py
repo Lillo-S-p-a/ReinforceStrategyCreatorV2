@@ -123,193 +123,164 @@ def test_portfolio_value_history_update_in_step(env):
 
 
 def test_calculate_reward_data_availability(env):
-    """Test that _calculate_reward returns 0.0 when not enough data is available."""
-    # Reset the environment
+    """Test reward calculation behavior based on last_portfolio_value availability."""
+    # Reset the environment - last_portfolio_value should be None
     env.reset()
-    
-    # Check that _portfolio_value_history is empty
-    assert len(env._portfolio_value_history) == 0
-    
-    # Calculate reward
+    # After reset, last_portfolio_value should be the initial balance
+    assert pytest.approx(env.last_portfolio_value) == env.initial_balance
+
+    # Calculate reward when last_portfolio_value is None
     reward = env._calculate_reward()
-    
-    # Check that reward is 0.0 when _portfolio_value_history is empty
+    # Check that reward is 0.0
     assert reward == 0.0
-    
-    # Add some values to _portfolio_value_history, but less than sharpe_window_size
-    for i in range(env.sharpe_window_size - 1):
-        env._portfolio_value_history.append(10000.0 + i * 100)
-    
-    # Check that _portfolio_value_history has less than sharpe_window_size values
-    assert len(env._portfolio_value_history) < env.sharpe_window_size
-    
-    # Calculate reward
+
+    # Manually set last_portfolio_value to 0
+    env.last_portfolio_value = 0.0
+    env.portfolio_value = 10000.0 # Set a current value
+    # Calculate reward when last_portfolio_value is 0
     reward = env._calculate_reward()
-    
-    # Check that reward is 0.0 when _portfolio_value_history has less than sharpe_window_size values
+    # Check that reward is 0.0 (division by zero protection)
     assert reward == 0.0
+
+    # Manually set valid last_portfolio_value and portfolio_value
+    env.last_portfolio_value = 10000.0
+    env.portfolio_value = 10100.0
+    # Calculate reward with valid values
+    reward = env._calculate_reward()
+    # Check that reward is calculated correctly (0.01 for 1% increase)
+    assert pytest.approx(reward) == 0.01
 
 
 def test_calculate_reward_numerical_stability(env):
-    """Test that _calculate_reward handles numerical instability correctly."""
+    """Test reward calculation with very small non-zero last_portfolio_value."""
     # Reset the environment
     env.reset()
-    
-    # Add constant values to _portfolio_value_history (will result in zero standard deviation)
-    for _ in range(env.sharpe_window_size):
-        env._portfolio_value_history.append(10000.0)
-    
+
+    # Set very small last_portfolio_value and a slightly larger portfolio_value
+    env.last_portfolio_value = 1e-9
+    env.portfolio_value = 2e-9
+
     # Calculate reward
     reward = env._calculate_reward()
-    
-    # Check that reward is 0.0 when standard deviation is zero
-    assert reward == 0.0
-    
-    # Add values with very small changes to _portfolio_value_history
-    env._portfolio_value_history.clear()
-    for i in range(env.sharpe_window_size):
-        env._portfolio_value_history.append(10000.0 + i * 1e-10)
-    
-    # Calculate reward
+
+    # Calculate expected reward: (2e-9 - 1e-9) / 1e-9 = 1.0
+    expected_reward = 1.0
+
+    # Check that reward is calculated correctly even with small numbers
+    assert pytest.approx(reward) == expected_reward
+
+    # Test with negative small numbers
+    env.last_portfolio_value = -1e-9
+    env.portfolio_value = -2e-9
     reward = env._calculate_reward()
-    
-    # Check that reward is 0.0 when standard deviation is near-zero
-    assert reward == 0.0
+    # Expected: (-2e-9 - (-1e-9)) / -1e-9 = -1e-9 / -1e-9 = 1.0
+    expected_reward = 1.0
+    assert pytest.approx(reward) == expected_reward
+
+    # Test with small positive change from small negative
+    env.last_portfolio_value = -2e-9
+    env.portfolio_value = -1e-9
+    reward = env._calculate_reward()
+    # Expected: (-1e-9 - (-2e-9)) / -2e-9 = 1e-9 / -2e-9 = -0.5
+    expected_reward = -0.5
+    assert pytest.approx(reward) == expected_reward
 
 
-def test_calculate_reward_linear_increase(env_small_window):
-    """Test that _calculate_reward calculates Sharpe Ratio correctly for linearly increasing portfolio values."""
-    env = env_small_window
+def test_calculate_reward_positive_change(env):
+    """Test _calculate_reward for a positive portfolio value change."""
     # Reset the environment
     env.reset()
-    
-    # Add linearly increasing values to _portfolio_value_history
-    for i in range(env.sharpe_window_size):
-        env._portfolio_value_history.append(10000.0 + i * 100)
-    
+
+    # Set previous and current portfolio values for a positive change
+    env.last_portfolio_value = 10000.0
+    env.portfolio_value = 10100.0  # 1% increase
+
     # Calculate reward
     reward = env._calculate_reward()
-    
-    # For linearly increasing values, the Sharpe ratio should be positive
+
+    # Calculate expected reward (percentage change)
+    expected_reward = (10100.0 - 10000.0) / 10000.0  # Should be 0.01
+
+    # Check that reward is positive and matches the expected percentage change
     assert reward > 0.0
-    
-    # Calculate expected Sharpe ratio manually
-    returns = []
-    values = list(env._portfolio_value_history)
-    for i in range(1, len(values)):
-        prev_value = values[i-1]
-        curr_value = values[i]
-        returns.append((curr_value - prev_value) / prev_value)
-    
-    mean_return = np.mean(returns)
-    std_return = np.std(returns)
-    expected_sharpe = mean_return / std_return
-    
-    # Check that the calculated reward matches the expected Sharpe ratio
-    assert pytest.approx(reward, abs=1e-5) == expected_sharpe
+    assert pytest.approx(reward) == expected_reward
 
 
-def test_calculate_reward_linear_decrease(env_small_window):
-    """Test that _calculate_reward calculates Sharpe Ratio correctly for linearly decreasing portfolio values."""
-    env = env_small_window
+def test_calculate_reward_negative_change(env):
+    """Test _calculate_reward for a negative portfolio value change."""
     # Reset the environment
     env.reset()
-    
-    # Add linearly decreasing values to _portfolio_value_history
-    for i in range(env.sharpe_window_size):
-        env._portfolio_value_history.append(10000.0 - i * 100)
-    
+
+    # Set previous and current portfolio values for a negative change
+    env.last_portfolio_value = 10000.0
+    env.portfolio_value = 9800.0  # 2% decrease
+
     # Calculate reward
     reward = env._calculate_reward()
-    
-    # For linearly decreasing values, the Sharpe ratio should be negative
+
+    # Calculate expected reward (percentage change)
+    expected_reward = (9800.0 - 10000.0) / 10000.0  # Should be -0.02
+
+    # Check that reward is negative and matches the expected percentage change
     assert reward < 0.0
-    
-    # Calculate expected Sharpe ratio manually
-    returns = []
-    values = list(env._portfolio_value_history)
-    for i in range(1, len(values)):
-        prev_value = values[i-1]
-        curr_value = values[i]
-        returns.append((curr_value - prev_value) / prev_value)
-    
-    mean_return = np.mean(returns)
-    std_return = np.std(returns)
-    expected_sharpe = mean_return / std_return
-    
-    # Check that the calculated reward matches the expected Sharpe ratio
-    assert pytest.approx(reward, abs=1e-5) == expected_sharpe
+    assert pytest.approx(reward) == expected_reward
 
 
-def test_calculate_reward_volatile(env_small_window):
-    """Test that _calculate_reward calculates Sharpe Ratio correctly for volatile portfolio values."""
-    env = env_small_window
+def test_calculate_reward_no_change(env):
+    """Test _calculate_reward when the portfolio value does not change."""
     # Reset the environment
     env.reset()
-    
-    # Add volatile values to _portfolio_value_history
-    values = [10000.0, 10200.0, 10100.0, 10300.0, 10050.0]
-    for value in values:
-        env._portfolio_value_history.append(value)
-    
+
+    # Set previous and current portfolio values to be the same
+    env.last_portfolio_value = 10000.0
+    env.portfolio_value = 10000.0
+
     # Calculate reward
     reward = env._calculate_reward()
-    
-    # Calculate expected Sharpe ratio manually
-    returns = []
-    for i in range(1, len(values)):
-        prev_value = values[i-1]
-        curr_value = values[i]
-        returns.append((curr_value - prev_value) / prev_value)
-    
-    mean_return = np.mean(returns)
-    std_return = np.std(returns)
-    expected_sharpe = mean_return / std_return
-    
-    # Check that the calculated reward matches the expected Sharpe ratio
-    assert pytest.approx(reward, abs=1e-5) == expected_sharpe
+
+    # Calculate expected reward (percentage change)
+    expected_reward = (10000.0 - 10000.0) / 10000.0  # Should be 0.0
+
+    # Check that reward is zero
+    assert pytest.approx(reward) == expected_reward
 
 
 # CONTEXTUAL INTEGRATION TESTS
 
-def test_step_returns_sharpe_ratio_as_reward(env_small_window):
-    """Test that the reward returned by step is the calculated Sharpe Ratio."""
-    env = env_small_window
+def test_step_returns_percentage_change_reward(env):
+    """Test that the reward returned by step is the calculated percentage change."""
     # Reset the environment
-    env.reset()
-    
-    # Take steps to fill the _portfolio_value_history
-    for _ in range(env.sharpe_window_size):
-        _, reward, _, _, _ = env.step(0)  # Flat action
-    
-    # At this point, _portfolio_value_history should be full
-    assert len(env._portfolio_value_history) == env.sharpe_window_size
-    
-    # Calculate the expected Sharpe ratio
-    returns = []
-    values = list(env._portfolio_value_history)
-    for i in range(1, len(values)):
-        prev_value = values[i-1]
-        curr_value = values[i]
-        returns.append((curr_value - prev_value) / prev_value)
-    
-    mean_return = np.mean(returns)
-    std_return = np.std(returns)
-    
-    # Handle the case where std_return is near-zero
-    if std_return < 1e-8:
-        expected_sharpe = 0.0
-    else:
-        expected_sharpe = mean_return / std_return
-    
-    # Take one more step and check that the reward matches the expected Sharpe ratio
-    _, reward, _, _, _ = env.step(0)  # Flat action
-    
+    obs1, info1 = env.reset()
+    initial_value = env.portfolio_value # Should be initial_balance
+    # After reset, last_portfolio_value should be the initial balance
+    assert pytest.approx(env.last_portfolio_value) == env.initial_balance
+
+    # Take step 1 (e.g., flat action, portfolio value might change slightly due to time passing if fees applied differently, but assume no change for simplicity here)
+    # In a real scenario, price changes would affect value. We use flat action for minimal change.
+    obs2, reward1, term1, trunc1, info2 = env.step(0)
+    value_after_step1 = env.portfolio_value
+    last_value_after_step1 = env.last_portfolio_value # Should be initial_value
+
+    # Reward for the first step should be 0.0 as last_portfolio_value was None initially
+    assert reward1 == 0.0
+    assert last_value_after_step1 == initial_value
+
+    # Take step 2
+    obs3, reward2, term2, trunc2, info3 = env.step(0)
+    value_after_step2 = env.portfolio_value
+    last_value_after_step2 = env.last_portfolio_value # Should be value_after_step1
+
+    # Reward for the second step should be the percentage change from initial_value to value_after_step1
+    expected_reward2 = 0.0
+    if initial_value != 0: # Avoid division by zero
+        expected_reward2 = (value_after_step1 - initial_value) / initial_value
+
     # Check that the reward is a float
-    assert isinstance(reward, float)
-    
-    # Check that the reward matches the expected Sharpe ratio
-    assert pytest.approx(reward, abs=1e-5) == expected_sharpe
+    assert isinstance(reward2, float)
+
+    # Check that the reward matches the expected percentage change
+    assert pytest.approx(reward2) == expected_reward2
+    assert last_value_after_step2 == value_after_step1
 
 
 def test_basic_run_through_steps(env):

@@ -138,7 +138,7 @@ def test_step_buy_action_detailed(env):
     assert pytest.approx(env.portfolio_value, abs=1e-5) == expected_portfolio_value
     
     # Check that the reward reflects the change in portfolio value
-    expected_reward = ((env.portfolio_value - initial_portfolio_value) / initial_portfolio_value) * 100
+    expected_reward = (env.portfolio_value - initial_portfolio_value) / initial_portfolio_value
     assert pytest.approx(reward, abs=1e-5) == expected_reward
 
 
@@ -167,7 +167,7 @@ def test_step_flat_action_from_long(env):
     assert pytest.approx(env.portfolio_value, abs=1e-5) == expected_portfolio_value
     
     # Check that the reward reflects the change in portfolio value
-    expected_reward = ((env.portfolio_value - portfolio_value_after_long) / portfolio_value_after_long) * 100
+    expected_reward = (env.portfolio_value - portfolio_value_after_long) / portfolio_value_after_long
     assert pytest.approx(reward, abs=1e-5) == expected_reward
 
 
@@ -197,7 +197,7 @@ def test_step_short_action_from_flat(env):
     assert pytest.approx(env.portfolio_value, abs=1e-5) == expected_portfolio_value
     
     # Check that the reward reflects the change in portfolio value
-    expected_reward = ((env.portfolio_value - initial_portfolio_value) / initial_portfolio_value) * 100
+    expected_reward = (env.portfolio_value - initial_portfolio_value) / initial_portfolio_value
     assert pytest.approx(reward, abs=1e-5) == expected_reward
 
 
@@ -223,7 +223,9 @@ def test_step_long_with_insufficient_balance(env):
     assert pytest.approx(env.portfolio_value, abs=1e-5) == expected_portfolio_value
     
     # Check that the reward reflects the change in portfolio value
-    expected_reward = ((env.portfolio_value - initial_portfolio_value) / initial_portfolio_value) * 100
+    # If no action could be taken (insufficient balance), portfolio value change should be 0, hence reward 0
+    # However, the calculation reflects the raw percentage change based on the initial value, even if it's 0.
+    expected_reward = (env.portfolio_value - initial_portfolio_value) / initial_portfolio_value if initial_portfolio_value != 0 else 0.0
     assert pytest.approx(reward, abs=1e-5) == expected_reward
 
 
@@ -264,7 +266,7 @@ def test_step_reward_calculation(env):
     
     # Calculate expected reward
     portfolio_change = env.portfolio_value - env.initial_balance
-    expected_reward = (portfolio_change / env.initial_balance) * 100
+    expected_reward = portfolio_change / env.initial_balance
     
     # Check that the reward matches the expected value
     assert pytest.approx(reward, abs=1e-5) == expected_reward
@@ -275,7 +277,7 @@ def test_step_reward_calculation(env):
     
     # Calculate expected reward
     portfolio_change = env.portfolio_value - portfolio_value_before_flat
-    expected_reward = (portfolio_change / portfolio_value_before_flat) * 100
+    expected_reward = portfolio_change / portfolio_value_before_flat
     
     # Check that the reward matches the expected value
     assert pytest.approx(reward, abs=1e-5) == expected_reward
@@ -325,8 +327,9 @@ def test_step_interaction_with_agent(env, agent):
     next_action = agent.select_action(next_observation)
     assert 0 <= next_action < env.action_space.n
     
-    # Check that the agent can learn from the transition
-    agent.learn(observation, action, reward, next_observation, terminated)
+    # Check that the agent can remember the transition and then learn
+    agent.remember(observation, action, reward, next_observation, terminated)
+    agent.learn() # Learn samples from memory, doesn't take arguments directly
     
     # This test passes if no exceptions are raised during the interaction
 
