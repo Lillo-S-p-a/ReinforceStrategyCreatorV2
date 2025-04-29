@@ -353,8 +353,9 @@ class TradingEnv(gym.Env):
             if prev_position == 0:  # Flat -> Short (Sell short)
                 # Calculate number of shares to short (similar to buying, but we're selling shares we don't own)
                 # Use a similar approach to buying, but for shorting
-                max_shares_possible = self.balance / (self.current_price * (self.transaction_fee_percent / 100))
-                shares_to_short = int(max_shares_possible / 2)  # More conservative for shorting
+                # Calculate shares based on what could be bought (mirroring long logic for simplicity)
+                buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
+                shares_to_short = buyable_shares # Short the same amount we could buy
                 
                 if shares_to_short > 0:
                     # Calculate the proceeds from shorting
@@ -387,8 +388,9 @@ class TradingEnv(gym.Env):
                     self.shares_held = 0
                     
                     # Then, short shares
-                    max_shares_possible = self.balance / (self.current_price * (self.transaction_fee_percent / 100))
-                    shares_to_short = int(max_shares_possible / 2)  # More conservative for shorting
+                    # Calculate shares based on what could be bought (mirroring long logic for simplicity)
+                    buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
+                    shares_to_short = buyable_shares # Short the same amount we could buy
                     
                     if shares_to_short > 0:
                         # Calculate the proceeds from shorting
