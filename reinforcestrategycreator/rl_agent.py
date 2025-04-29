@@ -9,38 +9,61 @@ This module provides a reinforcement learning agent for strategy creation.
 import logging
 import numpy as np
 from typing import List, Tuple, Any, Union
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
 class StrategyAgent:
     """
-    Reinforcement Learning agent for trading strategy creation.
-    
-    This class implements a reinforcement learning agent that learns to create
+    Reinforcement Learning agent for trading strategy creation using DQN.
+    :Algorithm DQN
+
+    This class implements a Deep Q-Network (DQN) agent that learns to create
     trading strategies based on market data and technical indicators.
-    
+
     Attributes:
         state_size (int): Dimension of the state space.
         action_size (int): Dimension of the action space.
+        model (keras.Model): The Q-network model.
+        learning_rate (float): Learning rate for the optimizer.
     """
-    
-    def __init__(self, state_size: int, action_size: int):
+
+    def __init__(self, state_size: int, action_size: int, learning_rate: float = 0.001):
         """
-        Initialize the RL agent with state and action dimensions.
-        
+        Initialize the DQN agent.
+
+        Builds and compiles the Q-network model.
+
         Args:
             state_size (int): Dimension of the state space (input features).
             action_size (int): Dimension of the action space (possible actions).
+            learning_rate (float): Learning rate for the Adam optimizer. Defaults to 0.001.
         """
         self.state_size = state_size
         self.action_size = action_size
-        
-        # Placeholder for future implementation
-        self.model = None
-        
-        logger.info(f"StrategyAgent initialized with state_size={state_size}, action_size={action_size}")
+        self.learning_rate = learning_rate
+
+        # Build the Q-Network model
+        self.model = self._build_model()
+
+        logger.info(f"StrategyAgent (DQN) initialized: state_size={state_size}, "
+                    f"action_size={action_size}, learning_rate={learning_rate}. Model built and compiled.")
     
+    def _build_model(self) -> keras.Model:
+        """Builds the Keras model for the Q-network."""
+        model = Sequential()
+        model.add(Dense(64, input_dim=self.state_size, activation='relu'))
+        model.add(Dense(64, activation='relu'))
+        model.add(Dense(self.action_size, activation='linear'))
+        model.compile(loss='mse', optimizer=Adam(learning_rate=self.learning_rate))
+        logger.debug("Q-Network model built and compiled.")
+        return model
+
     def select_action(self, state: Union[List[float], np.ndarray]) -> int:
         """
         Select an action based on the current state.
