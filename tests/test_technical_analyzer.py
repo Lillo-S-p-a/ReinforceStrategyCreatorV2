@@ -9,6 +9,9 @@ import numpy as np
 from datetime import datetime
 
 from reinforcestrategycreator.technical_analyzer import calculate_indicators
+from ta.momentum import RSIIndicator
+from ta.trend import MACD
+from ta.volatility import BollingerBands
 
 
 class TestTechnicalAnalyzer(unittest.TestCase):
@@ -154,6 +157,42 @@ class TestTechnicalAnalyzer(unittest.TestCase):
         # Verify that the indicators contain valid numerical data (not all NaN)
         for indicator in expected_indicators:
             self.assertTrue(result[indicator].notna().any(), f"Indicator {indicator} should contain valid data")
+
+    def test_calculate_indicators_numerical_accuracy(self):
+        """Test the numerical accuracy of calculated indicators."""
+        # Create a small DataFrame with known close prices
+        # Needs enough data points for the longest window (MACD slow = 26) + signal (9) ~ 35
+        close_prices = [
+            100, 101, 102, 103, 104, 105, 106, 107, 108, 109, # 10
+            110, 111, 112, 113, 114, 115, 114, 113, 112, 111, # 20
+            110, 109, 108, 107, 106, 105, 106, 107, 108, 109, # 30
+            110, 111, 112, 113, 114 # 35
+        ]
+        test_df = pd.DataFrame({'Close': close_prices}, index=pd.date_range(start='2023-01-01', periods=len(close_prices), freq='D'))
+
+        # Calculate indicators using the function under test
+        result_df = calculate_indicators(test_df.copy()) # Pass a copy
+
+        # Calculate expected values directly using the 'ta' library
+        expected_rsi = RSIIndicator(close=test_df['Close'], window=14).rsi()
+        macd_indicator = MACD(close=test_df['Close'], window_slow=26, window_fast=12, window_sign=9)
+        expected_macd = macd_indicator.macd()
+        expected_macd_signal = macd_indicator.macd_signal()
+        expected_macd_hist = macd_indicator.macd_diff()
+        bb_indicator = BollingerBands(close=test_df['Close'], window=20, window_dev=2)
+        expected_bbl = bb_indicator.bollinger_lband()
+        expected_bbm = bb_indicator.bollinger_mavg()
+        expected_bbu = bb_indicator.bollinger_hband()
+
+        # Compare results (allow for small floating point differences)
+        # Check names=False because the function adds suffixes like _14, _12_26_9 etc.
+        pd.testing.assert_series_equal(result_df['RSI_14'], expected_rsi, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['MACD_12_26_9'], expected_macd, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['MACD_Signal_12_26_9'], expected_macd_signal, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['MACD_Hist_12_26_9'], expected_macd_hist, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['BBL_20_2.0'], expected_bbl, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['BBM_20_2.0'], expected_bbm, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['BBU_20_2.0'], expected_bbu, check_names=False, rtol=1e-5, atol=1e-8)
 
 
 if __name__ == '__main__':

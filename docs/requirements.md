@@ -7,7 +7,7 @@ This document outlines the key functional and non-functional requirements for th
 *   **FR1: Data Acquisition**
     *   FR1.1: The system MUST be able to fetch historical market data (OHLCV - Open, High, Low, Close, Volume) for specified financial instruments (:DataSource).
     *   FR1.2: Support fetching data from local CSV files.
-    *   FR1.3: (Future) Support fetching data from specific financial data APIs (e.g., Yahoo Finance, Alpha Vantage).
+    *   FR1.3: (Implemented - yfinance) Support fetching data from specific financial data APIs (e.g., Yahoo Finance, Alpha Vantage).
 *   **FR2: Feature Engineering**
     *   FR2.1: The system MUST calculate standard technical indicators (:FeatureEngineering) based on the fetched market data.
     *   FR2.2: MUST include at least RSI, MACD, and Bollinger Bands.
