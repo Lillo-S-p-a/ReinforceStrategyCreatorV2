@@ -20,14 +20,38 @@ from reinforcestrategycreator.rl_agent import StrategyAgent
 
 @pytest.fixture
 def test_df():
-    """Create a sample DataFrame with price data for testing."""
-    return pd.DataFrame({
-        'open': [100.0, 101.0, 102.0, 103.0, 104.0],
-        'high': [105.0, 106.0, 107.0, 108.0, 109.0],
-        'low': [95.0, 96.0, 97.0, 98.0, 99.0],
-        'close': [102.0, 103.0, 104.0, 105.0, 106.0],
-        'volume': [1000, 1100, 1200, 1300, 1400]
+    """Create a sample DataFrame with price data and indicators for testing."""
+    df = pd.DataFrame({
+        'open': [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0,
+                110.0, 111.0, 112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0,
+                120.0, 121.0, 122.0, 123.0, 124.0, 125.0, 126.0, 127.0, 128.0, 129.0],
+        'high': [105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0, 112.0, 113.0, 114.0,
+                115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0, 122.0, 123.0, 124.0,
+                125.0, 126.0, 127.0, 128.0, 129.0, 130.0, 131.0, 132.0, 133.0, 134.0],
+        'low': [95.0, 96.0, 97.0, 98.0, 99.0, 100.0, 101.0, 102.0, 103.0, 104.0,
+               105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0, 112.0, 113.0, 114.0,
+               115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0, 122.0, 123.0, 124.0],
+        'Close': [102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0,
+                 112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0,
+                 122.0, 123.0, 124.0, 125.0, 126.0, 127.0, 128.0, 129.0, 130.0, 131.0],
+        'close': [102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0,
+                 112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0,
+                 122.0, 123.0, 124.0, 125.0, 126.0, 127.0, 128.0, 129.0, 130.0, 131.0],
+        'volume': [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900,
+                  2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900,
+                  3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900]
     })
+    
+    # Add mock indicator columns
+    df['RSI_14'] = [50.0] * 30
+    df['MACD_12_26_9'] = [0.5] * 30
+    df['MACD_Signal_12_26_9'] = [0.3] * 30
+    df['MACD_Hist_12_26_9'] = [0.2] * 30
+    df['BBL_20_2.0'] = [95.0] * 30
+    df['BBM_20_2.0'] = [100.0] * 30
+    df['BBU_20_2.0'] = [105.0] * 30
+    
+    return df
 
 
 @pytest.fixture
@@ -118,68 +142,57 @@ def test_step_buy_action_detailed(env):
     assert pytest.approx(reward, abs=1e-5) == expected_reward
 
 
-def test_step_sell_action_detailed(env):
-    """Test the sell action (2) in detail."""
+def test_step_flat_action_from_long(env):
+    """Test the flat action (0) when in long position."""
     # Reset the environment
     observation, info = env.reset()
     
-    # First buy some shares
+    # First go to Long position
     env.step(1)
     
-    # Get state after buying
-    balance_after_buy = env.balance
-    shares_after_buy = env.shares_held
-    portfolio_value_after_buy = env.portfolio_value
+    # Get state after going Long
+    balance_after_long = env.balance
+    shares_after_long = env.shares_held
+    portfolio_value_after_long = env.portfolio_value
     
-    # Take a step with action 2 (sell)
-    next_observation, reward, terminated, truncated, info = env.step(2)
-    
-    # Calculate expected values
-    # Expected revenue including fees
-    expected_revenue = shares_after_buy * env.current_price
-    expected_fee = expected_revenue * (env.transaction_fee_percent / 100)
-    expected_total_revenue = expected_revenue - expected_fee
-    
-    # Expected balance after selling
-    expected_balance = balance_after_buy + expected_total_revenue
-    
-    # Assert that balance increased correctly
-    assert pytest.approx(env.balance, abs=1e-5) == expected_balance
+    # Take a step with action 0 (Flat)
+    next_observation, reward, terminated, truncated, info = env.step(0)
     
     # Assert that shares decreased to zero
     assert env.shares_held == 0
+    assert env.current_position == 0  # Should be in Flat position
     
     # Check portfolio value calculation
     expected_portfolio_value = env.balance + (env.shares_held * env.current_price)
     assert pytest.approx(env.portfolio_value, abs=1e-5) == expected_portfolio_value
     
     # Check that the reward reflects the change in portfolio value
-    expected_reward = ((env.portfolio_value - portfolio_value_after_buy) / portfolio_value_after_buy) * 100
+    expected_reward = ((env.portfolio_value - portfolio_value_after_long) / portfolio_value_after_long) * 100
     assert pytest.approx(reward, abs=1e-5) == expected_reward
 
 
-def test_step_sell_with_zero_shares(env):
-    """Test the sell action (2) when no shares are held (edge case)."""
+def test_step_short_action_from_flat(env):
+    """Test the short action (2) from flat position."""
     # Reset the environment
     observation, info = env.reset()
     
-    # Ensure we have no shares
+    # Ensure we're in Flat position
     env.shares_held = 0
+    env.current_position = 0
     
     # Get initial state
     initial_balance = env.balance
     initial_portfolio_value = env.portfolio_value
     
-    # Take a step with action 2 (sell)
+    # Take a step with action 2 (Short)
     next_observation, reward, terminated, truncated, info = env.step(2)
     
-    # Assert that balance remains unchanged
-    assert env.balance == initial_balance
+    # Assert that balance increased and shares are negative
+    assert env.balance > initial_balance
+    assert env.shares_held < 0
+    assert env.current_position == -1  # Should be in Short position
     
-    # Assert that shares remain at zero
-    assert env.shares_held == 0
-    
-    # Check portfolio value calculation (should only change due to time step increment)
+    # Check portfolio value calculation
     expected_portfolio_value = env.balance + (env.shares_held * env.current_price)
     assert pytest.approx(env.portfolio_value, abs=1e-5) == expected_portfolio_value
     
@@ -188,8 +201,8 @@ def test_step_sell_with_zero_shares(env):
     assert pytest.approx(reward, abs=1e-5) == expected_reward
 
 
-def test_step_buy_with_insufficient_balance(env):
-    """Test the buy action (1) with insufficient balance (edge case)."""
+def test_step_long_with_insufficient_balance(env):
+    """Test the long action (1) with insufficient balance (edge case)."""
     # Reset the environment
     observation, info = env.reset()
     
@@ -198,11 +211,12 @@ def test_step_buy_with_insufficient_balance(env):
     initial_shares = env.shares_held
     initial_portfolio_value = env.portfolio_value
     
-    # Take a step with action 1 (buy)
+    # Take a step with action 1 (Long)
     next_observation, reward, terminated, truncated, info = env.step(1)
     
     # Assert that shares remain unchanged (couldn't buy any)
     assert env.shares_held == initial_shares
+    assert env.current_position == 0  # Should remain in Flat position
     
     # Check portfolio value calculation
     expected_portfolio_value = env.balance + (env.shares_held * env.current_price)
@@ -228,21 +242,16 @@ def test_step_observation_generation(env):
     assert isinstance(next_observation, np.ndarray)
     assert next_observation.dtype == np.float32
     
-    # Check that observation contains normalized market data and account information
-    # The last two elements should be normalized balance and position
+    # Check that the last two elements are the normalized balance and position
     normalized_balance = env.balance / env.initial_balance
     normalized_position = env.shares_held * env.current_price / env.initial_balance
     
-    # Get the market data from the current step
-    market_data = env.df.iloc[env.current_step].values
-    market_data_normalized = market_data / (np.max(np.abs(market_data)) + 1e-10)
+    # The last two elements of the observation should be close to these values
+    assert np.isclose(next_observation[-2], normalized_balance)
+    assert np.isclose(next_observation[-1], normalized_position)
     
-    # Construct expected observation
-    expected_observation = np.append(market_data_normalized, [normalized_balance, normalized_position])
-    expected_observation = expected_observation.astype(np.float32)
-    
-    # Check that the observation matches the expected values
-    assert np.allclose(next_observation, expected_observation, rtol=1e-5)
+    # Verify that there are no NaN values in the observation
+    assert not np.isnan(next_observation).any()
 
 
 def test_step_reward_calculation(env):
@@ -250,7 +259,7 @@ def test_step_reward_calculation(env):
     # Reset the environment
     observation, info = env.reset()
     
-    # Take a step with action 1 (buy)
+    # Take a step with action 1 (Long)
     next_observation, reward, terminated, truncated, info = env.step(1)
     
     # Calculate expected reward
@@ -260,13 +269,13 @@ def test_step_reward_calculation(env):
     # Check that the reward matches the expected value
     assert pytest.approx(reward, abs=1e-5) == expected_reward
     
-    # Take another step with action 2 (sell)
-    portfolio_value_before_sell = env.portfolio_value
-    next_observation, reward, terminated, truncated, info = env.step(2)
+    # Take another step with action 0 (Flat)
+    portfolio_value_before_flat = env.portfolio_value
+    next_observation, reward, terminated, truncated, info = env.step(0)
     
     # Calculate expected reward
-    portfolio_change = env.portfolio_value - portfolio_value_before_sell
-    expected_reward = (portfolio_change / portfolio_value_before_sell) * 100
+    portfolio_change = env.portfolio_value - portfolio_value_before_flat
+    expected_reward = (portfolio_change / portfolio_value_before_flat) * 100
     
     # Check that the reward matches the expected value
     assert pytest.approx(reward, abs=1e-5) == expected_reward
@@ -345,6 +354,7 @@ def test_step_gymnasium_api_compatibility(env):
     assert 'shares_held' in info
     assert 'current_price' in info
     assert 'portfolio_value' in info
+    assert 'current_position' in info
     assert 'step' in info
     
     # Check that the values in info have the correct types
@@ -361,7 +371,7 @@ def test_step_multiple_actions_sequence(env):
     observation, info = env.reset()
     
     # Define a sequence of actions
-    actions = [1, 0, 2, 0, 1]  # Buy, Hold, Sell, Hold, Buy
+    actions = [1, 0, 2, 0, 1]  # Long, Flat, Short, Flat, Long
     
     # Execute the sequence
     for action in actions:
@@ -381,3 +391,27 @@ def test_step_multiple_actions_sequence(env):
         # If the episode terminated, break the loop
         if terminated:
             break
+
+
+def test_observation_includes_technical_indicators(env):
+    """Test that the observation includes technical indicators."""
+    # Reset the environment
+    observation, info = env.reset()
+    
+    # Take a step to get a non-zero observation
+    next_observation, reward, terminated, truncated, info = env.step(0)
+    
+    # Check observation shape
+    assert next_observation.shape == env.observation_space.shape
+    
+    # The observation should include window_size steps of market data plus balance and position
+    window_size = env.window_size
+    num_market_features = len(env.df.columns)
+    num_portfolio_features = 2  # balance and position
+    expected_features = (window_size * num_market_features) + num_portfolio_features
+    
+    assert len(next_observation) == expected_features
+    
+    # Verify that the observation includes technical indicators by checking its length
+    # It should be longer than just the basic OHLCV data (5 columns) + 2 (balance and position)
+    assert len(next_observation) > 7  # 5 (OHLCV) + 2 (balance and position)

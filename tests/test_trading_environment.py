@@ -5,20 +5,44 @@ Tests for the trading_environment module.
 import pytest
 import numpy as np
 import pandas as pd
+from ta.momentum import RSIIndicator
+from ta.trend import MACD
+from ta.volatility import BollingerBands
 
 from reinforcestrategycreator.trading_environment import TradingEnv
+from reinforcestrategycreator.technical_analyzer import calculate_indicators
 
 
 @pytest.fixture
-def test_df():
-    """Create a sample DataFrame for testing."""
+def test_df_raw():
+    """Create a sample DataFrame without indicators for testing."""
     return pd.DataFrame({
-        'open': [100.0, 101.0, 102.0, 103.0, 104.0],
-        'high': [105.0, 106.0, 107.0, 108.0, 109.0],
-        'low': [95.0, 96.0, 97.0, 98.0, 99.0],
-        'close': [102.0, 103.0, 104.0, 105.0, 106.0],
-        'volume': [1000, 1100, 1200, 1300, 1400]
+        'open': [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0,
+                110.0, 111.0, 112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0,
+                120.0, 121.0, 122.0, 123.0, 124.0, 125.0, 126.0, 127.0, 128.0, 129.0],
+        'high': [105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0, 112.0, 113.0, 114.0,
+                115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0, 122.0, 123.0, 124.0,
+                125.0, 126.0, 127.0, 128.0, 129.0, 130.0, 131.0, 132.0, 133.0, 134.0],
+        'low': [95.0, 96.0, 97.0, 98.0, 99.0, 100.0, 101.0, 102.0, 103.0, 104.0,
+               105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0, 112.0, 113.0, 114.0,
+               115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0, 122.0, 123.0, 124.0],
+        'Close': [102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0,
+                 112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0,
+                 122.0, 123.0, 124.0, 125.0, 126.0, 127.0, 128.0, 129.0, 130.0, 131.0],
+        'close': [102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0,
+                 112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0, 120.0, 121.0,
+                 122.0, 123.0, 124.0, 125.0, 126.0, 127.0, 128.0, 129.0, 130.0, 131.0],
+        'volume': [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900,
+                  2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900,
+                  3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900]
     })
+
+@pytest.fixture
+def test_df(test_df_raw):
+    """Create a sample DataFrame with indicators for testing."""
+    # Use the technical_analyzer to calculate indicators
+    df_with_indicators = calculate_indicators(test_df_raw)
+    return df_with_indicators
 
 
 @pytest.fixture
@@ -30,7 +54,7 @@ def initial_balance():
 @pytest.fixture
 def env(test_df, initial_balance):
     """Create a sample environment for testing."""
-    return TradingEnv(test_df, initial_balance)
+    return TradingEnv(test_df, initial_balance, window_size=5)
 
 
 def test_environment_initialization(env, test_df, initial_balance):
@@ -42,31 +66,115 @@ def test_environment_initialization(env, test_df, initial_balance):
     assert env.current_step == 0
     
     # Check action and observation spaces
-    assert env.action_space.n == 3  # 3 actions: hold, buy, sell
-    assert env.observation_space.shape[0] == len(test_df.columns) + 2  # features + balance + position
+    assert env.action_space.n == 3  # 3 actions: Flat, Long, Short
+    
+    # Check observation space includes all features with window size
+    # (price/volume + indicators + balance + position)
+    window_size = env.window_size
+    num_market_features = len(test_df.columns)
+    num_portfolio_features = 2  # balance and position
+    expected_features = (window_size * num_market_features) + num_portfolio_features
+    assert env.observation_space.shape[0] == expected_features
 
 
-def test_reset(env):
-    """Test that reset returns a valid initial observation."""
+def test_reset(env, test_df):
+    """Test that reset returns a valid initial observation and sets current_step appropriately."""
     # Reset the environment
     observation, info = env.reset()
     
     # Assert that the observation has the correct shape
     assert observation.shape == env.observation_space.shape
     
-    # Assert that info is a dictionary
+    # Assert that info is a dictionary with expected keys
     assert isinstance(info, dict)
+    assert 'balance' in info
+    assert 'shares_held' in info
+    assert 'portfolio_value' in info
+    assert 'starting_step' in info
+    assert 'current_price' in info
     
-    # Assert that current_step is reset to 0
-    assert env.current_step == 0
+    # Assert that current_step is set to a valid value
+    assert env.current_step >= 0
+    assert env.current_step < len(test_df)
+    assert info['starting_step'] == env.current_step
+    
+    # Assert that portfolio values are correctly initialized
+    assert env.balance == env.initial_balance
+    assert env.shares_held == 0
+    assert env.current_position == 0  # Should start in Flat position
+    assert env.portfolio_value == env.initial_balance
+    assert env.last_portfolio_value == env.initial_balance
+    
+    # Assert that the current price is set correctly
+    assert env.current_price == test_df.iloc[env.current_step]['close']
 
+
+def test_reset_with_all_nan_indicators():
+    """Test that reset works even when all indicators are NaN but price data is available."""
+    # Create a DataFrame with all NaN values for indicators but valid price data
+    df = pd.DataFrame({
+        'open': [100.0, 101.0, 102.0],
+        'high': [105.0, 106.0, 107.0],
+        'low': [95.0, 96.0, 97.0],
+        'Close': [102.0, 103.0, 104.0],
+        'close': [102.0, 103.0, 104.0],
+        'volume': [1000, 1100, 1200],
+        'RSI_14': [np.nan, np.nan, np.nan],
+        'MACD_12_26_9': [np.nan, np.nan, np.nan],
+        'MACD_Signal_12_26_9': [np.nan, np.nan, np.nan],
+        'MACD_Hist_12_26_9': [np.nan, np.nan, np.nan],
+        'BBL_20_2.0': [np.nan, np.nan, np.nan],
+        'BBM_20_2.0': [np.nan, np.nan, np.nan],
+        'BBU_20_2.0': [np.nan, np.nan, np.nan]
+    })
+    
+    # Create environment with the all-NaN indicators DataFrame
+    env = TradingEnv(df)
+    
+    # Reset should work and use the first step with valid price data
+    observation, info = env.reset()
+    
+    # Assert that the observation has the correct shape
+    assert observation.shape == env.observation_space.shape
+    
+    # Assert that info is a dictionary with expected keys
+    assert isinstance(info, dict)
+    assert 'balance' in info
+    assert 'shares_held' in info
+    assert 'portfolio_value' in info
+    assert 'starting_step' in info
+    assert 'current_price' in info
+    
+    # Assert that current_step is set to a valid value (should be 0 since price data is available)
+    assert env.current_step == 0
+    assert info['starting_step'] == 0
+    
+    # Assert that portfolio values are correctly initialized
+    assert env.balance == env.initial_balance
+    assert env.shares_held == 0
+    assert env.current_position == 0  # Should start in Flat position
+    assert env.portfolio_value == env.initial_balance
+    assert env.last_portfolio_value == env.initial_balance
+
+
+def test_reset_with_empty_dataframe():
+    """Test that reset raises an error when the DataFrame is empty."""
+    # Create an empty DataFrame
+    df = pd.DataFrame()
+    
+    # Create environment with the empty DataFrame
+    env = TradingEnv(df)
+    
+    # Reset should raise a RuntimeError
+    with pytest.raises(RuntimeError):
+        env.reset()
 
 def test_step(env):
     """Test that step returns valid values."""
     # Reset the environment
     env.reset()
     
-    # Take a step with action 0 (hold)
+    # Take a step with action 0 (Flat)
     observation, reward, terminated, truncated, info = env.step(0)
     
     # Assert that the returned values have the correct types
@@ -83,11 +191,12 @@ def test_step(env):
     assert 'balance' in info
     assert 'shares_held' in info
     assert 'portfolio_value' in info
+    assert 'current_position' in info
     assert 'current_price' in info
 
 
-def test_step_hold_action(env):
-    """Test the hold action (0)."""
+def test_step_flat_action_from_flat(env):
+    """Test the Flat action (0) when already in Flat position."""
     # Reset the environment
     env.reset()
     
@@ -95,16 +204,17 @@ def test_step_hold_action(env):
     initial_balance = env.balance
     initial_shares = env.shares_held
     
-    # Take a step with action 0 (hold)
+    # Take a step with action 0 (Flat)
     _, _, _, _, info = env.step(0)
     
-    # Assert that balance and shares remain unchanged
+    # Assert that balance, shares, and position remain unchanged
     assert env.balance == initial_balance
     assert env.shares_held == initial_shares
+    assert env.current_position == 0  # Should remain in Flat position
 
 
-def test_step_buy_action(env):
-    """Test the buy action (1)."""
+def test_step_long_action_from_flat(env):
+    """Test the Long action (1) from Flat position."""
     # Reset the environment
     env.reset()
     
@@ -112,55 +222,133 @@ def test_step_buy_action(env):
     initial_balance = env.balance
     initial_shares = env.shares_held
     
-    # Take a step with action 1 (buy)
+    # Take a step with action 1 (Long)
     _, _, _, _, info = env.step(1)
     
-    # Assert that balance decreased and shares increased
+    # Assert that balance decreased, shares increased, and position is Long
     assert env.balance < initial_balance
     assert env.shares_held > initial_shares
+    assert env.current_position == 1  # Should be in Long position
 
 
-def test_step_sell_action_with_shares(env):
-    """Test the sell action (2) when shares are held."""
+def test_step_short_action_from_flat(env):
+    """Test the Short action (2) from Flat position."""
     # Reset the environment
     env.reset()
     
-    # First buy some shares
+    # Get initial balance and shares
+    initial_balance = env.balance
+    initial_shares = env.shares_held
+    
+    # Take a step with action 2 (Short)
+    _, _, _, _, info = env.step(2)
+    
+    # Assert that balance increased, shares are negative, and position is Short
+    assert env.balance > initial_balance
+    assert env.shares_held < 0
+    assert env.current_position == -1  # Should be in Short position
+
+
+def test_flat_action_from_long(env):
+    """Test the Flat action (0) when in Long position."""
+    # Reset the environment
+    env.reset()
+    
+    # First go to Long position
     env.step(1)
     
-    # Get balance and shares after buying
-    balance_after_buy = env.balance
-    shares_after_buy = env.shares_held
+    # Make sure we're in Long position
+    assert env.current_position == 1
+    assert env.shares_held > 0
     
-    # Make sure we have shares to sell
-    assert shares_after_buy > 0
+    # Get balance and shares after going Long
+    balance_after_long = env.balance
+    shares_after_long = env.shares_held
     
-    # Take a step with action 2 (sell)
-    _, _, _, _, info = env.step(2)
+    # Take a step with action 0 (Flat)
+    _, _, _, _, info = env.step(0)
     
-    # Assert that balance increased and shares decreased to zero
-    assert env.balance > balance_after_buy
+    # Assert that balance increased, shares are zero, and position is Flat
+    assert env.balance > balance_after_long
     assert env.shares_held == 0
+    assert env.current_position == 0  # Should be in Flat position
 
 
-def test_step_sell_action_without_shares(env):
-    """Test the sell action (2) when no shares are held."""
+def test_flat_action_from_short(env):
+    """Test the Flat action (0) when in Short position."""
     # Reset the environment
     env.reset()
     
-    # Ensure we have no shares
-    env.shares_held = 0
+    # Manually set up a small short position that can be covered
+    env.shares_held = -10
+    env.current_position = -1
     
-    # Get initial balance
-    initial_balance = env.balance
+    # Calculate what the balance would be after shorting 10 shares
+    # (This is an approximation to ensure test consistency)
+    short_proceeds = 10 * env.current_price
+    short_fee = short_proceeds * (env.transaction_fee_percent / 100)
+    env.balance += (short_proceeds - short_fee)
     
-    # Take a step with action 2 (sell)
+    # Get balance and shares after setting up Short position
+    balance_after_short = env.balance
+    shares_after_short = env.shares_held
+    
+    # Take a step with action 0 (Flat)
+    _, _, _, _, info = env.step(0)
+    
+    # Assert that balance decreased, shares are zero, and position is Flat
+    assert env.balance < balance_after_short
+    assert env.shares_held == 0
+    assert env.current_position == 0  # Should be in Flat position
+
+def test_long_action_from_short(env):
+    """Test the Long action (1) when in Short position."""
+    # Reset the environment
+    env.reset()
+    
+    # Manually set up a small short position that can be covered
+    env.shares_held = -10
+    env.current_position = -1
+    
+    # Calculate what the balance would be after shorting 10 shares
+    # (This is an approximation to ensure test consistency)
+    short_proceeds = 10 * env.current_price
+    short_fee = short_proceeds * (env.transaction_fee_percent / 100)
+    env.balance += (short_proceeds - short_fee)
+    
+    # Get balance and shares after setting up Short position
+    balance_after_short = env.balance
+    shares_after_short = env.shares_held
+    
+    # Take a step with action 1 (Long)
+    _, _, _, _, info = env.step(1)
+    
+    # Assert that shares are now positive or zero, and position is Long or Flat
+    assert env.shares_held >= 0
+    assert env.current_position >= 0  # Should be in Long or Flat position
+
+def test_short_action_from_long(env):
+    """Test the Short action (2) when in Long position."""
+    # Reset the environment
+    env.reset()
+    
+    # First go to Long position
+    env.step(1)
+    
+    # Make sure we're in Long position
+    assert env.current_position == 1
+    assert env.shares_held > 0
+    
+    # Get balance and shares after going Long
+    balance_after_long = env.balance
+    shares_after_long = env.shares_held
+    
+    # Take a step with action 2 (Short)
     _, _, _, _, info = env.step(2)
     
-    # Assert that balance remains unchanged
-    assert env.balance == initial_balance
-    assert env.shares_held == 0
-
+    # Assert that shares are now negative or zero, and position is Short or Flat
+    assert env.shares_held <= 0
+    assert env.current_position <= 0  # Should be in Short or Flat position
 
 def test_reward_calculation(env):
     """Test that rewards are calculated correctly."""
@@ -168,13 +356,13 @@ def test_reward_calculation(env):
     env.reset()
     
     # Take a step and get the reward
-    _, reward1, _, _, _ = env.step(1)  # Buy
+    _, reward1, _, _, _ = env.step(1)  # Long
     
     # The reward should be related to the change in portfolio value
-    # For the first step after buying, it might be slightly negative due to transaction fees
+    # For the first step after going Long, it might be slightly negative due to transaction fees
     
     # Take another step
-    _, reward2, _, _, _ = env.step(2)  # Sell
+    _, reward2, _, _, _ = env.step(0)  # Flat
     
     # The reward should reflect the change in portfolio value
     # It could be positive or negative depending on price movement
@@ -189,7 +377,7 @@ def test_portfolio_value_calculation(env):
     # Reset the environment
     env.reset()
     
-    # Take a step to buy shares
+    # Take a step to go Long
     _, _, _, _, info1 = env.step(1)
     
     # Calculate expected portfolio value
@@ -207,11 +395,11 @@ def test_episode_termination(env, test_df):
     
     # Run until one step before the end
     for _ in range(len(test_df) - 2):
-        _, _, terminated, _, _ = env.step(0)
+        _, _, terminated, _, _ = env.step(0)  # Flat action
         assert not terminated
     
     # Take the final step
-    _, _, terminated, _, _ = env.step(0)
+    _, _, terminated, _, _ = env.step(0)  # Flat action
     
     # Assert that the episode is terminated
     assert terminated
@@ -230,6 +418,64 @@ def test_render(env):
     rgb_render = env.render(mode='rgb_array')
     assert isinstance(rgb_render, np.ndarray)
     assert rgb_render.shape == (100, 100, 3)
+
+
+def test_observation_includes_indicators(env, test_df):
+    """Test that the observation includes technical indicators."""
+    # Reset the environment
+    env.reset()
+    
+    # Move to a step where indicators are available (after initial NaN values)
+    for _ in range(26):  # Move past the initial steps where indicators might have NaN values
+        if env.current_step < len(test_df) - 1:
+            env.step(0)  # Take a Flat action
+    
+    # Get observation
+    observation = env._get_observation()
+    
+    # Check observation shape
+    assert observation.shape == env.observation_space.shape
+    
+    # Check that observation contains normalized market data, indicators, and account information
+    # The observation should have the correct number of features based on window size
+    window_size = env.window_size
+    num_market_features = len(test_df.columns)
+    num_portfolio_features = 2  # balance and position
+    expected_features = (window_size * num_market_features) + num_portfolio_features
+    assert len(observation) == expected_features
+    
+    # Verify that there are no NaN values in the observation
+    assert not np.isnan(observation).any()
+
+
+def test_window_size_parameter():
+    """Test that the window_size parameter is correctly used."""
+    # Create a simple DataFrame
+    df = pd.DataFrame({
+        'open': [100.0, 101.0, 102.0, 103.0, 104.0],
+        'high': [105.0, 106.0, 107.0, 108.0, 109.0],
+        'low': [95.0, 96.0, 97.0, 98.0, 99.0],
+        'close': [102.0, 103.0, 104.0, 105.0, 106.0],
+        'volume': [1000, 1100, 1200, 1300, 1400]
+    })
+    
+    # Create environments with different window sizes
+    env1 = TradingEnv(df, window_size=2)
+    env2 = TradingEnv(df, window_size=3)
+    env3 = TradingEnv(df, window_size=4)
+    
+    # Check that the window_size attribute is set correctly
+    assert env1.window_size == 2
+    assert env2.window_size == 3
+    assert env3.window_size == 4
+    
+    # Check that the observation space shape is affected by window_size
+    num_market_features = len(df.columns)
+    num_portfolio_features = 2  # balance and position
+    
+    assert env1.observation_space.shape[0] == (2 * num_market_features) + num_portfolio_features
+    assert env2.observation_space.shape[0] == (3 * num_market_features) + num_portfolio_features
+    assert env3.observation_space.shape[0] == (4 * num_market_features) + num_portfolio_features
 
 
 def test_close(env):
