@@ -51,7 +51,7 @@ class TestTechnicalAnalyzer(unittest.TestCase):
         # Assert that the result contains the expected indicator columns
         expected_columns = [
             'RSI_14', 
-            'MACD_12_26_9', 'MACD_Signal_12_26_9', 'MACD_Hist_12_26_9',
+            'MACD_12_26_9', 'MACDs_12_26_9', 'MACDh_12_26_9',
             'BBL_20_2.0', 'BBM_20_2.0', 'BBU_20_2.0'
         ]
         
@@ -147,7 +147,7 @@ class TestTechnicalAnalyzer(unittest.TestCase):
         # Verify that the result contains the expected indicator columns
         expected_indicators = [
             'RSI_14',
-            'MACD_12_26_9', 'MACD_Signal_12_26_9', 'MACD_Hist_12_26_9',
+            'MACD_12_26_9', 'MACDs_12_26_9', 'MACDh_12_26_9',
             'BBL_20_2.0', 'BBM_20_2.0', 'BBU_20_2.0'
         ]
         
@@ -188,8 +188,8 @@ class TestTechnicalAnalyzer(unittest.TestCase):
         # Check names=False because the function adds suffixes like _14, _12_26_9 etc.
         pd.testing.assert_series_equal(result_df['RSI_14'], expected_rsi, check_names=False, rtol=1e-5, atol=1e-8)
         pd.testing.assert_series_equal(result_df['MACD_12_26_9'], expected_macd, check_names=False, rtol=1e-5, atol=1e-8)
-        pd.testing.assert_series_equal(result_df['MACD_Signal_12_26_9'], expected_macd_signal, check_names=False, rtol=1e-5, atol=1e-8)
-        pd.testing.assert_series_equal(result_df['MACD_Hist_12_26_9'], expected_macd_hist, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['MACDs_12_26_9'], expected_macd_signal, check_names=False, rtol=1e-5, atol=1e-8)
+        pd.testing.assert_series_equal(result_df['MACDh_12_26_9'], expected_macd_hist, check_names=False, rtol=1e-5, atol=1e-8)
         pd.testing.assert_series_equal(result_df['BBL_20_2.0'], expected_bbl, check_names=False, rtol=1e-5, atol=1e-8)
         pd.testing.assert_series_equal(result_df['BBM_20_2.0'], expected_bbm, check_names=False, rtol=1e-5, atol=1e-8)
         pd.testing.assert_series_equal(result_df['BBU_20_2.0'], expected_bbu, check_names=False, rtol=1e-5, atol=1e-8)

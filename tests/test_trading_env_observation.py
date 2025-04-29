@@ -262,8 +262,8 @@ def test_observation_includes_technical_indicators_explicitly(env, test_df):
     expected_indicators = [
         'RSI_14',
         'MACD_12_26_9',
-        'MACD_Signal_12_26_9',
-        'MACD_Hist_12_26_9',
+        'MACDs_12_26_9',
+        'MACDh_12_26_9',
         'BBL_20_2.0',
         'BBM_20_2.0',
         'BBU_20_2.0'

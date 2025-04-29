@@ -13,7 +13,7 @@ from typing import List, Tuple, Any, Union
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Input # Added Input
 from tensorflow.keras.optimizers import Adam
 
 from collections import deque # Added import
@@ -108,10 +108,12 @@ class StrategyAgent:
 
     def _build_model(self) -> keras.Model:
         """Builds the Keras model for the Q-network."""
-        model = Sequential()
-        model.add(Dense(64, input_dim=self.state_size, activation='relu'))
-        model.add(Dense(64, activation='relu'))
-        model.add(Dense(self.action_size, activation='linear'))
+        model = Sequential([
+            Input(shape=(self.state_size,)), # Explicit Input layer
+            Dense(64, activation='relu'),     # No input_dim needed here
+            Dense(64, activation='relu'),
+            Dense(self.action_size, activation='linear')
+        ])
         model.compile(loss='mse', optimizer=Adam(learning_rate=self.learning_rate))
         logger.debug("Q-Network model built and compiled.")
         return model

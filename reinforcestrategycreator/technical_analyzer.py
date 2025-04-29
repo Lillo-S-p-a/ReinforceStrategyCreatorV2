@@ -47,40 +47,55 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     result_df = data.copy()
     
     try:
-        # Check if DataFrame is empty or doesn't have required columns
-        if result_df.empty or 'close' not in result_df.columns:
-            logger.warning("CalculationError: Input DataFrame is empty or missing 'close' column")
-            return data
+        # Find the 'close' column case-insensitively
+        close_col = next((col for col in result_df.columns if col.lower() == 'close'), None)
         
+        # Check if DataFrame is empty or doesn't have the 'close' column
+        if result_df.empty or close_col is None:
+            logger.warning("CalculationError: Input DataFrame is empty or missing 'close' column (case-insensitive)")
+            return data # Return original data if no close column
+            
         # Check if there's enough data for the calculations
         if len(result_df) < 26:  # 26 is the largest window size needed (for MACD)
             logger.warning("CalculationError: Insufficient data for indicator calculation (minimum 26 points required)")
-            return data
+            return data # Return original data if insufficient length
+        
+        # --- Calculate Indicators ---
+        # Use the found close_col name
         
         # Calculate RSI using ta
         try:
-            rsi_indicator = RSIIndicator(close=result_df['close'], window=14)
+            rsi_indicator = RSIIndicator(close=result_df[close_col], window=14)
             result_df['RSI_14'] = rsi_indicator.rsi()
         except Exception as e:
             logger.warning(f"CalculationError: Failed to calculate RSI: {str(e)}")
+            # Optionally return data here if RSI is critical and fails
+            # return data
         
         # Calculate MACD using ta
         try:
             macd_indicator = MACD(
-                close=result_df['close'], 
-                window_slow=26, 
-                window_fast=12, 
+                close=result_df[close_col],
+                window_slow=26,
+                window_fast=12,
                 window_sign=9
             )
             result_df['MACD_12_26_9'] = macd_indicator.macd()
             result_df['MACD_Signal_12_26_9'] = macd_indicator.macd_signal()
             result_df['MACD_Hist_12_26_9'] = macd_indicator.macd_diff()
+            # Rename columns to match expected test/pandas-ta names
+            result_df.rename(columns={
+                'MACD_Signal_12_26_9': 'MACDs_12_26_9',
+                'MACD_Hist_12_26_9': 'MACDh_12_26_9'
+            }, inplace=True)
         except Exception as e:
             logger.warning(f"CalculationError: Failed to calculate MACD: {str(e)}")
+            # Optionally return data here if MACD is critical and fails
+            # return data
         
         # Calculate Bollinger Bands using ta
         try:
-            bb = BollingerBands(close=result_df['close'], window=20, window_dev=2)
+            bb = BollingerBands(close=result_df[close_col], window=20, window_dev=2)
             result_df['BBL_20_2.0'] = bb.bollinger_lband()
             result_df['BBM_20_2.0'] = bb.bollinger_mavg()
             result_df['BBU_20_2.0'] = bb.bollinger_hband()

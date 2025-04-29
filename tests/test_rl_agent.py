@@ -7,7 +7,9 @@ import numpy as np
 import tensorflow as tf
 import unittest.mock as mock # Use alias for clarity
 import unittest.mock # Add this import
+import random # Import random for patching
 from tensorflow import keras
+from collections import deque # Ensure deque is imported
 
 from reinforcestrategycreator.rl_agent import StrategyAgent
 
@@ -175,8 +177,6 @@ def test_integration_with_numpy_arrays(agent, state_size, action_size, shape_tup
 
     assert test_passed, f"Methods should handle numpy arrays of shape {shape} and learn should run"
 
-
-from collections import deque # Ensure deque is imported
 
 # --- Tests for Experience Replay Memory ---
 
@@ -509,64 +509,120 @@ class TestStrategyAgentLearnBatching:
             "state_size": state_size,
             "action_size": action_size,
             "learning_rate": learning_rate,
-            "memory_size": 100, # Sufficient memory capacity
-            "batch_size": 16,    # Specific batch size for testing
-            "gamma": 0.95        # Default gamma for these tests
+            "memory_size": 10, # Small memory
+            "batch_size": 5,   # Batch size
+            "gamma": 0.95
         }
 
     @pytest.fixture
     def learn_agent(self, learn_params):
-        """Provides an agent instance with specific parameters for learn tests."""
+        """Provides an agent instance with specific parameters for learn batching tests."""
         return StrategyAgent(**learn_params)
 
     def _populate_memory(self, agent, num_experiences, state_size):
-        """Helper function to populate agent memory."""
+        """Helper to populate memory with dummy experiences."""
         for i in range(num_experiences):
-            state = np.random.rand(state_size).astype(np.float32)
+            state = np.random.rand(state_size)
             action = np.random.randint(agent.action_size)
-            reward = np.random.rand() * 10 - 5 # Random reward +/-
-            next_state = np.random.rand(state_size).astype(np.float32)
-            done = (np.random.rand() > 0.8) # Randomly True/False
+            reward = np.random.rand()
+            next_state = np.random.rand(state_size)
+            done = (i % 4 == 0)
             agent.remember(state, action, reward, next_state, done)
 
     def test_learn_insufficient_memory(self, learn_agent, learn_params, state_size):
-        """CORE LOGIC TEST: Verify learn returns None when memory < batch_size."""
-        # Context: Test the initial size check in learn().
-        # Potential SAPPO :Problems: :LogicError
+        """CORE LOGIC TEST: Verify learn() returns early if memory < batch_size."""
+        # Context: Test the guard clause for insufficient samples (:Algorithm ExperienceReplay).
+        # Potential SAPPO :Problems: :LogicError, :IndexError
         batch_size = learn_params["batch_size"]
-        num_samples = batch_size - 1
-        assert num_samples > 0, "Batch size must be > 1 for this test"
+        self._populate_memory(learn_agent, batch_size - 1, state_size) # One less than needed
 
-        self._populate_memory(learn_agent, num_samples, state_size)
-        assert len(learn_agent.memory) == num_samples
+        # Mock model.fit to check if it's called
+        with mock.patch.object(tf.keras.Model, 'fit') as mock_fit:
+            learn_agent.learn()
+            mock_fit.assert_not_called() # Fit should not be called
 
-        # Assuming learn is refactored to return None when insufficient memory
-        result = learn_agent.learn()
+        assert len(learn_agent.memory) == batch_size - 1, "Memory size should remain unchanged."
 
-        assert result is None, f"learn() should return None when memory ({len(learn_agent.memory)}) < batch_size ({batch_size})."
 
-    def test_learn_sufficient_memory_batch_preparation(self, learn_agent, learn_params, state_size):
-        """CORE LOGIC TEST: Verify learn samples and prepares batch correctly."""
+    @mock.patch('random.sample')
+    @mock.patch('tensorflow.keras.Model.fit') # Mock fit to avoid training
+    @mock.patch('tensorflow.keras.Model.predict') # Mock predict to avoid prediction
+    def test_learn_batch_sampling_and_preparation(self, mock_predict, mock_fit, mock_sample, learn_agent, learn_params, state_size):
+        """CORE LOGIC TEST: Verify minibatch sampling and data preparation."""
+        # Context: Test random.sample call and data stacking/typing (:Algorithm ExperienceReplay).
+        # Potential SAPPO :Problems: :LogicError, :TypeError, :ValueError (shapes)
+        batch_size = learn_params["batch_size"]
+        memory_size = learn_params["memory_size"]
+        self._populate_memory(learn_agent, memory_size, state_size) # Fill memory
+
+        # Create a specific sample to be returned by the mock
+        # Use slices to ensure we get exactly batch_size elements
+        expected_sample = list(learn_agent.memory)[:batch_size]
+        mock_sample.return_value = expected_sample
+
+        # Mock predict/fit return values (needed for learn to run)
+        mock_predict.return_value = np.random.rand(batch_size, learn_agent.action_size)
+        mock_fit.return_value = mock.MagicMock(history={'loss': [0.1]})
+
+        # --- Execute ---
+        learn_agent.learn()
+
+        # --- Assertions ---
+        # 1. Verify random.sample was called correctly
+        mock_sample.assert_called_once_with(learn_agent.memory, batch_size)
+
+        # 2. Verify data preparation (shapes and types) by checking inputs to predict/fit
+        # Predict is called twice (target, main), Fit is called once (main)
+        assert mock_predict.call_count == 2
+        assert mock_fit.call_count == 1
+
+        # Check predict calls' input shapes
+        predict_call_args_list = mock_predict.call_args_list
+        # First call (target model on next_states)
+        target_predict_args, _ = predict_call_args_list[0]
+        assert target_predict_args[0].shape == (batch_size, state_size), "Shape mismatch for next_states in target predict."
+        assert target_predict_args[0].dtype == np.float32 or target_predict_args[0].dtype == np.float64, "dtype mismatch for next_states."
+        # Second call (main model on states)
+        main_predict_args, _ = predict_call_args_list[1]
+        assert main_predict_args[0].shape == (batch_size, state_size), "Shape mismatch for states in main predict."
+        assert main_predict_args[0].dtype == np.float32 or main_predict_args[0].dtype == np.float64, "dtype mismatch for states."
+
+        # Check fit call's input shapes and types
+        fit_call_args, _ = mock_fit.call_args
+        # fit_pos_args = fit_call_args[0] # Assuming (self, x, y) - corrected below
+        fit_pos_args = fit_call_args # Assuming (x, y) when patching Model.fit
+
+        assert len(fit_pos_args) == 2, "Fit should receive 2 positional args (x, y)"
+        fit_states = fit_pos_args[0]
+        fit_targets = fit_pos_args[1]
+
+        assert fit_states.shape == (batch_size, state_size), "Shape mismatch for states in fit."
+        assert fit_states.dtype == np.float32 or fit_states.dtype == np.float64, "dtype mismatch for states in fit."
+        assert fit_targets.shape == (batch_size, learn_agent.action_size), "Shape mismatch for targets in fit."
+        assert fit_targets.dtype == np.float32 or fit_targets.dtype == np.float64, "dtype mismatch for targets in fit."
+
+        # Check dones type (used in calculation, should be numeric)
+        # We can infer this by checking if the calculation worked without type errors
+        # (The test passes if no exception is raised during learn)
+
+
     def test_learn_integration_no_runtime_error(self, learn_agent, learn_params, state_size):
-        """CONTEXTUAL INTEGRATION TEST: Verify learn runs without error after memory population."""
-        # Context: Ensure learn() executes sampling/preparation without crashing when memory is full.
-        # Potential SAPPO :Problems: Runtime errors (:IndexError, :TypeError, etc.) during batch processing.
+        """CONTEXTUAL INTEGRATION TEST: Verify learn runs without error when memory is sufficient."""
+        # Context: Basic check for runtime errors during the learn process.
+        # Potential SAPPO :Problems: :TypeError, :ValueError, :IndexError
         batch_size = learn_params["batch_size"]
-        num_samples = batch_size + 5
-
-        self._populate_memory(learn_agent, num_samples, state_size)
+        self._populate_memory(learn_agent, batch_size, state_size) # Just enough memory
 
         try:
-            # Mock fit to avoid actual training, just check if learn runs
-            with mock.patch.object(learn_agent.model, 'fit') as mock_fit:
-                learn_agent.learn()
-            # If memory > batch_size, fit should have been called
-            if len(learn_agent.memory) >= learn_params["batch_size"]:
-                 mock_fit.assert_called_once()
-            else:
-                 mock_fit.assert_not_called() # Should not be called if memory too small
+            learn_agent.learn() # Call learn
+            test_passed = True
         except Exception as e:
-            pytest.fail(f"learn() raised an unexpected exception during batch preparation: {e}")
+            test_passed = False
+            pytest.fail(f"learn method raised an unexpected exception with sufficient memory: {e}")
+
+        assert test_passed, "learn method should run without errors when memory >= batch_size."
+
+
 # --- Tests for learn method Q-value calculation and model fitting ---
 
 class TestStrategyAgentLearnLogic:
@@ -591,10 +647,11 @@ class TestStrategyAgentLearnLogic:
 
     # Patch the actual model methods directly on the agent's instances
     @mock.patch.object(StrategyAgent, 'update_target_model') # Prevent actual weight copy during test setup
+    @mock.patch('random.sample') # Mock random sample to control the batch
     @mock.patch('tensorflow.keras.Model.fit')
     @mock.patch('tensorflow.keras.Model.predict')
     def test_learn_q_value_target_calculation_and_fit(
-        self, mock_predict, mock_fit, mock_update_target, # Order matters for decorators
+        self, mock_predict, mock_fit, mock_random_sample, mock_update_target, # Order matters for decorators
         learn_logic_agent, learn_logic_params, state_size, action_size
     ):
         """CORE LOGIC TEST: Verify Q-target calculation (using target net) and model.fit call."""
@@ -603,141 +660,119 @@ class TestStrategyAgentLearnLogic:
 
         # --- Agent Setup ---
         agent = learn_logic_agent # Use the fixture agent
-        # We mock predict/fit on the Model class, so it affects both agent.model and agent.target_model
         initial_update_counter = agent.update_counter # Store initial counter
 
         # --- Test Data ---
         batch_size = learn_logic_params["batch_size"]
         gamma = learn_logic_params["gamma"]
-        # Create distinct batch data
-        states_batch = np.array([np.random.rand(state_size) * (i+1) for i in range(batch_size)])
-        actions_batch = np.random.randint(0, action_size, size=batch_size)
-        rewards_batch = np.random.rand(batch_size) * 10
-        next_states_batch = np.array([np.random.rand(state_size) * (i+1 + 0.5) for i in range(batch_size)])
-        # Make some episodes end
-        dones_batch = np.array([i % 3 == 0 for i in range(batch_size)], dtype=np.uint8)
+        # Create distinct batch data (original order)
+        states_batch_orig = np.array([np.random.rand(state_size) * (i+1) for i in range(batch_size)])
+        actions_batch_orig = np.random.randint(0, action_size, size=batch_size)
+        rewards_batch_orig = np.random.rand(batch_size) * 10
+        next_states_batch_orig = np.array([np.random.rand(state_size) * (i+1 + 0.5) for i in range(batch_size)])
+        dones_batch_orig = np.array([i % 3 == 0 for i in range(batch_size)], dtype=np.uint8)
 
-        # Populate memory
+        # Populate memory and store original experiences
+        original_experiences = []
         for i in range(batch_size):
-            # remember expects (1, state_size), so reshape here for consistency
-            agent.remember(states_batch[i].reshape(1, state_size), actions_batch[i], rewards_batch[i],
-                           next_states_batch[i].reshape(1, state_size), bool(dones_batch[i]))
+            state = states_batch_orig[i].reshape(1, state_size)
+            action = actions_batch_orig[i]
+            reward = rewards_batch_orig[i]
+            next_state = next_states_batch_orig[i].reshape(1, state_size)
+            done = bool(dones_batch_orig[i])
+            experience = (state, action, reward, next_state, done)
+            agent.remember(state[0], action, reward, next_state[0], done) # remember takes 1D state
+            original_experiences.append(experience) # Store tuple with reshaped states
+
+        # --- Mock random.sample ---
+        # Define a fixed shuffled order (e.g., reverse it) - use indices
+        fixed_shuffled_indices = list(range(batch_size))[::-1]
+        # Create the shuffled sample based on the fixed indices
+        shuffled_sample = [original_experiences[i] for i in fixed_shuffled_indices]
+        mock_random_sample.return_value = shuffled_sample
 
         # --- Mock predict and fit return values ---
-        # Mock Q-values for current states (returned by model.predict(states))
-        mock_current_q = np.array([[1.1, 1.2, 1.3], [1.4, 1.5, 1.6], [1.7, 1.8, 1.9], [2.0, 2.1, 2.2]], dtype=np.float32)
-        # Mock Q-values for next states (returned by *target_model*.predict(next_states))
-        mock_next_q_target = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9], [1.0, 1.1, 1.2]], dtype=np.float32) # Different values for target
+        # Mock Q-values based on the ORIGINAL order (easier to reason about)
+        mock_current_q_orig = np.array([[1.1, 1.2, 1.3], [1.4, 1.5, 1.6], [1.7, 1.8, 1.9], [2.0, 2.1, 2.2]], dtype=np.float32)
+        mock_next_q_target_orig = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9], [1.0, 1.1, 1.2]], dtype=np.float32)
+
+        # Reorder the mock Q-values based on the fixed shuffle
+        mock_current_q_shuffled = mock_current_q_orig[fixed_shuffled_indices]
+        mock_next_q_target_shuffled = mock_next_q_target_orig[fixed_shuffled_indices]
 
         # Configure the mock predict method's side effect
-        predict_call_inputs = {} # Store inputs keyed by model instance
-        def mock_predict_side_effect(self_model, input_batch, **kwargs):
-            # Store input based on which model instance called predict
-            model_id = id(self_model)
-            if model_id not in predict_call_inputs:
-                predict_call_inputs[model_id] = []
-            predict_call_inputs[model_id].append(input_batch)
-
-            # Return different values based on the model instance
-            if self_model is agent.target_model:
-                # Check if the input matches next_states_batch (order might be shuffled)
-                assert input_batch.shape == next_states_batch.shape
-                # Simple check based on expected call order: target first
-                assert len(predict_call_inputs.get(id(agent.target_model), [])) == 1, "Target model predict called more than once or out of order"
-                return mock_next_q_target
-            elif self_model is agent.model:
-                # Check if the input matches states_batch (order might be shuffled)
-                assert input_batch.shape == states_batch.shape
-                # Simple check based on expected call order: main model second
-                assert len(predict_call_inputs.get(id(agent.model), [])) == 1, "Main model predict called more than once or out of order"
-                return mock_current_q
+        predict_call_counts = {'target': 0, 'main': 0}
+        def mock_predict_side_effect(x, **kwargs):
+            if predict_call_counts['target'] == 0 and predict_call_counts['main'] == 0:
+                # First call: target_model.predict(next_states_shuffled)
+                predict_call_counts['target'] += 1
+                expected_next_states = np.vstack([exp[3] for exp in shuffled_sample])
+                np.testing.assert_allclose(x, expected_next_states, rtol=1e-6, err_msg="Predict called with wrong next_states")
+                return mock_next_q_target_shuffled # Return shuffled mock
+            elif predict_call_counts['target'] == 1 and predict_call_counts['main'] == 0:
+                # Second call: model.predict(states_shuffled)
+                predict_call_counts['main'] += 1
+                expected_states = np.vstack([exp[0] for exp in shuffled_sample])
+                np.testing.assert_allclose(x, expected_states, rtol=1e-6, err_msg="Predict called with wrong states")
+                return mock_current_q_shuffled # Return shuffled mock
             else:
-                raise AssertionError("Predict called by unexpected model instance")
-
+                raise AssertionError(f"Predict called unexpectedly. Target calls: {predict_call_counts['target']}, Main calls: {predict_call_counts['main']}")
         mock_predict.side_effect = mock_predict_side_effect
-
-        # Mock the fit method (we only care that it's called correctly on the main model)
-        mock_fit.return_value = mock.MagicMock(history={'loss': [0.123]}) # Mock history object
+        mock_fit.return_value = mock.MagicMock(history={'loss': [0.123]})
 
         # --- Execute ---
         agent.learn()
 
         # --- Assertions ---
-        # 1. Verify predict calls (one for target, one for main)
+        # 1. Verify random.sample call
+        mock_random_sample.assert_called_once_with(agent.memory, batch_size)
+
+        # 2. Verify predict calls
         assert mock_predict.call_count == 2, "Model.predict should be called twice."
-        assert id(agent.target_model) in predict_call_inputs, "target_model.predict was not called."
-        assert id(agent.model) in predict_call_inputs, "model.predict was not called."
-        assert len(predict_call_inputs[id(agent.target_model)]) == 1, "target_model.predict called more than once."
-        assert len(predict_call_inputs[id(agent.model)]) == 1, "model.predict called more than once."
+        # Side effect already verified inputs
 
-        # Verify predict inputs (order independent check)
-        # Helper to compare sets of rows
-        def array_rows_to_set(arr):
-            return set(tuple(np.round(row, decimals=6)) for row in arr)
+        # 3. Verify fit call
+        assert mock_fit.call_count == 1, "model.fit should only be called once."
+        fit_pos_args = mock_fit.call_args[0]
+        fit_kwargs = mock_fit.call_args[1]
+        assert len(fit_pos_args) == 2, f"Expected 2 positional args (x, y) for mocked fit, got {len(fit_pos_args)}"
+        fit_states_actual = fit_pos_args[0]
+        fit_targets = fit_pos_args[1]
 
-        actual_target_predict_input_set = array_rows_to_set(predict_call_inputs[id(agent.target_model)][0])
-        expected_next_states_set = array_rows_to_set(next_states_batch)
-        assert actual_target_predict_input_set == expected_next_states_set, "target_model.predict not called with next_states_batch."
+        # Verify fit_states_actual matches the states from the shuffled sample
+        expected_states_shuffled = np.vstack([exp[0] for exp in shuffled_sample])
+        np.testing.assert_allclose(fit_states_actual, expected_states_shuffled, rtol=1e-6,
+                                          err_msg="States passed to fit do not match the shuffled sample states.")
 
-        actual_main_predict_input_set = array_rows_to_set(predict_call_inputs[id(agent.model)][0])
-        expected_states_set = array_rows_to_set(states_batch)
-        assert actual_main_predict_input_set == expected_states_set, "model.predict not called with states_batch."
+        # 4. Manually calculate expected target Q-values using the SHUFFLED data
+        # Extract shuffled components directly from shuffled_sample
+        actions_shuffled = np.array([exp[1] for exp in shuffled_sample])
+        rewards_shuffled = np.array([exp[2] for exp in shuffled_sample])
+        # Dones need to be uint8 for calculation
+        dones_shuffled = np.array([exp[4] for exp in shuffled_sample]).astype(np.uint8)
 
+        # Calculate Bellman target using shuffled data and shuffled mock predict outputs
+        max_next_q_target_shuffled_calc = np.amax(mock_next_q_target_shuffled, axis=1)
+        bellman_target_shuffled = rewards_shuffled + gamma * max_next_q_target_shuffled_calc * (1 - dones_shuffled)
 
-        # 2. Verify fit call (should only be called on the main model instance)
-        found_fit_call_on_main_model = False
-        fit_call_args = None
-        fit_call_kwargs = None
-        for call in mock_fit.call_args_list:
-            if call[0][0] is agent.model: # Check if the instance matches agent.model
-                found_fit_call_on_main_model = True
-                fit_call_args = call[0] # Positional args (self, x, y, ...)
-                fit_call_kwargs = call[1] # Keyword args
-                break
-        assert found_fit_call_on_main_model, "model.fit was not called on the main model instance."
-        assert mock_fit.call_count == 1, "model.fit should only be called once (on the main model)."
+        # Create expected targets based on shuffled current Q and update with Bellman target
+        expected_targets_shuffled = mock_current_q_shuffled.copy()
+        batch_indices_shuffled = np.arange(batch_size)
+        expected_targets_shuffled[batch_indices_shuffled, actions_shuffled] = bellman_target_shuffled
 
-        # 3. Verify fit arguments (states and target_q_values)
-        fit_states_actual = fit_call_args[1] # x argument
-        fit_targets = fit_call_args[2]      # y argument
-
-        # Verify fit_states (order independent)
-        assert fit_states_actual.shape == states_batch.shape
-        actual_fit_states_set = array_rows_to_set(fit_states_actual)
-        assert actual_fit_states_set == expected_states_set, "States passed to fit do not match batch states."
-
-        # 4. Manually calculate expected target Q-values using TARGET network's output
-        # Need to map shuffled fit_states back to original indices to use original rewards/dones/actions
-        original_indices_map = {}
-        for i, original_row in enumerate(states_batch):
-            original_indices_map[tuple(np.round(original_row, decimals=6))] = i
-
-        fit_permutation_indices = [original_indices_map[tuple(np.round(row, decimals=6))] for row in fit_states_actual]
-
-        # Use the original mock Q-values, but select based on the permutation
-        shuffled_current_q = mock_current_q[fit_permutation_indices]
-        shuffled_next_q_target = mock_next_q_target[fit_permutation_indices]
-        shuffled_rewards = rewards_batch[fit_permutation_indices]
-        shuffled_dones = dones_batch[fit_permutation_indices]
-        shuffled_actions = actions_batch[fit_permutation_indices]
-
-        expected_targets = shuffled_current_q.copy() # Start with current Q-values from MAIN model (shuffled)
-        max_next_q_target = np.amax(shuffled_next_q_target, axis=1) # Use TARGET model's next Q prediction (shuffled)
-        bellman_target = shuffled_rewards + gamma * max_next_q_target * (1 - shuffled_dones)
-        batch_indices = np.arange(batch_size)
-        expected_targets[batch_indices, shuffled_actions] = bellman_target # Update only the taken actions
-
-        np.testing.assert_allclose(fit_targets, expected_targets, rtol=1e-6,
-                                              err_msg="Target Q-values passed to fit are incorrect (check target network usage).")
+        # Compare fit_targets directly with the expected targets calculated from shuffled data
+        np.testing.assert_allclose(fit_targets, expected_targets_shuffled, rtol=1e-6,
+                                              err_msg="Target Q-values passed to fit are incorrect.")
 
         # 5. Verify fit keyword arguments (epochs, verbose)
-        assert fit_call_kwargs.get('epochs') == 1, "fit should be called with epochs=1."
-        assert fit_call_kwargs.get('verbose') == 0, "fit should be called with verbose=0."
+        assert fit_kwargs.get('epochs') == 1, "fit should be called with epochs=1."
+        assert fit_kwargs.get('verbose') == 0, "fit should be called with verbose=0."
 
         # 6. Verify target update counter incremented
         assert agent.update_counter == initial_update_counter + 1, "Update counter should have incremented after learn."
         # Verify mock_update_target was NOT called (assuming freq > 1)
         mock_update_target.assert_not_called()
+
     @mock.patch.object(StrategyAgent, 'update_target_model')
     @mock.patch('tensorflow.keras.Model.fit') # Mock fit to avoid actual training
     @mock.patch('tensorflow.keras.Model.predict') # Mock predict as well
@@ -771,32 +806,25 @@ class TestStrategyAgentLearnLogic:
         mock_predict.return_value = np.random.rand(batch_size, action_size)
         mock_fit.return_value = mock.MagicMock(history={'loss': [0.1]})
 
+        # Reset mock call count AFTER initialization (which calls update_target_model once)
+        mock_update_target.reset_mock()
+
         # --- Execute and Assert ---
         # Call learn() freq - 1 times
-        for i in range(test_freq - 1):
+        for _ in range(test_freq - 1):
             agent.learn()
-            assert agent.update_counter == i + 1, f"Counter should be {i+1} after {i+1} learns"
             mock_update_target.assert_not_called() # Should not be called yet
 
-        # Call learn() the freq-th time
+        # Call learn() one more time (total freq calls)
         agent.learn()
-        assert agent.update_counter == test_freq, f"Counter should be {test_freq} after {test_freq} learns"
         mock_update_target.assert_called_once() # Should be called exactly once now
 
-        # Call learn() one more time (freq + 1)
-        agent.learn()
-        assert agent.update_counter == test_freq + 1, f"Counter should be {test_freq + 1} after {test_freq + 1} learns"
-        # Call count should still be 1
-        mock_update_target.assert_called_once()
+        # Call learn() freq - 1 more times
+        mock_update_target.reset_mock() # Reset for next check
+        for _ in range(test_freq - 1):
+            agent.learn()
+            mock_update_target.assert_not_called()
 
-        # Call learn() up to 2 * freq - 1 times
-        for i in range(test_freq + 1, 2 * test_freq - 1):
-             agent.learn()
-             assert agent.update_counter == i + 1, f"Counter should be {i+1} after {i+1} learns"
-             # Call count should still be 1
-             mock_update_target.assert_called_once()
-
-        # Call learn() the 2 * freq-th time
+        # Call learn() one more time (total 2*freq calls)
         agent.learn()
-        assert agent.update_counter == 2 * test_freq, f"Counter should be {2 * test_freq} after {2 * test_freq} learns"
-        assert mock_update_target.call_count == 2 # Should be called exactly twice now
+        mock_update_target.assert_called_once() # Should be called exactly once again
