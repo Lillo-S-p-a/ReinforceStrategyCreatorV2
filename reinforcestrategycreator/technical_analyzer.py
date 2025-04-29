@@ -27,7 +27,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     
     Args:
         data (pd.DataFrame): DataFrame containing OHLCV data.
-                            Must have a 'Close' column.
+                            Must have a 'close' column.
         
     Returns:
         pd.DataFrame: Original DataFrame with added indicator columns.
@@ -48,8 +48,8 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     
     try:
         # Check if DataFrame is empty or doesn't have required columns
-        if result_df.empty or 'Close' not in result_df.columns:
-            logger.warning("CalculationError: Input DataFrame is empty or missing 'Close' column")
+        if result_df.empty or 'close' not in result_df.columns:
+            logger.warning("CalculationError: Input DataFrame is empty or missing 'close' column")
             return data
         
         # Check if there's enough data for the calculations
@@ -59,7 +59,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
         
         # Calculate RSI using ta
         try:
-            rsi_indicator = RSIIndicator(close=result_df['Close'], window=14)
+            rsi_indicator = RSIIndicator(close=result_df['close'], window=14)
             result_df['RSI_14'] = rsi_indicator.rsi()
         except Exception as e:
             logger.warning(f"CalculationError: Failed to calculate RSI: {str(e)}")
@@ -67,7 +67,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
         # Calculate MACD using ta
         try:
             macd_indicator = MACD(
-                close=result_df['Close'], 
+                close=result_df['close'], 
                 window_slow=26, 
                 window_fast=12, 
                 window_sign=9
@@ -80,7 +80,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
         
         # Calculate Bollinger Bands using ta
         try:
-            bb = BollingerBands(close=result_df['Close'], window=20, window_dev=2)
+            bb = BollingerBands(close=result_df['close'], window=20, window_dev=2)
             result_df['BBL_20_2.0'] = bb.bollinger_lband()
             result_df['BBM_20_2.0'] = bb.bollinger_mavg()
             result_df['BBU_20_2.0'] = bb.bollinger_hband()
