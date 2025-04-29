@@ -20,7 +20,7 @@ The system is designed with a modular architecture, comprising the following cor
 
 *   **Trading Environment (`trading_environment.py`):**
     *   **Role:** :ComponentRole TradingEnvironment
-    *   **Responsibility:** Simulating the trading process based on market data and agent actions. Provides observations, executes trades (long, short, flat), calculates portfolio value, applies transaction costs/slippage (future), and computes rewards. Adheres to the Gymnasium API standard.
+    *   **Responsibility:** Simulating the trading process based on market data and agent actions. Provides observations, executes trades (long, short, flat), calculates portfolio value, applies transaction costs/slippage (future), and computes rewards based on the Sharpe Ratio (:RiskAdjustedReturn) over a defined window. Adheres to the Gymnasium API standard.
     *   **Context:** :Context RLCore, :Context Simulation
 
 *   **RL Agent (`rl_agent.py`):**

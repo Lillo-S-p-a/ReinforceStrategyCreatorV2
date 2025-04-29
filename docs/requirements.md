@@ -19,8 +19,8 @@ This document outlines the key functional and non-functional requirements for th
     *   FR3.4: The environment MUST simulate trade execution based on agent actions, updating portfolio balance and shares held (allowing negative shares for short positions).
     *   FR3.5: The environment MUST apply a configurable transaction fee (:TransactionCost) for buy and sell operations.
     *   FR3.6: (Future) The environment SHOULD simulate market slippage (:Slippage).
-    *   FR3.7: The environment MUST calculate a reward signal based on portfolio performance changes.
-    *   FR3.8: (Future) The reward calculation SHOULD incorporate risk-adjusted metrics (:RiskAdjustedReturn, e.g., Sharpe Ratio).
+    *   FR3.7: The environment MUST calculate a reward signal based on the Sharpe Ratio (:RiskAdjustedReturn) calculated over a defined window of portfolio history. (Incorporates former FR3.8)
+    *   FR3.8: (Implemented - See FR3.7)
 *   **FR4: Reinforcement Learning Agent**
     *   FR4.1: The system MUST include an RL agent (:ComponentRole RLAgent) capable of learning a trading policy.
     *   FR4.2: The agent MUST interact with the Trading Environment using the standard observation-action-reward loop.
