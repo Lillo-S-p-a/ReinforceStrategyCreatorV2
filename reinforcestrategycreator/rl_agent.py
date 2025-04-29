@@ -41,6 +41,9 @@ class StrategyAgent:
         memory_size (int): Maximum size of the replay buffer.
         batch_size (int): Size of the mini-batch sampled from memory for training.
         gamma (float): Discount factor for future rewards.
+        target_model (keras.Model): The target Q-network model for stable learning.
+        target_update_freq (int): Frequency (in learning steps) to update the target network.
+        update_counter (int): Counter for tracking steps until the next target network update.
     """
 
     def __init__(self, state_size: int, action_size: int,
@@ -49,14 +52,17 @@ class StrategyAgent:
                  epsilon_min: float = 0.01,
                  epsilon_decay: float = 0.995,
                  memory_size: int = 2000, batch_size: int = 32,
-                 gamma: float = 0.95): # <-- Add gamma parameter
+                 gamma: float = 0.95,
+                 target_update_freq: int = 100): # <-- Add target_update_freq
         """
-        Initialize the DQN agent with Experience Replay.
+        Initialize the DQN agent with Experience Replay and Target Network.
 
-        Builds and compiles the Q-network model, sets up epsilon-greedy parameters,
-        and initializes the experience replay memory.
+        Builds and compiles the main Q-network and the target Q-network,
+        sets up epsilon-greedy parameters, initializes the experience replay memory,
+        and configures the target network update frequency.
         :Algorithm EpsilonGreedyExploration
         :Algorithm ExperienceReplay
+        :Algorithm TargetNetwork
 
         Args:
             state_size (int): Dimension of the state space (input features).
@@ -67,7 +73,8 @@ class StrategyAgent:
             epsilon_decay (float): Decay rate for exploration probability. Defaults to 0.995.
             memory_size (int): Maximum size of the experience replay buffer. Defaults to 2000.
             batch_size (int): Size of the mini-batch sampled for learning. Defaults to 32.
-            gamma (float): Discount factor for future rewards. Defaults to 0.95. # <-- Add gamma doc
+            gamma (float): Discount factor for future rewards. Defaults to 0.95.
+            target_update_freq (int): How often (in learning steps) to update the target network. Defaults to 100.
         """
         self.state_size = state_size
         self.action_size = action_size
@@ -77,19 +84,27 @@ class StrategyAgent:
         self.epsilon_decay = epsilon_decay
         self.memory_size = memory_size
         self.batch_size = batch_size
-        self.gamma = gamma # <-- Add gamma assignment
+        self.gamma = gamma
+        self.target_update_freq = target_update_freq
+        self.update_counter = 0 # Counter for target network updates
 
         # Initialize replay memory
         self.memory = deque(maxlen=self.memory_size)
 
-        # Build the Q-Network model
+        # Build the main Q-Network model
         self.model = self._build_model()
 
-        logger.info(f"StrategyAgent (DQN) initialized: state_size={state_size}, "
+        # Build the target Q-Network model
+        self.target_model = self._build_model()
+        # Initialize target model weights to match the main model
+        self.update_target_model()
+
+        logger.info(f"StrategyAgent (DQN with Target Network) initialized: state_size={state_size}, "
                     f"action_size={action_size}, learning_rate={learning_rate}, "
                     f"epsilon={epsilon}, epsilon_min={epsilon_min}, epsilon_decay={epsilon_decay}, "
-                    f"memory_size={memory_size}, batch_size={batch_size}, gamma={gamma}. " # <-- Add gamma log
-                    "Model built and compiled. Replay memory initialized.")
+                    f"memory_size={memory_size}, batch_size={batch_size}, gamma={gamma}, "
+                    f"target_update_freq={target_update_freq}. "
+                    "Models built and compiled. Target model initialized. Replay memory initialized.")
 
     def _build_model(self) -> keras.Model:
         """Builds the Keras model for the Q-network."""
@@ -216,9 +231,9 @@ class StrategyAgent:
                      f"rewards shape {rewards.shape}, next_states shape {next_states.shape}, dones shape {dones.shape}")
 
         # --- Q-Value Target Calculation and Training ---
-        # 1. Predict Q-values for the next states using the main model
-        next_q_values = self.model.predict(next_states, verbose=0)
-        logger.debug(f"Predicted next_q_values shape: {next_q_values.shape}")
+        # 1. Predict Q-values for the next states using the *target* model for stability
+        next_q_values = self.target_model.predict(next_states, verbose=0) # Use target_model here
+        logger.debug(f"Predicted next_q_values (using target model) shape: {next_q_values.shape}")
 
         # 2. Calculate the target Q-value using the Bellman equation
         # Target is reward if done, otherwise reward + discounted max future Q
@@ -241,6 +256,23 @@ class StrategyAgent:
         loss = history.history['loss'][0]
         logger.debug(f"Training complete for one batch. Loss: {loss}")
 
+        # Increment counter and update target network if needed
+        self._update_target_if_needed()
+
         # Optional: Update epsilon decay here instead of in select_action if preferred
         # if self.epsilon > self.epsilon_min:
         #     self.epsilon *= self.epsilon_decay
+
+    def _update_target_if_needed(self) -> None:
+        """Checks the counter and updates the target network weights if the frequency is met."""
+        self.update_counter += 1
+        if self.update_counter % self.target_update_freq == 0:
+            self.update_target_model()
+            logger.info(f"Target network updated at step {self.update_counter}")
+            # Optional: Reset counter if you prefer counting from 0 each time
+            # self.update_counter = 0
+
+    def update_target_model(self) -> None:
+        """Copies weights from the main model to the target model."""
+        logger.debug("Updating target model weights from main model.")
+        self.target_model.set_weights(self.model.get_weights())
