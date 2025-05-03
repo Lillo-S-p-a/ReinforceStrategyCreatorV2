@@ -17,6 +17,9 @@ numpy = "^1.26.0"
 gymnasium = "0.29.1"
 tensorflow = "^2.16.1" # Or appropriate version
 matplotlib = "^3.8.4" # Added for plotting results
+streamlit = "^1.34.0" # Added for dashboard
+sqlalchemy = "^2.0.30" # Added for PostgreSQL interaction
+psycopg2-binary = "^2.9.9" # Added for PostgreSQL driver
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
