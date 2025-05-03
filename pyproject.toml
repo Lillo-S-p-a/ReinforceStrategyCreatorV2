@@ -16,6 +16,7 @@ ta = "^0.11.0"
 numpy = "^1.26.0"
 gymnasium = "0.29.1"
 tensorflow = "^2.16.1" # Or appropriate version
+matplotlib = "^3.8.4" # Added for plotting results
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

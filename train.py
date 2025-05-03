@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 import logging
+import csv # Added for logging results
 from reinforcestrategycreator.data_fetcher import fetch_historical_data # Corrected import
 from reinforcestrategycreator.technical_analyzer import calculate_indicators # Corrected import
 from reinforcestrategycreator.trading_environment import TradingEnv # Corrected import
@@ -13,6 +14,8 @@ START_DATE = "2020-01-01"
 END_DATE = "2023-12-31"
 TRAINING_EPISODES = 10 # Start with a small number for testing
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
+
+LOG_FILENAME = "training_log.csv" # File to store detailed step results
 
 # Agent Hyperparameters (Example values, use defaults or tune later)
 STATE_SIZE = None # Will be determined from env
@@ -106,9 +109,15 @@ def main():
 
     # --- 4. Training Loop ---
     logging.info(f"Starting training loop for {TRAINING_EPISODES} episodes...")
-    for episode in range(TRAINING_EPISODES):
-        state, info = env.reset()
-        # Reshape state for the agent's Keras model (expects batch dimension)
+    # --- Setup CSV Logging ---
+    log_header = ['episode', 'step', 'action', 'reward', 'balance', 'shares_held', 'current_price', 'portfolio_value', 'current_position']
+    with open(LOG_FILENAME, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(log_header)
+
+        for episode in range(TRAINING_EPISODES):
+            state, reset_info = env.reset() # Capture reset info if needed, though not logged per step
+            # Reshape state for the agent's Keras model (expects batch dimension)
         state = np.reshape(state, [1, STATE_SIZE])
         total_reward = 0
         done = False
@@ -137,11 +146,25 @@ def main():
             if len(agent.memory) > AGENT_BATCH_SIZE:
                 agent.learn()
 
+            # Log step data to CSV
+            log_data = [
+                episode + 1,
+                info.get('step', step_count), # Use step from info if available
+                action,
+                reward,
+                info.get('balance', np.nan),
+                info.get('shares_held', np.nan),
+                info.get('current_price', np.nan),
+                info.get('portfolio_value', np.nan),
+                info.get('current_position', np.nan)
+            ]
+            writer.writerow(log_data)
+
             if done:
-                logging.info(f"Episode: {episode+1}/{TRAINING_EPISODES}, Total Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}, Steps: {step_count}")
+                logging.info(f"Episode: {episode+1}/{TRAINING_EPISODES}, Total Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}, Steps: {step_count}, Final Portfolio Value: {info.get('portfolio_value', 'N/A'):.2f}")
                 # Optional: Add more info like portfolio value from `info` dict if available
 
-    logging.info("Training finished.")
+    logging.info(f"Training finished. Detailed results saved to {LOG_FILENAME}")
     # Optional: Save the trained model
     # agent.save_model("spy_rl_model.keras") # Or .weights.h5
     # logging.info("Agent model saved.")
