@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from reinforcestrategycreator import db_models
 from reinforcestrategycreator.api import schemas
-from reinforcestrategycreator.api.dependencies import DBSession, APIKey
+from reinforcestrategycreator.api.dependencies import DBSession, APIKey, get_api_key # Import get_api_key
 # Removed import of PaginationParams, will define params directly
 
 # Import constants from runs or define them here if preferred
@@ -16,13 +16,14 @@ from .runs import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 router = APIRouter(
     prefix="/episodes",
     tags=["Episodes"],
-    dependencies=[Depends(APIKey)] # Apply API Key security
+    # Removed router-level dependency
 )
 
 @router.get("/{episode_id}", response_model=schemas.EpisodeDetail)
 async def get_episode_details(
     episode_id: Annotated[int, Path(description="The ID of the episode to retrieve")],
     db: DBSession,
+    api_key: str = Depends(get_api_key), # Add dependency here
 ):
     """
     Retrieve details for a specific episode by its ID.
@@ -37,6 +38,7 @@ async def get_episode_details(
 async def list_episode_steps(
     episode_id: Annotated[int, Path(description="The ID of the episode whose steps to retrieve")],
     db: DBSession,
+    api_key: str = Depends(get_api_key), # Add dependency here
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
 ):
@@ -80,6 +82,7 @@ async def list_episode_steps(
 async def list_episode_trades(
     episode_id: Annotated[int, Path(description="The ID of the episode whose trades to retrieve")],
     db: DBSession,
+    api_key: str = Depends(get_api_key), # Add dependency here
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
 ):

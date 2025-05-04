@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 
 from reinforcestrategycreator import db_models
 from reinforcestrategycreator.api import schemas
-from reinforcestrategycreator.api.dependencies import DBSession, APIKey
+from reinforcestrategycreator.api.dependencies import DBSession, APIKey, get_api_key # Import get_api_key if using Depends directly
 
 router = APIRouter(
     prefix="/runs",
     tags=["Training Runs"],
-    dependencies=[Depends(APIKey)] # Apply API Key security to all routes in this router
+    # Removed router-level dependency
 )
 
 # --- Helper for Pagination ---
@@ -27,6 +27,8 @@ MAX_PAGE_SIZE = 100
 @router.get("/", response_model=schemas.PaginatedResponse[schemas.TrainingRun])
 async def list_training_runs(
     db: DBSession,
+    api_key: str = Depends(get_api_key), # Keep dependency here
+    # Revert back to Annotated syntax
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
     start_date: Annotated[Optional[datetime.date], Query(description="Filter runs started on or after this date (YYYY-MM-DD)")] = None,
@@ -81,6 +83,7 @@ async def list_training_runs(
 async def get_training_run_details(
     run_id: Annotated[str, Path(description="The ID of the training run to retrieve")],
     db: DBSession,
+    api_key: str = Depends(get_api_key), # Add dependency here
 ):
     """
     Retrieve details for a specific training run by its ID.
@@ -97,6 +100,7 @@ async def get_training_run_details(
 async def list_run_episodes(
     run_id: Annotated[str, Path(description="The ID of the training run whose episodes to retrieve")],
     db: DBSession,
+    api_key: str = Depends(get_api_key), # Add dependency here
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
     min_pnl: Annotated[Optional[float], Query(description="Filter episodes with PnL greater than or equal to this value")] = None,
@@ -162,6 +166,7 @@ async def list_run_episodes(
 async def get_run_episodes_summary(
     run_id: Annotated[str, Path(description="The ID of the training run whose episodes to summarize")],
     db: DBSession,
+    api_key: str = Depends(get_api_key), # Add dependency here
 ):
     """
     Calculate and retrieve aggregated performance metrics for all episodes
