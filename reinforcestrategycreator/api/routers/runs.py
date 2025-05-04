@@ -20,23 +20,15 @@ router = APIRouter(
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
-def get_pagination_params(
-    page: Annotated[int, Query(1, ge=1, description="Page number")] = 1,
-    page_size: Annotated[int, Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE
-) -> tuple[int, int]:
-    """Dependency to get pagination parameters (skip, limit)."""
-    limit = page_size
-    skip = (page - 1) * limit
-    return skip, limit
-
-PaginationParams = Annotated[tuple[int, int], Depends(get_pagination_params)]
+# Removed get_pagination_params dependency function and PaginationParams alias
 
 # --- Endpoints ---
 
 @router.get("/", response_model=schemas.PaginatedResponse[schemas.TrainingRun])
 async def list_training_runs(
     db: DBSession,
-    pagination: PaginationParams,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
     start_date: Annotated[Optional[datetime.date], Query(description="Filter runs started on or after this date (YYYY-MM-DD)")] = None,
     end_date: Annotated[Optional[datetime.date], Query(description="Filter runs started on or before this date (YYYY-MM-DD)")] = None,
     status: Annotated[Optional[str], Query(description="Filter runs by status (e.g., 'completed', 'running')")] = None,
@@ -44,7 +36,10 @@ async def list_training_runs(
     """
     Retrieve a paginated list of training runs, optionally filtered by date range and status.
     """
-    skip, limit = pagination
+    # Calculate skip and limit directly
+    limit = min(page_size, MAX_PAGE_SIZE)
+    skip = (page - 1) * limit
+
     query = select(db_models.TrainingRun)
     count_query = select(func.count()).select_from(db_models.TrainingRun)
 
@@ -102,7 +97,8 @@ async def get_training_run_details(
 async def list_run_episodes(
     run_id: Annotated[str, Path(description="The ID of the training run whose episodes to retrieve")],
     db: DBSession,
-    pagination: PaginationParams,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
     min_pnl: Annotated[Optional[float], Query(description="Filter episodes with PnL greater than or equal to this value")] = None,
     max_sharpe: Annotated[Optional[float], Query(description="Filter episodes with Sharpe Ratio less than or equal to this value")] = None,
     start_date: Annotated[Optional[datetime.date], Query(description="Filter episodes started on or after this date (YYYY-MM-DD)")] = None,
@@ -117,7 +113,10 @@ async def list_run_episodes(
     if run is None:
         raise HTTPException(status_code=404, detail=f"Training run with ID '{run_id}' not found")
 
-    skip, limit = pagination
+    # Calculate skip and limit directly
+    limit = min(page_size, MAX_PAGE_SIZE)
+    skip = (page - 1) * limit
+
     query = select(db_models.Episode).where(db_models.Episode.run_id == run_id)
     count_query = select(func.count()).select_from(db_models.Episode).where(db_models.Episode.run_id == run_id)
 

@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 from reinforcestrategycreator import db_models
 from reinforcestrategycreator.api import schemas
 from reinforcestrategycreator.api.dependencies import DBSession, APIKey
-from .runs import PaginationParams # Reuse pagination helper from runs router
+# Removed import of PaginationParams, will define params directly
+
+# Import constants from runs or define them here if preferred
+from .runs import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 router = APIRouter(
     prefix="/episodes",
@@ -34,7 +37,8 @@ async def get_episode_details(
 async def list_episode_steps(
     episode_id: Annotated[int, Path(description="The ID of the episode whose steps to retrieve")],
     db: DBSession,
-    pagination: PaginationParams,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
 ):
     """
     Retrieve a paginated list of steps for a specific episode.
@@ -44,7 +48,10 @@ async def list_episode_steps(
     if episode is None:
         raise HTTPException(status_code=404, detail=f"Episode with ID {episode_id} not found")
 
-    skip, limit = pagination
+    # Calculate skip and limit directly
+    limit = min(page_size, MAX_PAGE_SIZE)
+    skip = (page - 1) * limit
+
     query = select(db_models.Step).where(db_models.Step.episode_id == episode_id)
     count_query = select(func.count()).select_from(db_models.Step).where(db_models.Step.episode_id == episode_id)
 
@@ -73,7 +80,8 @@ async def list_episode_steps(
 async def list_episode_trades(
     episode_id: Annotated[int, Path(description="The ID of the episode whose trades to retrieve")],
     db: DBSession,
-    pagination: PaginationParams,
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE, description="Items per page")] = DEFAULT_PAGE_SIZE,
 ):
     """
     Retrieve a paginated list of trades for a specific episode.
@@ -83,7 +91,10 @@ async def list_episode_trades(
     if episode is None:
         raise HTTPException(status_code=404, detail=f"Episode with ID {episode_id} not found")
 
-    skip, limit = pagination
+    # Calculate skip and limit directly
+    limit = min(page_size, MAX_PAGE_SIZE)
+    skip = (page - 1) * limit
+
     query = select(db_models.Trade).where(db_models.Trade.episode_id == episode_id)
     count_query = select(func.count()).select_from(db_models.Trade).where(db_models.Trade.episode_id == episode_id)
 
