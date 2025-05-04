@@ -505,7 +505,17 @@ class TradingEnv(gym.Env):
         elif mode == 'rgb_array':
             # Return an empty image as placeholder
             return np.zeros((100, 100, 3), dtype=np.uint8)
-    
+
+    def get_completed_trades(self) -> List[Dict[str, Any]]:
+        """
+        Returns the list of completed trades for the current episode.
+
+        Returns:
+            List[Dict[str, Any]]: A list of dictionaries, each representing a completed trade.
+        """
+        # Return a copy to prevent external modification
+        return list(self._completed_trades)
+
     def close(self) -> None:
         """
         Clean up resources used by the environment.
