@@ -98,8 +98,14 @@ def fetch_episode_steps(episode_id: int) -> pd.DataFrame:
     df = df.set_index('timestamp')
     df['portfolio_value'] = pd.to_numeric(df['portfolio_value'], errors='coerce')
     df['reward'] = pd.to_numeric(df['reward'], errors='coerce')
-    # Ensure action is numeric for calculations - THIS IS THE FIX
-    df['action'] = pd.to_numeric(df['action'], errors='coerce')
+    # Map string actions from API ('flat', 'long', 'short') to numeric (0, 1, 2)
+    action_string_map = {'flat': 0, 'long': 1, 'short': 2}
+    df['action'] = df['action'].map(action_string_map).fillna(-1).astype(int) # Map and handle potential unknowns, ensure integer type
+    
+    # Also ensure reward and portfolio_value are numeric (already present, but good practice)
+    df['portfolio_value'] = pd.to_numeric(df['portfolio_value'], errors='coerce')
+    df['reward'] = pd.to_numeric(df['reward'], errors='coerce')
+
     return df.sort_index()
 
 def fetch_episode_trades(episode_id: int) -> List[Dict[str, Any]]:
