@@ -32,7 +32,10 @@ class TradingEnv(gym.Env):
         observation_space (gym.spaces.Space): The observation space of the environment.
     """
     
-    def __init__(self, df: pd.DataFrame, initial_balance: float = 10000.0, transaction_fee_percent: float = 0.1, window_size: int = 5, sharpe_window_size: int = 20):
+    def __init__(self, df: pd.DataFrame, initial_balance: float = 10000.0, transaction_fee_percent: float = 0.1,
+                 window_size: int = 5, sharpe_window_size: int = 20, use_sharpe_ratio: bool = True,
+                 trading_frequency_penalty: float = 0.01, drawdown_penalty: float = 0.1,
+                 risk_free_rate: float = 0.0):
         """
         Initialize the trading environment.
         
@@ -44,6 +47,10 @@ class TradingEnv(gym.Env):
             transaction_fee_percent (float): Fee percentage for each transaction (default: 0.1%).
             window_size (int): Number of time steps to include in each observation (default: 5).
             sharpe_window_size (int): Number of time steps to use for Sharpe ratio calculation (default: 20).
+            use_sharpe_ratio (bool): Whether to use Sharpe ratio for reward calculation (default: True).
+            trading_frequency_penalty (float): Weight for the trading frequency penalty (default: 0.01).
+            drawdown_penalty (float): Weight for the drawdown penalty (default: 0.1).
+            risk_free_rate (float): Risk-free rate for Sharpe ratio calculation (default: 0.0).
         """
         super(TradingEnv, self).__init__()
         
@@ -52,6 +59,10 @@ class TradingEnv(gym.Env):
         self.transaction_fee_percent = transaction_fee_percent
         self.window_size = window_size
         self.sharpe_window_size = sharpe_window_size
+        self.use_sharpe_ratio = use_sharpe_ratio
+        self.trading_frequency_penalty = trading_frequency_penalty
+        self.drawdown_penalty = drawdown_penalty
+        self.risk_free_rate = risk_free_rate
         
         # Placeholder for current step in the environment
         self.current_step = 0
@@ -62,14 +73,17 @@ class TradingEnv(gym.Env):
         self.current_price = 0
         self.portfolio_value = initial_balance
         self.last_portfolio_value = initial_balance
+        self.max_portfolio_value = initial_balance  # Track maximum portfolio value for drawdown calculation
         
         # List to store details of completed trades
         self._completed_trades = [] # Fix: Initialize the missing attribute
         self._entry_price = 0.0     # Price at which the current position was entered
         self._entry_step = 0        # Step at which the current position was entered
+        self._trade_count = 0       # Count of trades in the current episode
         
         # Portfolio value history for Sharpe ratio calculation
         self._portfolio_value_history = deque(maxlen=sharpe_window_size)
+        self._portfolio_returns = deque(maxlen=sharpe_window_size)  # Store returns for Sharpe ratio
         
         # Current position state: 0 = Flat, 1 = Long, -1 = Short
         self.current_position = 0
@@ -121,13 +135,16 @@ class TradingEnv(gym.Env):
         self.shares_held = 0
         self.portfolio_value = self.initial_balance
         self.last_portfolio_value = self.initial_balance
+        self.max_portfolio_value = self.initial_balance
         self.current_position = 0  # Reset to Flat position
         self._entry_price = 0.0
         self._entry_step = 0
+        self._trade_count = 0
         
         # Clear trade and portfolio history
         self._completed_trades.clear()
         self._portfolio_value_history.clear()
+        self._portfolio_returns.clear()
         
         if len(self.df) == 0:
             error_msg = "DataFrame is empty. Cannot reset environment."
@@ -252,6 +269,8 @@ class TradingEnv(gym.Env):
         Args:
             action (int): The action to take (0 = Flat, 1 = Long, 2 = Short).
         """
+        # Track if a trade occurs in this step
+        trade_occurred = False
         # Get the current position before executing the action
         prev_position = self.current_position
         
@@ -294,6 +313,8 @@ class TradingEnv(gym.Env):
                     self.current_position = 0
                     self._entry_price = 0.0 # Reset entry price
                     self._entry_step = 0   # Reset entry step
+                    trade_occurred = True
+                    self._trade_count += 1
             
             elif prev_position == -1:  # Short -> Flat (Cover short position)
                 if self.shares_held < 0:
@@ -335,6 +356,8 @@ class TradingEnv(gym.Env):
                         self.current_position = 0
                         self._entry_price = 0.0 # Reset entry price
                         self._entry_step = 0   # Reset entry step
+                        trade_occurred = True
+                        self._trade_count += 1
                     else:
                         logger.warning(f"Insufficient funds to cover short position. Required: {total_cost}, Available: {self.balance}")
         
@@ -359,6 +382,8 @@ class TradingEnv(gym.Env):
                     self.current_position = 1
                     self._entry_price = self.current_price # Record entry price
                     self._entry_step = self.current_step   # Record entry step
+                    trade_occurred = True
+                    self._trade_count += 1
                     
                     logger.debug(f"Flat -> Long: Bought {shares_to_buy} shares at {self.current_price} each, "
                                f"total cost: {total_cost} (including fee: {transaction_fee})")
@@ -420,6 +445,8 @@ class TradingEnv(gym.Env):
                             self.current_position = 1
                             self._entry_price = self.current_price # Record entry price for new long position
                             self._entry_step = self.current_step   # Record entry step for new long position
+                            trade_occurred = True
+                            self._trade_count += 1
                             
                             logger.debug(f"Short -> Long (Step 2): Bought {shares_to_buy} shares at {self.current_price} each, "
                                        f"total cost: {total_buy_cost} (including fee: {buy_fee})")
@@ -450,6 +477,8 @@ class TradingEnv(gym.Env):
                     self.current_position = -1
                     self._entry_price = self.current_price # Record entry price
                     self._entry_step = self.current_step   # Record entry step
+                    trade_occurred = True
+                    self._trade_count += 1
                     
                     logger.debug(f"Flat -> Short: Sold short {shares_to_short} shares at {self.current_price} each, "
                                f"total proceeds: {total_proceeds} (after fee: {transaction_fee})")
@@ -520,18 +549,70 @@ class TradingEnv(gym.Env):
     
     def _calculate_reward(self) -> float:
         """
-        Calculate the reward based on the percentage change in portfolio value from the last step.
-
+        Calculate the reward based on risk-adjusted returns, trading frequency, and drawdowns.
+        
+        The reward consists of three components:
+        1. Risk-adjusted return (Sharpe ratio or simple percentage change)
+        2. Trading frequency penalty (to discourage excessive trading)
+        3. Drawdown penalty (to encourage capital preservation)
+        
         Returns:
-            float: The percentage change in portfolio value for the step.
-                   Returns 0 if the last portfolio value was 0 to avoid division by zero.
+            float: The calculated reward value.
         """
+        # Update max portfolio value for drawdown calculation
+        if self.portfolio_value > self.max_portfolio_value:
+            self.max_portfolio_value = self.portfolio_value
+        
+        # Calculate percentage change in portfolio value
         if self.last_portfolio_value == 0:
             logger.warning("Last portfolio value was 0, returning 0 reward to avoid division by zero.")
             return 0.0  # Avoid division by zero
-
-        # Calculate reward as the percentage change in portfolio value
-        reward = (self.portfolio_value - self.last_portfolio_value) / self.last_portfolio_value
+        
+        percentage_change = (self.portfolio_value - self.last_portfolio_value) / self.last_portfolio_value
+        
+        # Add the return to history for Sharpe ratio calculation
+        self._portfolio_returns.append(percentage_change)
+        
+        # Component 1: Risk-adjusted return
+        if self.use_sharpe_ratio and len(self._portfolio_returns) >= 2:
+            # Calculate Sharpe ratio using the portfolio returns history
+            returns_array = np.array(self._portfolio_returns)
+            returns_mean = np.mean(returns_array)
+            returns_std = np.std(returns_array)
+            
+            # Avoid division by zero
+            if returns_std == 0:
+                risk_adjusted_return = returns_mean  # If no volatility, just use the mean return
+            else:
+                # Sharpe ratio = (Mean Return - Risk Free Rate) / Standard Deviation
+                risk_adjusted_return = (returns_mean - self.risk_free_rate) / returns_std
+                
+                # Scale the Sharpe ratio to be comparable to percentage returns
+                # Typical Sharpe values might be between -3 and +3, while returns are often smaller
+                risk_adjusted_return *= 0.01  # Scale factor can be adjusted
+        else:
+            # If not using Sharpe ratio or not enough history, use percentage change
+            risk_adjusted_return = percentage_change
+        
+        # Component 2: Trading frequency penalty
+        # Penalize based on the number of trades in this episode
+        trading_penalty = self.trading_frequency_penalty * self._trade_count
+        
+        # Component 3: Drawdown penalty
+        # Calculate current drawdown as percentage from peak
+        if self.max_portfolio_value > 0:
+            current_drawdown = max(0, (self.max_portfolio_value - self.portfolio_value) / self.max_portfolio_value)
+            drawdown_penalty = self.drawdown_penalty * current_drawdown
+        else:
+            drawdown_penalty = 0
+        
+        # Combine all components into final reward
+        reward = risk_adjusted_return - trading_penalty - drawdown_penalty
+        
+        logger.debug(f"Reward components: risk_adjusted={risk_adjusted_return:.6f}, "
+                   f"trading_penalty={trading_penalty:.6f}, drawdown_penalty={drawdown_penalty:.6f}, "
+                   f"final_reward={reward:.6f}")
+        
         return reward
     
     def _get_observation(self) -> np.ndarray:
