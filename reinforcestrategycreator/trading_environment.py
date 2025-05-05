@@ -689,7 +689,7 @@ class TradingEnv(gym.Env):
                 
                 # Scale the Sharpe ratio to be comparable to percentage returns
                 # Typical Sharpe values might be between -3 and +3, while returns are often smaller
-                risk_adjusted_return *= 0.01  # Scale factor can be adjusted
+                # REMOVED: risk_adjusted_return *= 0.01  # Scaling factor removed as it drastically reduced reward signal
         else:
             # If not using Sharpe ratio or not enough history, use percentage change
             risk_adjusted_return = percentage_change

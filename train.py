@@ -23,6 +23,12 @@ END_DATE = "2023-12-31"
 TRAINING_EPISODES = 10 # Start with a small number for testing
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
 
+# Environment Tuning Parameters (Phase 1 Debug)
+ENV_DRAWDOWN_PENALTY = 0.01 # Reduced from 0.1 default
+ENV_TRADING_PENALTY = 0.005 # Reduced from 0.01 default
+ENV_RISK_FRACTION = 0.02    # Reduced from 0.1 default
+ENV_STOP_LOSS_PCT = 5.0     # Enabled, was None (disabled)
+
 # Agent Hyperparameters (Example values, use defaults or tune later)
 STATE_SIZE = None # Will be determined from env
 ACTION_SIZE = None # Will be determined from env
@@ -83,7 +89,16 @@ def main():
     # --- 2. Environment Setup ---
     logging.info("Initializing trading environment...")
     try:
-        env = TradingEnv(data_with_indicators, sharpe_window_size=SHARPE_WINDOW_SIZE, transaction_fee_percent=0.001) # Corrected class name and added fee
+        env = TradingEnv(
+            data_with_indicators,
+            sharpe_window_size=SHARPE_WINDOW_SIZE,
+            transaction_fee_percent=0.001, # Keep existing fee
+            drawdown_penalty=ENV_DRAWDOWN_PENALTY,
+            trading_frequency_penalty=ENV_TRADING_PENALTY,
+            risk_fraction=ENV_RISK_FRACTION,
+            stop_loss_pct=ENV_STOP_LOSS_PCT
+            # Note: take_profit_pct remains None (default) for now
+        )
         STATE_SIZE = env.observation_space.shape[0]
         ACTION_SIZE = env.action_space.n
         logging.info(f"Environment initialized. State size: {STATE_SIZE}, Action size: {ACTION_SIZE}")
@@ -134,7 +149,11 @@ def main():
         "agent_learning_rate": AGENT_LEARNING_RATE,
         "agent_target_update_freq": AGENT_TARGET_UPDATE_FREQ,
         "env_transaction_fee": env.transaction_fee_percent,
-        "env_window_size": env.window_size
+        "env_window_size": env.window_size,
+        "env_drawdown_penalty": env.drawdown_penalty, # Log tuned value
+        "env_trading_penalty": env.trading_frequency_penalty, # Log tuned value
+        "env_risk_fraction": env.risk_fraction, # Log tuned value
+        "env_stop_loss_pct": env.stop_loss_pct # Log tuned value
     }
 
     # Use a 'with' statement to manage the DB session lifecycle

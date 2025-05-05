@@ -24,6 +24,7 @@ fastapi = "^0.115.12"
 uvicorn = {extras = ["standard"], version = "^0.34.2"}
 scikit-learn = "^1.6.1"
 plotly = "^6.0.1"
+python-dotenv = "^1.0.1" # Added for loading .env file
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
