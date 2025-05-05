@@ -48,7 +48,7 @@ def analyze_decision_making(steps_df: pd.DataFrame) -> Dict[str, Any]:
     steps_df['action_num'] = pd.to_numeric(steps_df['action'], errors='coerce') # Already mapped in api.py, but coerce just in case
 
     # 1. Action consistency - how often does the model change actions?
-    steps_df['action_change'] = steps_df['action_num'].diff().fillna(0).abs() > 0 # fillna(0) for first row
+    steps_df['action_change'] = (steps_df['action_num'].diff().fillna(0).abs() > 0).astype('float64') # fillna(0) for first row
     action_change_rate = steps_df['action_change'].mean() * 100
     analysis['action_change_rate'] = action_change_rate
     
@@ -97,23 +97,56 @@ def analyze_decision_making(steps_df: pd.DataFrame) -> Dict[str, Any]:
             steps_df['asset_ma'] = np.nan  # Initialize with NaN
             steps_df['asset_uptrend'] = np.nan  # Initialize with NaN
             steps_df.loc[valid_price_df.index, 'asset_ma'] = valid_price_df['asset_ma']
-            steps_df.loc[valid_price_df.index, 'asset_uptrend'] = valid_price_df['asset_uptrend']
+            steps_df.loc[valid_price_df.index, 'asset_uptrend'] = valid_price_df['asset_uptrend'].astype('float64')
             
             # Drop NaN values for the trend analysis
-            trend_df = steps_df.dropna(subset=['asset_uptrend'])
+            trend_df = steps_df.dropna(subset=['asset_uptrend']).copy() # Add .copy() to avoid SettingWithCopyWarning later if modifying
             
             if not trend_df.empty:
+                # Ensure 'asset_uptrend' is boolean type AFTER dropna
+                try:
+                    trend_df['asset_uptrend'] = trend_df['asset_uptrend'].astype(bool)
+                except Exception as e:
+                    logging.error(f"Failed to cast 'asset_uptrend' to bool: {e}", exc_info=True)
+                    # Handle error case, maybe skip this part of analysis
+                    analysis['buy_in_asset_uptrend_rate'] = None
+                    analysis['sell_in_asset_downtrend_rate'] = None
+                    # Continue to the next part of the analysis or return
+                    # Depending on how critical this section is
+                    # For now, let's log and set rates to None
+                    logging.warning("Skipping trend alignment analysis due to boolean conversion error.")
+                    # Need to decide if we should 'continue' or 'return' based on function logic flow
+                    # Assuming we want to calculate other metrics, we'll set to None and let it proceed
+                    analysis['buy_in_asset_uptrend_rate'] = None
+                    analysis['sell_in_asset_downtrend_rate'] = None
+
+                logging.info(f"Created trend_df with shape {trend_df.shape}. asset_uptrend dtype: {trend_df['asset_uptrend'].dtype}")
+                logging.debug(f"trend_df head:\n{trend_df.head()}") # Changed to debug level
+
                 # In uptrends, agent buys (action 1)
                 buy_in_uptrend = trend_df[(trend_df['asset_uptrend']) & (trend_df['action_num'] == 1)].shape[0]
                 total_uptrend = trend_df[trend_df['asset_uptrend']].shape[0]
                 analysis['buy_in_asset_uptrend_rate'] = (buy_in_uptrend / total_uptrend * 100) if total_uptrend > 0 else 0
                 
                 # In downtrends, agent sells (action 2)
-                sell_in_downtrend = trend_df[(~trend_df['asset_uptrend']) & (trend_df['action_num'] == 2)].shape[0]
-                total_downtrend = trend_df[~trend_df['asset_uptrend']].shape[0]
-                analysis['sell_in_asset_downtrend_rate'] = (sell_in_downtrend / total_downtrend * 100) if total_downtrend > 0 else 0
+                # Create the boolean mask for downtrend
+                try:
+                    downtrend_mask = ~trend_df['asset_uptrend']
+                    logging.debug(f"Downtrend mask (first 5): {downtrend_mask.head().tolist()}") # Changed to debug level
+                    logging.debug(f"Downtrend mask index matches trend_df index: {downtrend_mask.index.equals(trend_df.index)}") # Changed to debug level
+
+                    # Apply the mask
+                    downtrend_rows = trend_df[downtrend_mask]
+                    logging.debug(f"Selected downtrend_rows shape: {downtrend_rows.shape}") # Changed to debug level
+
+                    sell_in_downtrend = downtrend_rows[downtrend_rows['action_num'] == 2].shape[0]
+                    total_downtrend = downtrend_rows.shape[0] # Use shape of filtered df
+                    analysis['sell_in_asset_downtrend_rate'] = (sell_in_downtrend / total_downtrend * 100) if total_downtrend > 0 else 0
+                except Exception as e:
+                     logging.error(f"Error during downtrend analysis (line 113 vicinity): {e}", exc_info=True)
+                     analysis['sell_in_asset_downtrend_rate'] = None # Set to None on error
             else:
-                logging.warning("No valid trend data after filtering NaN values")
+                logging.warning("No valid trend data after filtering NaN values (trend_df is empty)")
                 analysis['buy_in_asset_uptrend_rate'] = None
                 analysis['sell_in_asset_downtrend_rate'] = None
         else:
@@ -169,13 +202,25 @@ def analyze_decision_making(steps_df: pd.DataFrame) -> Dict[str, Any]:
                 steps_df['cluster'] = features_df['cluster'] # Assign based on index
 
                 # Analyze clusters (using steps_df which includes reward)
-                cluster_stats = steps_df.dropna(subset=['cluster']).groupby('cluster').agg(
-                    avg_asset_price=('asset_price', 'mean'),
-                    avg_asset_price_change=('asset_price_change', 'mean'),
-                    typical_action=('action_num', lambda x: x.mode()[0] if not x.mode().empty else -1), # Use action_num
-                    avg_reward=('reward', 'mean'),
-                    count=('cluster', 'size') # Add count for context
-                ).reset_index()
+                # Define base aggregations
+                agg_dict = {
+                    'avg_asset_price': ('asset_price', 'mean'),
+                    'typical_action': ('action_num', lambda x: x.mode()[0] if not x.mode().empty else -1),
+                    'avg_reward': ('reward', 'mean'),
+                    'count': ('cluster', 'size')
+                }
+                # Conditionally add asset_price_change aggregation
+                if 'asset_price_change' in steps_df.columns:
+                    agg_dict['avg_asset_price_change'] = ('asset_price_change', 'mean')
+                else:
+                    logging.warning("asset_price_change column missing during cluster aggregation.")
+
+                # Perform aggregation
+                cluster_stats = steps_df.dropna(subset=['cluster']).groupby('cluster').agg(**agg_dict).reset_index()
+
+                # Ensure avg_asset_price_change column exists even if it wasn't aggregated
+                if 'avg_asset_price_change' not in cluster_stats.columns:
+                    cluster_stats['avg_asset_price_change'] = np.nan
 
                 # Map typical_action back to string for readability if needed (0:flat, 1:long, 2:short)
                 action_map_rev = {0: 'flat', 1: 'long', 2: 'short', -1: 'unknown'}
@@ -235,6 +280,7 @@ def analyze_decision_making(steps_df: pd.DataFrame) -> Dict[str, Any]:
 
     # Consecutive Action Analysis
     if 'action_num' in steps_df.columns:
+        # The diff() != 0 creates a boolean Series, but cumsum() converts to int64, so no need for explicit cast
         steps_df['action_block'] = (steps_df['action_num'].diff() != 0).cumsum()
         action_streaks = steps_df.groupby('action_block')['action_num'].agg(['first', 'size'])
         analysis['avg_consecutive_action_duration'] = action_streaks['size'].mean()
