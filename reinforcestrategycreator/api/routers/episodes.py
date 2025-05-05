@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from reinforcestrategycreator import db_models
 from reinforcestrategycreator.db_models import TradingOperation, Episode # Added Episode and TradingOperation
 from reinforcestrategycreator.api import schemas
+from reinforcestrategycreator.api.schemas import episodes as episode_schemas # Import the new schemas
 from reinforcestrategycreator.api.schemas import TradingOperationRead # Added TradingOperationRead
 from reinforcestrategycreator.api.dependencies import DBSession, APIKey, get_api_key # Import get_api_key
 # Removed import of PaginationParams, will define params directly
@@ -180,3 +181,32 @@ async def read_episode_operations(
         page_size=limit,
         items=operations # Ensure this matches the schema name 'TradingOperationRead' implicitly
     )
+@router.get("/{episode_id}/model/", response_model=episode_schemas.ModelParameters)
+async def get_episode_model_parameters(
+    episode_id: Annotated[int, Path(description="The ID of the episode whose model parameters to retrieve")],
+    db: DBSession,
+    api_key: str = Depends(get_api_key), # Add dependency here
+):
+    """
+    Retrieve the training parameters (model configuration) associated with a specific episode's training run.
+    """
+    # Fetch the episode with its related training run eagerly or check relationship after fetch
+    episode = db.query(db_models.Episode).options(
+        # Use joinedload to fetch the related training_run in the same query
+        # from sqlalchemy.orm import joinedload
+        # joinedload(db_models.Episode.training_run) # Uncomment if needed and import joinedload
+    ).get(episode_id)
+
+    if episode is None:
+        raise HTTPException(status_code=404, detail=f"Episode with ID {episode_id} not found")
+
+    # Access the related training run
+    training_run = episode.training_run
+    if training_run is None:
+        # This case should ideally not happen if the relationship is set up correctly
+        # and data integrity is maintained, but it's good practice to check.
+        raise HTTPException(status_code=404, detail=f"Training run associated with episode {episode_id} not found")
+
+    # Return the parameters from the training run
+    # The ModelParameters schema expects a dictionary with a 'parameters' key
+    return episode_schemas.ModelParameters(parameters=training_run.parameters)

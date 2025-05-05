@@ -52,7 +52,10 @@ class Episode(Base):
     win_rate = Column(Float)  # Percentage of winning trades
     # Add other summary metrics as needed from metrics_definitions.md
 
-    training_run = relationship("TrainingRun", back_populates="episodes")
+    training_run = relationship("TrainingRun",
+                               foreign_keys=[run_id],
+                               primaryjoin="Episode.run_id == TrainingRun.run_id",
+                               back_populates="episodes")
     steps = relationship("Step", back_populates="episode", cascade="all, delete-orphan")
     trades = relationship(
         "Trade", back_populates="episode", cascade="all, delete-orphan"

@@ -124,8 +124,14 @@ def main():
         st.header("🔍 Episode Analysis")
         episodes = fetch_run_episodes(run_id)
         
+        # Log to help with debugging
+        st.write(f"Found {len(episodes)} episodes")
+        
         if episodes:
+            # Convert to DataFrame for easier manipulation
             episodes_df = pd.DataFrame(episodes)
+            # Log the column names to help with debugging
+            st.write(f"Episode data columns: {', '.join(episodes_df.columns)}")
             
             # Add a column for episode selection display
             episodes_df['display_name'] = episodes_df.apply(
@@ -137,11 +143,22 @@ def main():
             episodes_df = episodes_df.sort_values('episode_id')
             
             # Create a selectbox for episode selection
+            # Extract episode_ids
+            episode_ids = episodes_df['episode_id'].tolist()
+            
+            # Set default index to 0 (first episode)
+            default_index = 0
+            
+            # Create selectbox with default selection
             selected_episode_id = st.selectbox(
                 "Select Episode to Analyze:",
-                episodes_df['episode_id'].tolist(),
+                episode_ids,
+                index=default_index,
                 format_func=lambda x: episodes_df.loc[episodes_df['episode_id'] == x, 'display_name'].iloc[0]
             )
+            
+            # Log the selected episode ID for debugging
+            st.write(f"Selected Episode ID: {selected_episode_id}")
             
             # Display selected episode details
             if selected_episode_id:
