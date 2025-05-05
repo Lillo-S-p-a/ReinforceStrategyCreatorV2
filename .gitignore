@@ -3,3 +3,4 @@ venv
 # Python bytecode
 *.pyc
 __pycache__/
+*.keras

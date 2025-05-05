@@ -5,6 +5,7 @@ import logging
 import datetime
 import uuid
 # import csv # Removed for DB logging
+import os
 from reinforcestrategycreator.data_fetcher import fetch_historical_data # Corrected import
 from reinforcestrategycreator.technical_analyzer import calculate_indicators # Corrected import
 from reinforcestrategycreator.trading_environment import TradingEnv # Corrected import
@@ -339,6 +340,18 @@ def main():
                             # current_episode.success_rate = success_rate # Uncomment if column exists
 
                             logging.info(f"Episode: {episode_num+1}/{TRAINING_EPISODES}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.2f}, Steps: {step_count}, Final Portfolio: {info.get('portfolio_value', 'N/A'):.2f}")
+# --- ADDED: Save Model Weights for this Episode ---
+                            try:
+                                model_save_path = f"models/episode_{current_episode_id}_model.keras" # Save as Keras native format # Adjust extension if needed (.h5, .keras, etc.)
+                                os.makedirs("models", exist_ok=True) # Ensure the 'models' directory exists
+                                # !!! IMPORTANT: Replace 'save_weights' with the actual method name of your StrategyAgent class !!!
+                                agent.model.save(model_save_path)  # Use save() for SavedModel format 
+                                logging.info(f"Saved Keras model for episode {current_episode_id} to {model_save_path}")
+                            except AttributeError:
+                                logging.error(f"Agent does not have a 'save_weights' method. Please implement or correct the method name.")
+                            except Exception as save_err:
+                                logging.error(f"Error saving model weights for episode {current_episode_id}: {save_err}")
+                            # --- END OF ADDED PART ---
 
                     # Commit changes at the end of each episode (steps, trades, episode summary)
                     db.commit()

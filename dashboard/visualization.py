@@ -282,21 +282,24 @@ def create_model_parameter_radar(model_data: Dict[str, Any], template="plotly_da
     
     # Extract numeric parameters
     params = {}
+    # Use actual numeric keys found in API response ('parameters' dict)
+    # and provide reasonable max values for normalization.
     max_values = {
-        "learning_rate": 0.01,
-        "gamma": 1.0,
-        "epsilon": 1.0,
-        "batch_size": 128,
-        "hidden_layer_size": 256,
-        "memory_size": 20000
+        "agent_gamma": 1.0,           # Discount factor max is 1
+        "env_window_size": 20,        # Example max window size
+        "agent_batch_size": 256,      # Common max batch size
+        "agent_epsilon_min": 0.1,     # Epsilon decay minimum (max value for normalization)
+        "agent_memory_size": 50000,   # Max memory size
+        "training_episodes": 100      # Example max training episodes
+        # Add other relevant numeric parameters found in the API response if needed
     }
-    
-    # Attempt to get hyperparameters, default to empty dict if not present
-    hyperparams = model_data.get('hyperparameters', {})
+
+    # Extract the actual parameters dictionary from the nested 'parameters' key
+    actual_params = model_data.get('parameters', {})
 
     for param, max_val in max_values.items():
-        # Check in hyperparameters first, then top-level model_data
-        value = hyperparams.get(param, model_data.get(param))
+        # Get the value from the extracted parameters dictionary
+        value = actual_params.get(param)
 
         if value is not None:
             # Ensure value is numeric and max_val is not zero
