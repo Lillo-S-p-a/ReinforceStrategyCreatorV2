@@ -193,16 +193,18 @@ def create_action_analysis(steps_df: pd.DataFrame, template="plotly_dark") -> Tu
     if steps_df.empty or 'action' not in steps_df.columns:
         return None, None
     
-    # Ensure action is numeric for calculations
-    steps_df['action'] = pd.to_numeric(steps_df['action'], errors='coerce')
+    # Define the mapping from numerical action to string label
+    action_label_map = {0: 'flat', 1: 'long', 2: 'short', -1: 'Unknown'} # Include mapping for potential -1
     
     # Action distribution
     action_counts = steps_df['action'].value_counts().reset_index()
     action_counts.columns = ['action', 'count']
+    # Map numerical actions to labels for the pie chart
+    action_counts['action_label'] = action_counts['action'].map(action_label_map)
     
     fig_action_dist = px.pie(
-        action_counts, 
-        names='action', 
+        action_counts,
+        names='action_label', # Use the mapped labels
         values='count',
         title='Action Distribution',
         color_discrete_sequence=px.colors.sequential.Plasma_r,
@@ -215,9 +217,12 @@ def create_action_analysis(steps_df: pd.DataFrame, template="plotly_dark") -> Tu
     transitions = steps_df.dropna(subset=['next_action']).groupby(['action', 'next_action']).size().reset_index()
     transitions.columns = ['From', 'To', 'Count']
     
-    # Converting to strings for better display
-    transitions['From'] = transitions['From'].astype(str)
-    transitions['To'] = transitions['To'].astype(str)
+    # Map numerical actions to labels for the Sankey diagram
+    transitions['From_label'] = transitions['From'].map(action_label_map)
+    transitions['To_label'] = transitions['To'].map(action_label_map)
+    
+    # Create the list of unique labels for the nodes
+    all_labels = sorted(list(set(transitions['From_label'].tolist() + transitions['To_label'].tolist())))
     
     # Create Sankey diagram for transitions
     fig_transitions = go.Figure(data=[go.Sankey(
@@ -225,13 +230,16 @@ def create_action_analysis(steps_df: pd.DataFrame, template="plotly_dark") -> Tu
             pad=15,
             thickness=20,
             line=dict(color="black", width=0.5),
-            label=list(set(transitions['From'].tolist() + transitions['To'].tolist())),
+            label=all_labels, # Use the sorted list of unique labels
             color="blue"
         ),
         link=dict(
-            source=[list(set(transitions['From'].tolist() + transitions['To'].tolist())).index(x) for x in transitions['From']],
-            target=[list(set(transitions['From'].tolist() + transitions['To'].tolist())).index(x) for x in transitions['To']],
+            # Map source and target labels back to their index in the unique label list
+            source=[all_labels.index(x) for x in transitions['From_label']],
+            target=[all_labels.index(x) for x in transitions['To_label']],
             value=transitions['Count'],
+            # Add hover information with labels
+            hovertemplate='From %{source.label} to %{target.label}: %{value}<extra></extra>'
         )
     )])
     
@@ -277,9 +285,10 @@ def create_reward_analysis(steps_df: pd.DataFrame, template="plotly_dark") -> Tu
     
     return fig_reward_dist, fig_running_reward
 
-def create_model_parameter_radar(model_data: Dict[str, Any], template="plotly_dark") -> go.Figure:
+def create_model_parameter_radar(model_data: Dict[str, Any], episode_id: int, template="plotly_dark") -> go.Figure: # Keep episode_id for potential future use/debugging if needed
     """Create a radar chart visualizing model parameters."""
-    
+    # logging.info(f"Creating radar chart for episode {episode_id}") # Removed logging
+
     # Extract numeric parameters
     params = {}
     # Use actual numeric keys found in API response ('parameters' dict)
@@ -312,9 +321,10 @@ def create_model_parameter_radar(model_data: Dict[str, Any], template="plotly_da
                 params[param] = 0 # Default to 0 if invalid or non-numeric
         else:
              # Parameter not found in either location
-             logging.warning(f"Parameter '{param}' not found in model_data or hyperparameters for radar chart.")
+             logging.warning(f"Parameter '{param}' not found for radar chart (Episode {episode_id}).") # Keep warning for now
              params[param] = 0 # Default to 0 if not found
-    
+
+    # logging.info(f"Radar chart parameters for episode {episode_id}: {params}") # Removed logging
     # Create radar chart data
     fig = go.Figure()
     
