@@ -30,7 +30,7 @@ os.makedirs(PRODUCTION_MODELS_DIR, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- API Helper Functions ---
-@st.cache_data(ttl=60)
+# @st.cache_data(ttl=60) # DEBUG: Temporarily disabled caching
 def fetch_api_data(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """Generic function to fetch data from the API."""
     url = f"{API_BASE_URL}{endpoint}"
@@ -48,8 +48,22 @@ def fetch_api_data(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Op
         logging.info(f"  API Response Snippet: {response_snippet}")
 
         response.raise_for_status()
-        logging.info(f"  Successfully fetched and parsed JSON for {url}")
-        return response.json()
+        # --- DEBUGGING: Log raw response and parsed JSON for summary ---
+        raw_response_text = response.text
+        parsed_json = None
+        try:
+            parsed_json = response.json()
+            logging.info(f"  Successfully fetched and parsed JSON for {url}")
+            if "/episodes/summary/" in endpoint:
+                 logging.info(f"  [SUMMARY DEBUG] Raw Response Text: {raw_response_text[:500]}") # Log first 500 chars
+                 logging.info(f"  [SUMMARY DEBUG] Parsed JSON: {parsed_json}")
+            return parsed_json
+        except json.JSONDecodeError as json_err:
+            logging.error(f"JSON decoding error for {url}: {json_err}")
+            logging.error(f"  Raw Response that failed parsing: {raw_response_text[:500]}")
+            st.error(f"API response for {endpoint} was not valid JSON.")
+            return None
+        # --- END DEBUGGING ---
     except requests.exceptions.HTTPError as http_err:
         logging.error(f"HTTP error occurred fetching {url}: {http_err}")
         logging.error(f"  Response Body: {response.text}")
@@ -1000,13 +1014,17 @@ if latest_run:
     # --- Overall Summary ---
     st.header("📊 Overall Run Summary")
     run_summary = fetch_run_summary(run_id)
+    st.write(f"DEBUG: run_summary value = {run_summary}") # DEBUGGING
 
     if run_summary:
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Episodes", format_metric(run_summary.get('total_episodes'), "count"))
-        col2.metric("Avg PnL", format_metric(run_summary.get('average_pnl'), "pnl"))
-        col3.metric("Avg Sharpe Ratio", format_metric(run_summary.get('average_sharpe_ratio'), "ratio"))
-        col4.metric("Avg Win Rate", format_metric(run_summary.get('average_win_rate'), "percentage"))
+        # DEBUG: Pass raw values directly to st.metric, bypassing format_metric
+        col1.metric("Total Episodes", run_summary.get('total_episodes')) # Assuming st.metric handles basic number formatting
+        col2.metric("Avg PnL", run_summary.get('average_pnl'), "$") # Use st.metric's formatting for currency
+        col3.metric("Avg Sharpe Ratio", run_summary.get('average_sharpe_ratio')) # Let st.metric handle float
+        # For win rate, we need percentage. Let's try letting st.metric handle it, assuming input is 0-100
+        # If the API returns 0-1, we'd need: run_summary.get('average_win_rate') * 100
+        col4.metric("Avg Win Rate", run_summary.get('average_win_rate'), "%") # Use st.metric's formatting for percentage
         
         # Add explanation for metrics
         with st.expander("📊 Metrics Explanation"):

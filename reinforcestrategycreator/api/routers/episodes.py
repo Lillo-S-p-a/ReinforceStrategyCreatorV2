@@ -22,6 +22,33 @@ router = APIRouter(
     # Removed router-level dependency
 )
 
+# Import the new schema
+from reinforcestrategycreator.api.schemas.episodes import EpisodeIdList
+
+@router.get("/ids", response_model=EpisodeIdList)
+async def get_all_episode_ids(
+    db: DBSession,
+    api_key: str = Depends(get_api_key), # Reuse existing dependency for consistency
+):
+    """
+    Retrieve a list of all distinct episode IDs available in the database,
+    sorted in descending order (newest first).
+    """
+    try:
+        # Query distinct episode IDs and order them descendingly
+        query = (
+            select(db_models.Episode.episode_id)
+            .distinct()
+            .order_by(db_models.Episode.episode_id.desc())
+        )
+        result = db.execute(query).scalars().all()
+
+        # Return the list within the defined schema
+        return EpisodeIdList(episode_ids=result)
+    except Exception as e:
+        # Basic error handling, can be expanded
+        print(f"Error fetching episode IDs: {e}") # Log the error server-side
+        raise HTTPException(status_code=500, detail="Internal server error fetching episode IDs")
 # Define constants for this endpoint's pagination (as per task)
 DEFAULT_OPERATIONS_PAGE_SIZE = 100
 MAX_OPERATIONS_PAGE_SIZE = 1000

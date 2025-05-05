@@ -65,6 +65,11 @@ class Trade(BaseModel):
     class Config:
         from_attributes = True
 
+from typing import List # Ensure List is imported if not already
+
+# Schema for the list of episode IDs
+class EpisodeIdList(BaseModel):
+    episode_ids: List[int]
 # Ensure PaginatedResponse is defined, e.g., in schemas/base.py or here
 # from typing import Generic, TypeVar, List
 # T = TypeVar('T')
