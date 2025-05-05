@@ -21,10 +21,25 @@ def analyze_decision_making(steps_df: pd.DataFrame) -> Dict[str, Any]:
         logging.warning(f"Missing required columns for decision analysis. Found: {steps_df.columns.tolist()}")
         return {}
     
-    # Drop rows where asset_price is NaN, as it's crucial for many metrics
-    steps_df = steps_df.dropna(subset=['asset_price'])
+    # Check how many rows have NaN asset_price
+    nan_count = steps_df['asset_price'].isna().sum()
+    total_count = len(steps_df)
+    
+    if nan_count > 0:
+        logging.info(f"Found {nan_count}/{total_count} rows with NaN asset_price values")
+        
+        if nan_count < total_count:
+            # If we have some valid values, drop only the NaN rows
+            steps_df_filtered = steps_df.dropna(subset=['asset_price'])
+            logging.info(f"Dropped {nan_count} rows with NaN asset_price, {len(steps_df_filtered)} rows remaining")
+            steps_df = steps_df_filtered
+        else:
+            # All asset_price values are NaN, log a warning but try to continue with other metrics
+            logging.warning("All asset_price values are NaN. Some metrics will be unavailable.")
+            # We'll continue with the full dataset and skip asset_price-dependent calculations
+    
     if steps_df.empty:
-        logging.warning("No valid steps data after dropping NaN asset_price.")
+        logging.warning("No valid steps data after filtering.")
         return {}
 
     analysis = {}
@@ -38,38 +53,78 @@ def analyze_decision_making(steps_df: pd.DataFrame) -> Dict[str, Any]:
     analysis['action_change_rate'] = action_change_rate
     
     # 2. Responsiveness to ASSET price movements
-    # Use asset_price for more meaningful analysis
-    asset_price_changes = steps_df['asset_price'].pct_change()
-    steps_df['asset_price_change'] = asset_price_changes
-    
-    # When asset price goes up, how often does agent buy (action 1)?
-    buy_on_up = steps_df[(steps_df['asset_price_change'] > 0.0005) & (steps_df['action_num'] == 1)].shape[0]
-    total_price_up = steps_df[steps_df['asset_price_change'] > 0.0005].shape[0]
-    analysis['buy_on_asset_price_up_rate'] = (buy_on_up / total_price_up * 100) if total_price_up > 0 else 0
-    
-    # When asset price goes down, how often does agent sell (action 2)?
-    sell_on_down = steps_df[(steps_df['asset_price_change'] < -0.0005) & (steps_df['action_num'] == 2)].shape[0]
-    total_price_down = steps_df[steps_df['asset_price_change'] < -0.0005].shape[0]
-    analysis['sell_on_asset_price_down_rate'] = (sell_on_down / total_price_down * 100) if total_price_down > 0 else 0
+    # Use asset_price for more meaningful analysis, but check if we have valid data first
+    if not steps_df['asset_price'].isna().all():
+        # Calculate price changes only on valid asset_price values
+        valid_price_df = steps_df.dropna(subset=['asset_price'])
+        asset_price_changes = valid_price_df['asset_price'].pct_change()
+        
+        # Add the changes back to the main DataFrame, matching on index
+        steps_df['asset_price_change'] = np.nan  # Initialize with NaN
+        steps_df.loc[valid_price_df.index, 'asset_price_change'] = asset_price_changes
+        
+        # When asset price goes up, how often does agent buy (action 1)?
+        valid_up_df = steps_df.dropna(subset=['asset_price_change'])
+        buy_on_up = valid_up_df[(valid_up_df['asset_price_change'] > 0.0005) & (valid_up_df['action_num'] == 1)].shape[0]
+        total_price_up = valid_up_df[valid_up_df['asset_price_change'] > 0.0005].shape[0]
+        analysis['buy_on_asset_price_up_rate'] = (buy_on_up / total_price_up * 100) if total_price_up > 0 else 0
+        
+        # When asset price goes down, how often does agent sell (action 2)?
+        sell_on_down = valid_up_df[(valid_up_df['asset_price_change'] < -0.0005) & (valid_up_df['action_num'] == 2)].shape[0]
+        total_price_down = valid_up_df[valid_up_df['asset_price_change'] < -0.0005].shape[0]
+        analysis['sell_on_asset_price_down_rate'] = (sell_on_down / total_price_down * 100) if total_price_down > 0 else 0
+    else:
+        logging.warning("Skipping asset price movement analysis due to missing asset_price data")
+        analysis['buy_on_asset_price_up_rate'] = None
+        analysis['sell_on_asset_price_down_rate'] = None
     
     # 3. Long-term trend alignment (using asset price)
     # Calculate if agent goes long (1) primarily in uptrends, short (2) in downtrends
     # Use a simple 20-period moving average on asset_price
     trend_window = 20
-    if len(steps_df) >= trend_window:
-        steps_df['asset_ma'] = steps_df['asset_price'].rolling(window=trend_window).mean()
-        steps_df['asset_uptrend'] = steps_df['asset_price'] > steps_df['asset_ma']
+    
+    # Check if we have enough data points and valid asset_price values
+    if len(steps_df) >= trend_window and not steps_df['asset_price'].isna().all():
+        # Use only rows with valid asset_price for trend calculation
+        valid_price_df = steps_df.dropna(subset=['asset_price'])
         
-        # In uptrends, agent buys (action 1)
-        buy_in_uptrend = steps_df[(steps_df['asset_uptrend']) & (steps_df['action_num'] == 1)].shape[0]
-        total_uptrend = steps_df[steps_df['asset_uptrend']].shape[0]
-        analysis['buy_in_asset_uptrend_rate'] = (buy_in_uptrend / total_uptrend * 100) if total_uptrend > 0 else 0
-        
-        # In downtrends, agent sells (action 2)
-        sell_in_downtrend = steps_df[(~steps_df['asset_uptrend']) & (steps_df['action_num'] == 2)].shape[0]
-        total_downtrend = steps_df[~steps_df['asset_uptrend']].shape[0]
-        analysis['sell_in_asset_downtrend_rate'] = (sell_in_downtrend / total_downtrend * 100) if total_downtrend > 0 else 0
+        if len(valid_price_df) >= trend_window:
+            # Calculate moving average on valid data
+            valid_price_df['asset_ma'] = valid_price_df['asset_price'].rolling(window=trend_window).mean()
+            valid_price_df['asset_uptrend'] = valid_price_df['asset_price'] > valid_price_df['asset_ma']
+            
+            # Add the trend indicators back to the main DataFrame, matching on index
+            steps_df['asset_ma'] = np.nan  # Initialize with NaN
+            steps_df['asset_uptrend'] = np.nan  # Initialize with NaN
+            steps_df.loc[valid_price_df.index, 'asset_ma'] = valid_price_df['asset_ma']
+            steps_df.loc[valid_price_df.index, 'asset_uptrend'] = valid_price_df['asset_uptrend']
+            
+            # Drop NaN values for the trend analysis
+            trend_df = steps_df.dropna(subset=['asset_uptrend'])
+            
+            if not trend_df.empty:
+                # In uptrends, agent buys (action 1)
+                buy_in_uptrend = trend_df[(trend_df['asset_uptrend']) & (trend_df['action_num'] == 1)].shape[0]
+                total_uptrend = trend_df[trend_df['asset_uptrend']].shape[0]
+                analysis['buy_in_asset_uptrend_rate'] = (buy_in_uptrend / total_uptrend * 100) if total_uptrend > 0 else 0
+                
+                # In downtrends, agent sells (action 2)
+                sell_in_downtrend = trend_df[(~trend_df['asset_uptrend']) & (trend_df['action_num'] == 2)].shape[0]
+                total_downtrend = trend_df[~trend_df['asset_uptrend']].shape[0]
+                analysis['sell_in_asset_downtrend_rate'] = (sell_in_downtrend / total_downtrend * 100) if total_downtrend > 0 else 0
+            else:
+                logging.warning("No valid trend data after filtering NaN values")
+                analysis['buy_in_asset_uptrend_rate'] = None
+                analysis['sell_in_asset_downtrend_rate'] = None
+        else:
+            logging.warning(f"Not enough valid asset_price data points for trend analysis (need {trend_window}, have {len(valid_price_df)})")
+            analysis['buy_in_asset_uptrend_rate'] = None
+            analysis['sell_in_asset_downtrend_rate'] = None
     else:
+        if len(steps_df) < trend_window:
+            logging.warning(f"Not enough data points for trend analysis (need {trend_window}, have {len(steps_df)})")
+        else:
+            logging.warning("No valid asset_price data for trend analysis")
         analysis['buy_in_asset_uptrend_rate'] = None
         analysis['sell_in_asset_downtrend_rate'] = None
 

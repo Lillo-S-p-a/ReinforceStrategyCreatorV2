@@ -1,9 +1,11 @@
-from typing import List, Optional, Annotated
+from typing import List, Optional, Annotated, Dict, Any # Added Dict, Any
+import datetime # Add datetime import
 from math import ceil
+import logging # Add logging import at the top
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from sqlalchemy import select, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, class_mapper # Added class_mapper
 
 from reinforcestrategycreator import db_models
 from reinforcestrategycreator.db_models import TradingOperation, Episode # Added Episode and TradingOperation
@@ -24,6 +26,25 @@ router = APIRouter(
 
 # Import the new schema
 from reinforcestrategycreator.api.schemas.episodes import EpisodeIdList
+
+# Helper function to convert SQLAlchemy model instance to dict
+def model_to_dict(obj):
+    if obj is None:
+        return None
+    # Get columns from the mapper
+    mapper = class_mapper(obj.__class__)
+    columns = [c.key for c in mapper.columns]
+    # Create dict using column names and getattr
+    # Convert datetime objects to ISO format strings for JSON serialization
+    d = {}
+    for c in columns:
+        val = getattr(obj, c)
+        if isinstance(val, datetime.datetime):
+             d[c] = val.isoformat()
+        else:
+             d[c] = val
+    return d
+
 
 @router.get("/ids", response_model=EpisodeIdList)
 async def get_all_episode_ids(
@@ -67,7 +88,8 @@ async def get_episode_details(
     return episode
 
 
-@router.get("/{episode_id}/steps/", response_model=schemas.PaginatedResponse[schemas.Step])
+# Change response_model to expect dict instead of schemas.Step
+@router.get("/{episode_id}/steps/", response_model=schemas.PaginatedResponse[dict])
 async def list_episode_steps(
     episode_id: Annotated[int, Path(description="The ID of the episode whose steps to retrieve")],
     db: DBSession,
@@ -87,7 +109,9 @@ async def list_episode_steps(
     limit = min(page_size, MAX_PAGE_SIZE)
     skip = (page - 1) * limit
 
+    # Select the whole Step model object
     query = select(db_models.Step).where(db_models.Step.episode_id == episode_id)
+
     count_query = select(func.count()).select_from(db_models.Step).where(db_models.Step.episode_id == episode_id)
 
     # Get total count
@@ -95,19 +119,43 @@ async def list_episode_steps(
     total_pages = ceil(total_items / limit) if total_items > 0 else 1
     current_page = (skip // limit) + 1
 
-    # Get paginated items
-    steps = db.execute(
+    # Get paginated Step model objects
+    db_steps = db.execute(
         query.order_by(db_models.Step.timestamp.asc()) # Order steps chronologically
              .offset(skip)
              .limit(limit)
-    ).scalars().all()
+    ).scalars().all() # Use scalars().all() to get model instances
+
+    # Convert SQLAlchemy objects to dictionaries
+    response_items_as_dicts = []
+    for db_row in db_steps:
+        try:
+            row_dict = model_to_dict(db_row)
+            if row_dict:
+                 # Ensure asset_price is float or None before adding to dict list
+                 if 'asset_price' in row_dict and row_dict['asset_price'] is not None:
+                     try:
+                         row_dict['asset_price'] = float(row_dict['asset_price'])
+                     except (ValueError, TypeError):
+                         row_dict['asset_price'] = None # Set to None if conversion fails
+                 response_items_as_dicts.append(row_dict)
+            else:
+                 logging.warning(f"Could not convert step object to dict: {db_row}")
+
+        except Exception as e:
+            logging.error(f"Error processing step {getattr(db_row, 'step_id', 'N/A')}: {e}", exc_info=True)
+            continue
+
+    # --- Logging the constructed dictionaries ---
+    logging.warning(f"API Endpoint: Preparing to return dict steps (first 5): {response_items_as_dicts[:5]}")
+    # --- END LOGGING ---
 
     return schemas.PaginatedResponse(
         total_items=total_items,
         total_pages=total_pages,
         current_page=current_page,
         page_size=limit,
-        items=steps
+        items=response_items_as_dicts # Return the list of dictionaries
     )
 
 
