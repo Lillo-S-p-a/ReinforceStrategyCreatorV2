@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import logging # Added
+import plotly.graph_objects as go
 # import os # No longer needed
 import requests # Added
 from typing import List, Dict, Optional, Any # Added
@@ -121,7 +122,109 @@ def fetch_episode_steps(episode_id: int) -> pd.DataFrame:
     df['reward'] = pd.to_numeric(df['reward'], errors='coerce')
     # Keep action as string as returned by API
     return df.sort_index() # Ensure chronological order
+# NOTE: This function currently fetches portfolio_value, reward, action etc.
+    # It does NOT fetch the raw asset price (e.g., 'close_price') needed for
+    # accurately plotting the price line chart requested in TASK-FE-LEAD-20250505-122900.
+    # The chart will use portfolio_value as a proxy line for now.
 
+@st.cache_data(ttl=60)
+def fetch_episode_operations(episode_id: int) -> List[Dict[str, Any]]:
+    """Fetches all trading operations for a given episode (handles pagination)."""
+    operations_list = []
+    page = 1
+    logging.info(f"Fetching operations for episode {episode_id}")
+    while True:
+        endpoint = f"/episodes/{episode_id}/operations/"
+        data = fetch_api_data(endpoint, params={"page": page, "page_size": 100}) # Use max page size
+        logging.debug(f"Raw operations data page {page} for episode {episode_id}: {data}") # DEBUG: Log raw data
+        if not data or not data.get("items"):
+            if page == 1: # Only warn if no operations found at all
+                 logging.warning(f"No operations items found in API response for episode {episode_id} on page 1.")
+                 # st.warning(f"No trading operations found for episode {episode_id}.") # Avoid cluttering UI? Log is enough.
+            break
+        operations_list.extend(data["items"])
+        if page >= data.get("total_pages", 1):
+            break
+        page += 1
+    logging.info(f"Fetched {len(operations_list)} operations for episode {episode_id}.")
+    # Convert timestamp string to datetime objects for easier plotting
+    for op in operations_list:
+        op['timestamp'] = pd.to_datetime(op['timestamp']) # Correctly indented
+    return sorted(operations_list, key=lambda x: x['timestamp']) # Correctly indented
+
+# --- Plotting Functions ---
+
+def create_price_operations_chart(steps_df: pd.DataFrame, operations: List[Dict[str, Any]]) -> tuple[go.Figure, bool]:
+    """Creates a Plotly chart showing portfolio value and trading operations. Returns figure and a boolean indicating if markers were plotted."""
+    fig = go.Figure()
+    markers_plotted = False # Initialize the flag
+
+    # 1. Add Portfolio Value Line (Using as proxy for price)
+    if not steps_df.empty and 'portfolio_value' in steps_df.columns:
+        fig.add_trace(go.Scatter(
+            x=steps_df.index,
+            y=steps_df['portfolio_value'],
+            mode='lines',
+            name='Portfolio Value (Proxy)', # Indicate it's a proxy
+            line=dict(color='blue')
+        ))
+    else:
+        logging.warning("Steps DataFrame is empty or missing 'portfolio_value', cannot plot main line.")
+        # Optionally add a placeholder or return an empty figure?
+        # For now, continue to plot markers if available.
+
+    # 2. Prepare data for markers
+    marker_data = {
+        'ENTRY_LONG': {'x': [], 'y': [], 'text': [], 'color': 'green', 'symbol': 'triangle-up', 'size': 10},
+        'EXIT_LONG': {'x': [], 'y': [], 'text': [], 'color': 'green', 'symbol': 'triangle-down', 'size': 10},
+        'ENTRY_SHORT': {'x': [], 'y': [], 'text': [], 'color': 'red', 'symbol': 'triangle-down', 'size': 10},
+        'EXIT_SHORT': {'x': [], 'y': [], 'text': [], 'color': 'red', 'symbol': 'triangle-up', 'size': 10},
+    }
+
+    for op in operations:
+        op_type = op.get('operation_type')
+        if op_type in marker_data:
+            timestamp = op.get('timestamp')
+            price = op.get('price')
+            size = op.get('size')
+            if timestamp is not None and price is not None: # Ensure data exists
+                marker_data[op_type]['x'].append(timestamp)
+                marker_data[op_type]['y'].append(price)
+                hover_text = f"Type: {op_type}<br>Price: {price:.2f}<br>Size: {size or 'N/A'}<br>Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+                marker_data[op_type]['text'].append(hover_text)
+
+    # 3. Add Marker Traces
+    for op_type, data in marker_data.items():
+        if data['x']: # Only add trace if there are markers of this type
+            markers_plotted = True # Set flag if we add any marker trace
+            fig.add_trace(go.Scatter(
+                x=data['x'],
+                y=data['y'],
+                mode='markers',
+                marker=dict(
+                    color=data['color'],
+                    symbol=data['symbol'],
+                    size=data['size']
+                ),
+                name=op_type,
+                text=data['text'],
+                hoverinfo='text' # Show only the custom text on hover
+            ))
+
+    # 4. Customize Layout
+    fig.update_layout(
+        title=f"Portfolio Value and Trading Operations",
+        xaxis_title="Time",
+        yaxis_title="Value / Price",
+        hovermode="x unified", # Show hover info for all traces at a given x
+        legend_title="Trace Type",
+        height=500 # Adjust height as needed
+    )
+
+    return fig, markers_plotted # Return the flag as well
+    # --- End of create_price_operations_chart ---
+
+# --- Helper Functions (Old - To be commented out) ---
 # --- Helper Functions (Old - To be commented out) ---
 # def load_data(file_path):
 #     """Loads the training log data."""
@@ -249,6 +352,20 @@ if latest_run:
                 st.line_chart(episode_steps_df['reward'], use_container_width=True)
                 st.caption("Reward Per Step")
 
+# --- Price/Operations Chart (Plotly) ---
+            st.subheader("Portfolio Value & Trading Operations")
+            episode_operations = fetch_episode_operations(selected_episode_id)
+
+            # Create and display the chart
+            price_ops_fig, markers_were_plotted = create_price_operations_chart(episode_steps_df, episode_operations)
+            st.plotly_chart(price_ops_fig, use_container_width=True)
+
+            # Add a note based on why markers might be missing
+            if not episode_steps_df.empty: # Only show note if price line is present
+                if not episode_operations:
+                    st.caption(f"Note: No trading operations were found/returned by the API for episode {selected_episode_id}.")
+                elif not markers_were_plotted:
+                    st.caption(f"Note: Trading operations data was found, but markers could not be plotted for episode {selected_episode_id} (check data format or logs).")
         else:
             st.warning(f"No step data found for episode {selected_episode_id}.")
 
