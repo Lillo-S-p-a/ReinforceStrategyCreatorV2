@@ -157,7 +157,7 @@ def fetch_episode_operations(episode_id: int) -> List[Dict[str, Any]]:
 def create_price_operations_chart(steps_df: pd.DataFrame, operations: List[Dict[str, Any]]) -> tuple[go.Figure, bool]:
     """Creates a Plotly chart showing portfolio value and trading operations. Returns figure and a boolean indicating if markers were plotted."""
     fig = go.Figure()
-    markers_plotted = False # Initialize the flag
+    # markers_plotted = False # Initialize the flag - Moved initialization closer to usage
 
     # 1. Add Portfolio Value Line (Using as proxy for price)
     if not steps_df.empty and 'portfolio_value' in steps_df.columns:
@@ -194,6 +194,7 @@ def create_price_operations_chart(steps_df: pd.DataFrame, operations: List[Dict[
                 marker_data[op_type]['text'].append(hover_text)
 
     # 3. Add Marker Traces
+    markers_plotted = False # Initialize right before potential assignment
     for op_type, data in marker_data.items():
         if data['x']: # Only add trace if there are markers of this type
             markers_plotted = True # Set flag if we add any marker trace

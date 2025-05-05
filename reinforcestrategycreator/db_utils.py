@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 from dotenv import load_dotenv
+from contextlib import contextmanager # <-- Add this import
 from .db_models import Base # Import Base from the models file
 
 # Load environment variables from .env file if it exists
@@ -50,6 +51,7 @@ except (ValueError, OperationalError, Exception) as e:
     engine = None
     SessionLocal = None # Ensure SessionLocal is None if engine fails
 
+@contextmanager # <-- Add this decorator
 def get_db_session():
     """
     Provides a database session.

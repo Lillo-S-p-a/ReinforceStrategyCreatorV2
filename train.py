@@ -136,161 +136,187 @@ def main():
         "env_window_size": env.window_size
     }
 
-    db = None # Initialize db session variable
-    try:
-        # Get a single session for the entire run
-        db = next(get_db_session()) # Get session from generator
-
-        # Create TrainingRun record
-        training_run = TrainingRun(
-            run_id=run_id,
-            start_time=datetime.datetime.utcnow(),
-            parameters=run_params,
-            status='running'
-        )
-        db.add(training_run)
-        # Don't commit yet, commit at the end of the run
-
-        # --- Episode Loop ---
-        for episode_num in range(TRAINING_EPISODES):
-            state, reset_info = env.reset() # Capture reset info if needed
-            initial_portfolio_value = reset_info.get('portfolio_value', env.initial_balance)
-
-            # Create Episode record for this episode
-            current_episode = Episode(
+    # Use a 'with' statement to manage the DB session lifecycle
+    with get_db_session() as db:
+        training_run = None # Initialize training_run to handle potential early exceptions
+        try:
+            # Create TrainingRun record
+            training_run = TrainingRun(
                 run_id=run_id,
-                start_time=datetime.datetime.utcnow(),
-                initial_portfolio_value=initial_portfolio_value,
-                # Other fields will be updated at the end
+                start_time=datetime.datetime.now(datetime.UTC), # Use timezone-aware UTC now
+                parameters=run_params,
+                status='running'
             )
-            db.add(current_episode)
-            db.flush() # Flush to get the episode_id assigned
-            current_episode_id = current_episode.episode_id
-            logging.debug(f"Started Episode {episode_num+1}, DB Episode ID: {current_episode_id}")
-
-            # Reshape state for the agent's Keras model (expects batch dimension)
-            state = np.reshape(state, [1, STATE_SIZE])
-            total_reward = 0.0
-            done = False
-            step_count = 0
-            episode_portfolio_values = [initial_portfolio_value] # Start with initial value for MDD calc
-            episode_step_rewards = [] # Collect step rewards for Sharpe
-
-            # --- Step Loop ---
-            while not done:
-                # Agent selects action
-                action = agent.select_action(state)
-
-                # Environment steps
-                next_state, reward, terminated, truncated, info = env.step(action)
-                done = terminated or truncated
-
-                # Reshape next_state for the agent
-                next_state = np.reshape(next_state, [1, STATE_SIZE])
-
-                # Agent remembers the transition
-                agent.remember(state, action, reward, next_state, done)
-
-                # Update state
-                state = next_state
-                total_reward += reward
-                episode_step_rewards.append(float(reward)) # Store reward for Sharpe
-                step_count += 1
-                # Store portfolio value for MDD calculation
-                if info.get('portfolio_value') is not None:
-                    episode_portfolio_values.append(info['portfolio_value'])
-
-                # Agent learns (if enough memory samples)
-                if len(agent.memory) > AGENT_BATCH_SIZE:
-                    agent.learn()
-
-                # --- Log Step Data to DB ---
-                step_time = env.df.index[info['step']] if isinstance(env.df.index, pd.DatetimeIndex) else datetime.datetime.utcnow()
-                # Map action/position ints to strings (adjust if env changes)
-                action_map = {0: 'flat', 1: 'long', 2: 'short'}
-                position_map = {0: 'flat', 1: 'long', -1: 'short'}
-                db_step = Step(
-                    episode_id=current_episode_id,
-                    timestamp=step_time,
-                    portfolio_value=info.get('portfolio_value'),
-                    reward=float(reward), # Ensure float
-                    action=action_map.get(action, str(action)), # Store string representation
-                    position=position_map.get(info.get('current_position'), str(info.get('current_position')))
-                )
-                db.add(db_step)
-
-                if done:
-                    # --- Log Completed Trades for Episode ---
-                    completed_trades = env.get_completed_trades()
-                    logging.debug(f"Episode {episode_num+1} completed. Trades: {len(completed_trades)}")
-                    for trade_data in completed_trades:
-                        db_trade = Trade(
-                            episode_id=current_episode_id,
-                            entry_time=trade_data['entry_time'],
-                            exit_time=trade_data['exit_time'],
-                            entry_price=trade_data['entry_price'],
-                            exit_price=trade_data['exit_price'],
-                            quantity=trade_data['quantity'],
-                            direction=trade_data['direction'],
-                            pnl=trade_data['pnl'],
-                            costs=trade_data['costs']
-                        )
-                        db.add(db_trade)
-
-                    # --- Update Episode Summary Metrics ---
-                    # Calculate metrics
-                    # Note: Using step rewards for Sharpe as per env reward definition
-                    sharpe = calculate_sharpe_ratio(pd.Series(episode_step_rewards))
-                    mdd = calculate_max_drawdown(episode_portfolio_values)
-                    win_rate = calculate_win_rate(completed_trades)
-                    # Trade Frequency (per episode) is simply the number of trades
-                    trade_frequency = len(completed_trades)
-                    # Success Rate (episode level)
-                    episode_pnl = info.get('portfolio_value', initial_portfolio_value) - initial_portfolio_value
-                    success_rate = 100.0 if episode_pnl > 0 else 0.0 # 100% if profitable, 0% otherwise
-
-                    current_episode.end_time = datetime.datetime.utcnow()
-                    current_episode.final_portfolio_value = info.get('portfolio_value')
-                    current_episode.pnl = episode_pnl
-                    current_episode.total_reward = total_reward
-                    current_episode.total_steps = step_count
-                    current_episode.sharpe_ratio = sharpe
-                    current_episode.max_drawdown = mdd
-                    current_episode.win_rate = win_rate
-                    # Add trade_frequency and success_rate if columns exist in Episode model
-                    # Assuming they exist based on metrics_definitions.md:
-                    # current_episode.trade_frequency = trade_frequency # Uncomment if column exists
-                    # current_episode.success_rate = success_rate # Uncomment if column exists
-
-                    logging.info(f"Episode: {episode_num+1}/{TRAINING_EPISODES}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.2f}, Steps: {step_count}, Final Portfolio: {info.get('portfolio_value', 'N/A'):.2f}")
-
-            # Commit changes at the end of each episode
+            db.add(training_run)
+            # Commit the initial run record immediately to ensure it exists even if episodes fail
             db.commit()
-            logging.debug(f"Committed DB changes for Episode {episode_num+1}")
+            db.refresh(training_run) # Refresh to get the generated ID if needed elsewhere
 
-        # --- Final Run Update ---
-        training_run.end_time = datetime.datetime.utcnow()
-        training_run.status = 'completed'
-        db.commit()
-        logging.info(f"Training finished. Run ID: {run_id}. Results logged to database.")
+            # --- Episode Loop ---
+            for episode_num in range(TRAINING_EPISODES):
+                current_episode = None # Initialize for potential early errors in episode setup
+                try:
+                    state, reset_info = env.reset() # Capture reset info if needed
+                    initial_portfolio_value = reset_info.get('portfolio_value', env.initial_balance)
 
-    except Exception as e:
-        logging.error(f"An error occurred during training or DB logging: {e}", exc_info=True)
-        if db:
-            db.rollback() # Rollback any partial changes for the run
-            # Optionally update run status to 'failed'
-            try:
-                # Need to query the run again in case the session was invalidated
-                failed_run = db.query(TrainingRun).filter(TrainingRun.run_id == run_id).first()
-                if failed_run:
-                    failed_run.status = 'failed'
-                    failed_run.end_time = datetime.datetime.utcnow()
+                    # Create Episode record for this episode
+                    current_episode = Episode(
+                        run_id=run_id, # Use run_id directly
+                        start_time=datetime.datetime.now(datetime.UTC), # Use timezone-aware UTC now
+                        initial_portfolio_value=initial_portfolio_value,
+                        # Other fields will be updated at the end
+                    )
+                    db.add(current_episode)
+                    db.flush() # Flush to get the episode_id assigned
+                    current_episode_id = current_episode.episode_id
+                    logging.debug(f"Started Episode {episode_num+1}, DB Episode ID: {current_episode_id}")
+
+                    # Reshape state for the agent's Keras model (expects batch dimension)
+                    state = np.reshape(state, [1, STATE_SIZE])
+                    total_reward = 0.0
+                    done = False
+                    step_count = 0
+                    episode_portfolio_values = [initial_portfolio_value] # Start with initial value for MDD calc
+                    episode_step_rewards = [] # Collect step rewards for Sharpe
+
+                    # --- Step Loop ---
+                    while not done:
+                        # Agent selects action
+                        action = agent.select_action(state)
+
+                        # Environment steps
+                        next_state, reward, terminated, truncated, info = env.step(action)
+                        done = terminated or truncated
+
+                        # Reshape next_state for the agent
+                        next_state = np.reshape(next_state, [1, STATE_SIZE])
+
+                        # Agent remembers the transition
+                        agent.remember(state, action, reward, next_state, done)
+
+                        # Update state
+                        state = next_state
+                        total_reward += reward
+                        episode_step_rewards.append(float(reward)) # Store reward for Sharpe
+                        step_count += 1
+                        # Store portfolio value for MDD calculation
+                        if info.get('portfolio_value') is not None:
+                            episode_portfolio_values.append(info['portfolio_value'])
+
+                        # Agent learns (if enough memory samples)
+                        if len(agent.memory) > AGENT_BATCH_SIZE:
+                            agent.learn()
+
+                        # --- Log Step Data to DB ---
+                        step_time = env.df.index[info['step']] if isinstance(env.df.index, pd.DatetimeIndex) else datetime.datetime.now(datetime.UTC) # Use timezone-aware UTC now
+                        # Map action/position ints to strings (adjust if env changes)
+                        action_map = {0: 'flat', 1: 'long', 2: 'short'}
+                        position_map = {0: 'flat', 1: 'long', -1: 'short'}
+                        db_step = Step(
+                            episode_id=current_episode_id,
+                            timestamp=step_time,
+                            portfolio_value=info.get('portfolio_value'),
+                            reward=float(reward), # Ensure float
+                            action=action_map.get(action, str(action)), # Store string representation
+                            position=position_map.get(info.get('current_position'), str(info.get('current_position')))
+                        )
+                        db.add(db_step)
+
+                        if done:
+                            # --- Log Completed Trades for Episode ---
+                            completed_trades = env.get_completed_trades()
+                            logging.debug(f"Episode {episode_num+1} completed. Trades: {len(completed_trades)}")
+                            for trade_data in completed_trades:
+                                db_trade = Trade(
+                                    episode_id=current_episode_id,
+                                    entry_time=trade_data['entry_time'],
+                                    exit_time=trade_data['exit_time'],
+                                    entry_price=trade_data['entry_price'],
+                                    exit_price=trade_data['exit_price'],
+                                    quantity=trade_data['quantity'],
+                                    direction=trade_data['direction'],
+                                    pnl=trade_data['pnl'],
+                                    costs=trade_data['costs']
+                                )
+                                db.add(db_trade)
+
+                            # --- Update Episode Summary Metrics ---
+                            # Calculate metrics
+                            # Note: Using step rewards for Sharpe as per env reward definition
+                            sharpe = calculate_sharpe_ratio(pd.Series(episode_step_rewards)) if episode_step_rewards else 0.0
+                            mdd = calculate_max_drawdown(episode_portfolio_values) if len(episode_portfolio_values) > 1 else 0.0
+                            win_rate = calculate_win_rate(completed_trades) if completed_trades else 0.0
+                            # Trade Frequency (per episode) is simply the number of trades
+                            trade_frequency = len(completed_trades)
+                            # Success Rate (episode level)
+                            episode_pnl = info.get('portfolio_value', initial_portfolio_value) - initial_portfolio_value
+                            success_rate = 100.0 if episode_pnl > 0 else 0.0 # 100% if profitable, 0% otherwise
+
+                            current_episode.end_time = datetime.datetime.now(datetime.UTC) # Use timezone-aware UTC now
+                            current_episode.final_portfolio_value = info.get('portfolio_value')
+                            current_episode.pnl = episode_pnl
+                            current_episode.total_reward = total_reward
+                            current_episode.total_steps = step_count
+                            current_episode.sharpe_ratio = sharpe
+                            current_episode.max_drawdown = mdd
+                            current_episode.win_rate = win_rate
+                            # Add trade_frequency and success_rate if columns exist in Episode model
+                            # Assuming they exist based on metrics_definitions.md:
+                            # current_episode.trade_frequency = trade_frequency # Uncomment if column exists
+                            # current_episode.success_rate = success_rate # Uncomment if column exists
+
+                            logging.info(f"Episode: {episode_num+1}/{TRAINING_EPISODES}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.2f}, Steps: {step_count}, Final Portfolio: {info.get('portfolio_value', 'N/A'):.2f}")
+
+                    # Commit changes at the end of each episode (steps, trades, episode summary)
                     db.commit()
-            except Exception as e_update:
-                 logging.error(f"Failed to update run status to 'failed': {e_update}")
-    finally:
-        if db:
-            db.close() # Ensure session is closed
+                    logging.debug(f"Committed DB changes for Episode {episode_num+1}")
+
+                except Exception as episode_err:
+                    logging.error(f"Error during Episode {episode_num+1}: {episode_err}", exc_info=True)
+                    db.rollback() # Rollback changes for the failed episode
+                    # Optionally mark the episode as failed if the record exists
+                    if current_episode and current_episode.episode_id:
+                         try:
+                             # Re-fetch in case session state is weird after rollback
+                             failed_episode = db.query(Episode).filter(Episode.episode_id == current_episode.episode_id).first()
+                             if failed_episode:
+                                 failed_episode.end_time = datetime.datetime.now(datetime.UTC)
+                                 # Add a status field to Episode model if you want to mark it 'failed'
+                                 # failed_episode.status = 'failed'
+                                 db.commit()
+                         except Exception as ep_update_err:
+                             logging.error(f"Failed to mark episode {current_episode_id} after error: {ep_update_err}")
+                             db.rollback() # Rollback again if marking failed
+                    # Continue to the next episode
+                    continue
+
+            # --- Final Run Update (after all episodes attempted) ---
+            training_run.end_time = datetime.datetime.now(datetime.UTC) # Use timezone-aware UTC now
+            training_run.status = 'completed' # Mark as completed even if some episodes failed
+            db.commit()
+            logging.info(f"Training finished. Run ID: {run_id}. Results logged to database.")
+
+        except Exception as e:
+            logging.error(f"An error occurred during training run setup or DB logging: {e}", exc_info=True)
+            # Rollback is handled automatically by the 'with' statement on exception
+            # Update status to failed if possible and if the run was initially committed
+            if training_run and training_run.run_id: # Check if training_run exists and has an ID
+                try:
+                    # The session might be in a rolled-back state, but we can try to update
+                    # Re-fetch the run to ensure we have the correct object state
+                    run_to_update = db.query(TrainingRun).filter(TrainingRun.run_id == training_run.run_id).first()
+                    if run_to_update:
+                        run_to_update.status = 'failed'
+                        run_to_update.end_time = datetime.datetime.now(datetime.UTC) # Use timezone-aware UTC now
+                        db.commit() # Try committing the failure status
+                    else:
+                        logging.warning(f"Could not find run {training_run.run_id} to mark as failed (might not have been committed initially).")
+                except Exception as update_err:
+                    logging.error(f"Failed to update run status to 'failed' after initial error: {update_err}", exc_info=True)
+                    # Rollback might happen again here if commit fails, handled by 'with' exit
+
+        # The 'with' block automatically handles db.close() or rollback on error.
+        logging.info("Database session context exited.")
 
     # Optional: Save the trained model
     # agent.save_model("spy_rl_model.keras") # Or .weights.h5
