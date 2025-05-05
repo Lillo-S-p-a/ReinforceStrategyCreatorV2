@@ -82,7 +82,7 @@ def main():
     # --- 2. Environment Setup ---
     logging.info("Initializing trading environment...")
     try:
-        env = TradingEnv(data_with_indicators, sharpe_window_size=SHARPE_WINDOW_SIZE) # Corrected class name
+        env = TradingEnv(data_with_indicators, sharpe_window_size=SHARPE_WINDOW_SIZE, transaction_fee_percent=0.001) # Corrected class name and added fee
         STATE_SIZE = env.observation_space.shape[0]
         ACTION_SIZE = env.action_space.n
         logging.info(f"Environment initialized. State size: {STATE_SIZE}, Action size: {ACTION_SIZE}")

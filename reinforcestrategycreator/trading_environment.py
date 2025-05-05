@@ -63,6 +63,11 @@ class TradingEnv(gym.Env):
         self.portfolio_value = initial_balance
         self.last_portfolio_value = initial_balance
         
+        # List to store details of completed trades
+        self._completed_trades = [] # Fix: Initialize the missing attribute
+        self._entry_price = 0.0     # Price at which the current position was entered
+        self._entry_step = 0        # Step at which the current position was entered
+        
         # Portfolio value history for Sharpe ratio calculation
         self._portfolio_value_history = deque(maxlen=sharpe_window_size)
         
@@ -117,8 +122,11 @@ class TradingEnv(gym.Env):
         self.portfolio_value = self.initial_balance
         self.last_portfolio_value = self.initial_balance
         self.current_position = 0  # Reset to Flat position
+        self._entry_price = 0.0
+        self._entry_step = 0
         
-        # Clear portfolio value history
+        # Clear trade and portfolio history
+        self._completed_trades.clear()
         self._portfolio_value_history.clear()
         
         if len(self.df) == 0:
@@ -255,14 +263,37 @@ class TradingEnv(gym.Env):
                     transaction_fee = revenue * (self.transaction_fee_percent / 100)
                     total_revenue = revenue - transaction_fee
                     
+                    # Calculate Profit/Loss for the closed long position
+                    shares_sold = self.shares_held
+                    pnl = (self.current_price - self._entry_price) * shares_sold - transaction_fee
+                    
+                    # Record completed trade
+                    entry_time = self.df.index[self._entry_step]
+                    exit_time = self.df.index[self.current_step]
+                    trade_details = {
+                        'entry_step': self._entry_step,
+                        'exit_step': self.current_step,
+                        'entry_time': entry_time,
+                        'exit_time': exit_time,
+                        'entry_price': self._entry_price,
+                        'exit_price': self.current_price,
+                        'quantity': shares_sold,         # Use 'quantity'
+                        'direction': 'long',             # Use 'direction'
+                        'pnl': pnl,                      # Use 'pnl'
+                        'costs': transaction_fee         # Use 'costs'
+                    }
+                    self._completed_trades.append(trade_details)
+                    
                     # Update balance and shares
                     self.balance += total_revenue
                     
-                    logger.debug(f"Long -> Flat: Sold {self.shares_held} shares at {self.current_price} each, "
-                               f"total revenue: {total_revenue} (after fee: {transaction_fee})")
+                    logger.debug(f"Long -> Flat: Sold {shares_sold} shares at {self.current_price} each, "
+                               f"total revenue: {total_revenue} (after fee: {transaction_fee}), PnL: {pnl}")
                     
                     self.shares_held = 0
                     self.current_position = 0
+                    self._entry_price = 0.0 # Reset entry price
+                    self._entry_step = 0   # Reset entry step
             
             elif prev_position == -1:  # Short -> Flat (Cover short position)
                 if self.shares_held < 0:
@@ -273,14 +304,37 @@ class TradingEnv(gym.Env):
                     
                     # Check if we have enough balance to cover
                     if self.balance >= total_cost:
+                        # Calculate Profit/Loss for the closed short position
+                        shares_covered = abs(self.shares_held)
+                        pnl = (self._entry_price - self.current_price) * shares_covered - transaction_fee
+                        
+                        # Record completed trade
+                        entry_time = self.df.index[self._entry_step]
+                        exit_time = self.df.index[self.current_step]
+                        trade_details = {
+                            'entry_step': self._entry_step,
+                            'exit_step': self.current_step,
+                            'entry_time': entry_time,
+                            'exit_time': exit_time,
+                            'entry_price': self._entry_price,
+                            'exit_price': self.current_price,
+                            'quantity': shares_covered,      # Use 'quantity'
+                            'direction': 'short',            # Use 'direction'
+                            'pnl': pnl,                      # Use 'pnl'
+                            'costs': transaction_fee         # Use 'costs'
+                        }
+                        self._completed_trades.append(trade_details)
+                        
                         # Update balance and shares
                         self.balance -= total_cost
                         
-                        logger.debug(f"Short -> Flat: Covered {abs(self.shares_held)} shares at {self.current_price} each, "
-                                   f"total cost: {total_cost} (including fee: {transaction_fee})")
+                        logger.debug(f"Short -> Flat: Covered {shares_covered} shares at {self.current_price} each, "
+                                   f"total cost: {total_cost} (including fee: {transaction_fee}), PnL: {pnl}")
                         
                         self.shares_held = 0
                         self.current_position = 0
+                        self._entry_price = 0.0 # Reset entry price
+                        self._entry_step = 0   # Reset entry step
                     else:
                         logger.warning(f"Insufficient funds to cover short position. Required: {total_cost}, Available: {self.balance}")
         
@@ -303,6 +357,8 @@ class TradingEnv(gym.Env):
                     self.balance -= total_cost
                     self.shares_held += shares_to_buy
                     self.current_position = 1
+                    self._entry_price = self.current_price # Record entry price
+                    self._entry_step = self.current_step   # Record entry step
                     
                     logger.debug(f"Flat -> Long: Bought {shares_to_buy} shares at {self.current_price} each, "
                                f"total cost: {total_cost} (including fee: {transaction_fee})")
@@ -317,13 +373,36 @@ class TradingEnv(gym.Env):
                     
                     # Check if we have enough balance to cover
                     if self.balance >= total_cover_cost:
+                        # Calculate Profit/Loss for the closed short position
+                        shares_covered = abs(self.shares_held)
+                        pnl = (self._entry_price - self.current_price) * shares_covered - cover_fee
+                        
+                        # Record completed trade
+                        entry_time = self.df.index[self._entry_step]
+                        exit_time = self.df.index[self.current_step]
+                        trade_details = {
+                            'entry_step': self._entry_step,
+                            'exit_step': self.current_step,
+                            'entry_time': entry_time,
+                            'exit_time': exit_time,
+                            'entry_price': self._entry_price,
+                            'exit_price': self.current_price,
+                            'quantity': shares_covered,      # Use 'quantity'
+                            'direction': 'short',            # Use 'direction'
+                            'pnl': pnl,                      # Use 'pnl'
+                            'costs': cover_fee               # Use 'costs'
+                        }
+                        self._completed_trades.append(trade_details)
+                        
                         # Update balance after covering
                         self.balance -= total_cover_cost
                         
-                        logger.debug(f"Short -> Long (Step 1): Covered {abs(self.shares_held)} shares at {self.current_price} each, "
-                                   f"total cost: {total_cover_cost} (including fee: {cover_fee})")
+                        logger.debug(f"Short -> Long (Step 1): Covered {shares_covered} shares at {self.current_price} each, "
+                                   f"total cost: {total_cover_cost} (including fee: {cover_fee}), PnL: {pnl}")
                         
                         self.shares_held = 0
+                        self._entry_price = 0.0 # Reset entry price/step after closing short
+                        self._entry_step = 0
                         
                         # Then, buy shares with remaining balance
                         max_shares_possible = self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100))
@@ -339,6 +418,8 @@ class TradingEnv(gym.Env):
                             self.balance -= total_buy_cost
                             self.shares_held += shares_to_buy
                             self.current_position = 1
+                            self._entry_price = self.current_price # Record entry price for new long position
+                            self._entry_step = self.current_step   # Record entry step for new long position
                             
                             logger.debug(f"Short -> Long (Step 2): Bought {shares_to_buy} shares at {self.current_price} each, "
                                        f"total cost: {total_buy_cost} (including fee: {buy_fee})")
@@ -367,6 +448,8 @@ class TradingEnv(gym.Env):
                     self.balance += total_proceeds
                     self.shares_held = -shares_to_short
                     self.current_position = -1
+                    self._entry_price = self.current_price # Record entry price
+                    self._entry_step = self.current_step   # Record entry step
                     
                     logger.debug(f"Flat -> Short: Sold short {shares_to_short} shares at {self.current_price} each, "
                                f"total proceeds: {total_proceeds} (after fee: {transaction_fee})")
@@ -379,13 +462,36 @@ class TradingEnv(gym.Env):
                     sell_fee = revenue * (self.transaction_fee_percent / 100)
                     total_revenue = revenue - sell_fee
                     
+                    # Calculate Profit/Loss for the closed long position
+                    shares_sold = self.shares_held
+                    pnl = (self.current_price - self._entry_price) * shares_sold - sell_fee
+                    
+                    # Record completed trade
+                    entry_time = self.df.index[self._entry_step]
+                    exit_time = self.df.index[self.current_step]
+                    trade_details = {
+                        'entry_step': self._entry_step,
+                        'exit_step': self.current_step,
+                        'entry_time': entry_time,         # Add entry timestamp
+                        'exit_time': exit_time,           # Add exit timestamp
+                        'entry_price': self._entry_price,
+                        'exit_price': self.current_price,
+                        'quantity': shares_sold,         # Use 'quantity'
+                        'direction': 'long',             # Use 'direction'
+                        'pnl': pnl,                      # Use 'pnl'
+                        'costs': sell_fee                # Use 'costs'
+                    }
+                    self._completed_trades.append(trade_details)
+                    
                     # Update balance after selling
                     self.balance += total_revenue
                     
-                    logger.debug(f"Long -> Short (Step 1): Sold {self.shares_held} shares at {self.current_price} each, "
-                               f"total revenue: {total_revenue} (after fee: {sell_fee})")
+                    logger.debug(f"Long -> Short (Step 1): Sold {shares_sold} shares at {self.current_price} each, "
+                               f"total revenue: {total_revenue} (after fee: {sell_fee}), PnL: {pnl}")
                     
                     self.shares_held = 0
+                    self._entry_price = 0.0 # Reset entry price/step after closing long
+                    self._entry_step = 0
                     
                     # Then, short shares
                     # Calculate shares based on what could be bought (mirroring long logic for simplicity)
@@ -402,6 +508,8 @@ class TradingEnv(gym.Env):
                         self.balance += total_proceeds
                         self.shares_held = -shares_to_short
                         self.current_position = -1
+                        self._entry_price = self.current_price # Record entry price for new short position
+                        self._entry_step = self.current_step   # Record entry step for new short position
                         
                         logger.debug(f"Long -> Short (Step 2): Sold short {shares_to_short} shares at {self.current_price} each, "
                                    f"total proceeds: {total_proceeds} (after fee: {short_fee})")
