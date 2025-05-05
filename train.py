@@ -226,6 +226,7 @@ def main():
                             timestamp=step_time,
                             portfolio_value=info.get('portfolio_value'),
                             reward=float(reward), # Ensure float
+                            asset_price=info.get('current_price'), # <-- ADDED THIS LINE
                             action=action_map.get(action, str(action)), # Store string representation
                             position=position_map.get(current_position, str(current_position))
                         )

@@ -2,9 +2,10 @@ import requests
 import logging
 import pandas as pd
 from typing import List, Dict, Optional, Any
+import numpy as np
 
 # --- Configuration ---
-API_BASE_URL = "http://127.0.0.1:8001/api/v1"
+API_BASE_URL = "http://127.0.0.1:8000/api/v1"
 API_KEY = "test-key-123"
 API_HEADERS = {"X-API-Key": API_KEY}
 
@@ -93,6 +94,10 @@ def fetch_episode_steps(episode_id: int) -> pd.DataFrame:
     if not steps_list:
         return pd.DataFrame()
 
+    # --- ADDED LOGGING ---
+    logging.info(f"Raw steps_list received (first 5 items): {steps_list[:5]}")
+    # --- END LOGGING ---
+
     df = pd.DataFrame(steps_list)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.set_index('timestamp')
@@ -102,9 +107,35 @@ def fetch_episode_steps(episode_id: int) -> pd.DataFrame:
     action_string_map = {'flat': 0, 'long': 1, 'short': 2}
     df['action'] = df['action'].map(action_string_map).fillna(-1).astype(int) # Map and handle potential unknowns, ensure integer type
     
-    # Also ensure reward and portfolio_value are numeric (already present, but good practice)
+    # Ensure numeric types for key columns
     df['portfolio_value'] = pd.to_numeric(df['portfolio_value'], errors='coerce')
     df['reward'] = pd.to_numeric(df['reward'], errors='coerce')
+    # Include asset_price if available from API
+    if 'asset_price' in df.columns:
+        # Log the raw asset_price values for debugging
+        logging.info(f"Raw asset_price values (first 5): {df['asset_price'].head().tolist()}")
+        
+        # First, replace None/null values with NaN so they're properly identified
+        df['asset_price'] = df['asset_price'].replace([None], np.nan)
+        
+        # Convert to numeric, but fill NaN values with forward fill, then backward fill
+        # This ensures we have valid numeric values where possible
+        df['asset_price'] = pd.to_numeric(df['asset_price'], errors='coerce')
+        
+        # Log how many NaN values we have after conversion
+        nan_count = df['asset_price'].isna().sum()
+        total_count = len(df['asset_price'])
+        logging.info(f"After numeric conversion: {nan_count}/{total_count} NaN values in asset_price")
+        
+        if nan_count > 0 and nan_count < total_count:
+            # If we have some valid values, use forward/backward fill to interpolate missing values
+            df['asset_price'] = df['asset_price'].ffill().bfill()
+            logging.info(f"Applied forward/backward fill to asset_price column")
+        elif nan_count == total_count:
+            logging.warning("All asset_price values are NaN after conversion")
+    else:
+        logging.warning("asset_price column not found in API response for episode steps.")
+        df['asset_price'] = np.nan # Add column with NaN if missing
 
     return df.sort_index()
 
