@@ -83,10 +83,13 @@ def init_db(engine_instance=None):
 
     print("Attempting to create database tables...")
     try:
-        Base.metadata.create_all(bind=engine_instance)
-        print("Database tables created successfully (if they didn't exist).")
+        print("Dropping existing tables (if any)...")
+        Base.metadata.drop_all(bind=engine_instance) # Drop tables first
+        print("Creating tables based on current models...")
+        Base.metadata.create_all(bind=engine_instance) # Recreate tables with new schema
+        print("Database tables dropped and recreated successfully.")
     except Exception as e:
-        print(f"Error creating database tables: {e}")
+        print(f"Error dropping/creating database tables: {e}")
         raise
 
 # Example usage (e.g., in a main script or setup utility)

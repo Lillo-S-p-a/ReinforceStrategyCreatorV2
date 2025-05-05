@@ -15,117 +15,187 @@ def analyze_decision_making(steps_df: pd.DataFrame) -> Dict[str, Any]:
     3. Ability to capture trends
     4. Decision timing
     """
-    if steps_df.empty or 'action' not in steps_df.columns or 'portfolio_value' not in steps_df.columns:
+    # Check for required columns, including the new asset_price
+    required_cols = ['action', 'portfolio_value', 'asset_price', 'reward']
+    if steps_df.empty or not all(col in steps_df.columns for col in required_cols):
+        logging.warning(f"Missing required columns for decision analysis. Found: {steps_df.columns.tolist()}")
         return {}
     
+    # Drop rows where asset_price is NaN, as it's crucial for many metrics
+    steps_df = steps_df.dropna(subset=['asset_price'])
+    if steps_df.empty:
+        logging.warning("No valid steps data after dropping NaN asset_price.")
+        return {}
+
     analysis = {}
     
+    # Action codes: 0=flat, 1=long, 2=short
+    steps_df['action_num'] = pd.to_numeric(steps_df['action'], errors='coerce') # Already mapped in api.py, but coerce just in case
+
     # 1. Action consistency - how often does the model change actions?
-    # Ensure action is numeric for diff calculation
-    steps_df['action_num'] = pd.to_numeric(steps_df['action'], errors='coerce')
-    steps_df['action_change'] = steps_df['action_num'].diff().abs() > 0
+    steps_df['action_change'] = steps_df['action_num'].diff().fillna(0).abs() > 0 # fillna(0) for first row
     action_change_rate = steps_df['action_change'].mean() * 100
     analysis['action_change_rate'] = action_change_rate
     
-    # 2. Responsiveness to price movements
-    price_changes = steps_df['portfolio_value'].pct_change()
-    steps_df['price_change'] = price_changes
+    # 2. Responsiveness to ASSET price movements
+    # Use asset_price for more meaningful analysis
+    asset_price_changes = steps_df['asset_price'].pct_change()
+    steps_df['asset_price_change'] = asset_price_changes
     
-    # When price goes up, how often does agent buy?
-    buy_on_up = steps_df[(steps_df['price_change'] > 0.0005) & (steps_df['action'] == '1')].shape[0]
-    total_price_up = steps_df[steps_df['price_change'] > 0.0005].shape[0]
-    analysis['buy_on_price_up_rate'] = (buy_on_up / total_price_up * 100) if total_price_up > 0 else 0
+    # When asset price goes up, how often does agent buy (action 1)?
+    buy_on_up = steps_df[(steps_df['asset_price_change'] > 0.0005) & (steps_df['action_num'] == 1)].shape[0]
+    total_price_up = steps_df[steps_df['asset_price_change'] > 0.0005].shape[0]
+    analysis['buy_on_asset_price_up_rate'] = (buy_on_up / total_price_up * 100) if total_price_up > 0 else 0
     
-    # When price goes down, how often does agent sell?
-    sell_on_down = steps_df[(steps_df['price_change'] < -0.0005) & (steps_df['action'] == '2')].shape[0]
-    total_price_down = steps_df[steps_df['price_change'] < -0.0005].shape[0]
-    analysis['sell_on_price_down_rate'] = (sell_on_down / total_price_down * 100) if total_price_down > 0 else 0
+    # When asset price goes down, how often does agent sell (action 2)?
+    sell_on_down = steps_df[(steps_df['asset_price_change'] < -0.0005) & (steps_df['action_num'] == 2)].shape[0]
+    total_price_down = steps_df[steps_df['asset_price_change'] < -0.0005].shape[0]
+    analysis['sell_on_asset_price_down_rate'] = (sell_on_down / total_price_down * 100) if total_price_down > 0 else 0
     
-    # 3. Long-term trend alignment
-    # Calculate if agent goes long primarily in uptrends
-    # Use a simple 20-period moving average to determine trend
-    if len(steps_df) >= 20:
-        steps_df['ma20'] = steps_df['portfolio_value'].rolling(window=20).mean()
-        steps_df['uptrend'] = steps_df['portfolio_value'] > steps_df['ma20']
+    # 3. Long-term trend alignment (using asset price)
+    # Calculate if agent goes long (1) primarily in uptrends, short (2) in downtrends
+    # Use a simple 20-period moving average on asset_price
+    trend_window = 20
+    if len(steps_df) >= trend_window:
+        steps_df['asset_ma'] = steps_df['asset_price'].rolling(window=trend_window).mean()
+        steps_df['asset_uptrend'] = steps_df['asset_price'] > steps_df['asset_ma']
         
-        # In uptrends, agent buys
-        buy_in_uptrend = steps_df[(steps_df['uptrend']) & (steps_df['action'] == '1')].shape[0]
-        total_uptrend = steps_df[steps_df['uptrend']].shape[0]
-        analysis['buy_in_uptrend_rate'] = (buy_in_uptrend / total_uptrend * 100) if total_uptrend > 0 else 0
+        # In uptrends, agent buys (action 1)
+        buy_in_uptrend = steps_df[(steps_df['asset_uptrend']) & (steps_df['action_num'] == 1)].shape[0]
+        total_uptrend = steps_df[steps_df['asset_uptrend']].shape[0]
+        analysis['buy_in_asset_uptrend_rate'] = (buy_in_uptrend / total_uptrend * 100) if total_uptrend > 0 else 0
         
-        # In downtrends, agent sells
-        sell_in_downtrend = steps_df[(~steps_df['uptrend']) & (steps_df['action'] == '2')].shape[0]
-        total_downtrend = steps_df[~steps_df['uptrend']].shape[0]
-        analysis['sell_in_downtrend_rate'] = (sell_in_downtrend / total_downtrend * 100) if total_downtrend > 0 else 0
-    
-    # 4. Decision timing
-    # Correlate actions with future returns to assess if decisions were timely
-    if len(steps_df) > 5:
-        # Calculate future returns (5 steps ahead)
-        steps_df['future_return'] = steps_df['portfolio_value'].pct_change(periods=5).shift(-5)
+        # In downtrends, agent sells (action 2)
+        sell_in_downtrend = steps_df[(~steps_df['asset_uptrend']) & (steps_df['action_num'] == 2)].shape[0]
+        total_downtrend = steps_df[~steps_df['asset_uptrend']].shape[0]
+        analysis['sell_in_asset_downtrend_rate'] = (sell_in_downtrend / total_downtrend * 100) if total_downtrend > 0 else 0
+    else:
+        analysis['buy_in_asset_uptrend_rate'] = None
+        analysis['sell_in_asset_downtrend_rate'] = None
+
+    # 4. Decision timing (using portfolio value for future return)
+    # Correlate actions with future PORTFOLIO returns to assess if decisions were profitable
+    future_return_period = 5
+    if len(steps_df) > future_return_period:
+        steps_df['future_portfolio_return'] = steps_df['portfolio_value'].pct_change(periods=future_return_period).shift(-future_return_period)
         
-        # Correlation between action and future return
-        action_future_corr = steps_df['action_num'].corr(steps_df['future_return'])
-        analysis['action_future_return_correlation'] = action_future_corr
-    
-    # 5. Clustering decision contexts (advanced)
-    if len(steps_df) >= 50 and 'portfolio_value' in steps_df.columns and 'action' in steps_df.columns:
+        # Correlation between action (0, 1, 2) and future portfolio return
+        # Ensure future_portfolio_return is numeric and handle NaNs
+        valid_corr_data = steps_df[['action_num', 'future_portfolio_return']].dropna()
+        if not valid_corr_data.empty and len(valid_corr_data) > 1:
+             action_future_corr = valid_corr_data['action_num'].corr(valid_corr_data['future_portfolio_return'])
+             analysis['action_future_return_correlation'] = action_future_corr
+        else:
+             analysis['action_future_return_correlation'] = None
+    else:
+        analysis['action_future_return_correlation'] = None
+
+    # 5. Clustering decision contexts (using asset price features)
+    cluster_features = ['asset_price', 'asset_price_change', 'action_num']
+    if len(steps_df) >= 50 and all(col in steps_df.columns for col in cluster_features):
         try:
-            # Create features for clustering
-            features = pd.DataFrame({
-                'price': steps_df['portfolio_value'],
-                'price_change': steps_df['price_change'].fillna(0),
-                'action': pd.to_numeric(steps_df['action'], errors='coerce')
-            })
-            
-            # Standardize features
-            scaler = StandardScaler()
-            features_scaled = scaler.fit_transform(features.fillna(0))
-            
-            # Cluster into decision groups (3 clusters)
-            kmeans = KMeans(n_clusters=3, random_state=42)
-            clusters = kmeans.fit_predict(features_scaled)
-            
-            # Analyze clusters
-            steps_df['cluster'] = clusters
-            cluster_stats = steps_df.groupby('cluster').agg({
-                'portfolio_value': 'mean',
-                'price_change': 'mean', 
-                'action': lambda x: x.mode()[0] if not x.mode().empty else 'unknown',
-                'reward': 'mean'
-            }).reset_index()
-            
-            # Find best and worst clusters based on reward
-            best_cluster = cluster_stats.loc[cluster_stats['reward'].idxmax()]
-            worst_cluster = cluster_stats.loc[cluster_stats['reward'].idxmin()]
-            
-            analysis['best_decision_context'] = {
-                'cluster_id': int(best_cluster['cluster']),
-                'avg_price': float(best_cluster['portfolio_value']),
-                'avg_price_change': float(best_cluster['price_change']),
-                'typical_action': str(best_cluster['action']),
-                'avg_reward': float(best_cluster['reward'])
-            }
-            
-            analysis['worst_decision_context'] = {
-                'cluster_id': int(worst_cluster['cluster']),
-                'avg_price': float(worst_cluster['portfolio_value']),
-                'avg_price_change': float(worst_cluster['price_change']),
-                'typical_action': str(worst_cluster['action']),
-                'avg_reward': float(worst_cluster['reward'])
-            }
-            
-            # Calculate cluster distributions
-            cluster_counts = steps_df['cluster'].value_counts(normalize=True) * 100
-            analysis['decision_context_distribution'] = {
-                f"cluster_{i}": float(cluster_counts.get(i, 0)) for i in range(3)
-            }
-            
+            # Create features for clustering, handle NaNs
+            features_df = steps_df[cluster_features].copy()
+            features_df['asset_price_change'] = features_df['asset_price_change'].fillna(0) # Fill NaN price change (e.g., first step)
+            features_df = features_df.dropna() # Drop rows if asset_price or action is NaN
+
+            if not features_df.empty:
+                # Standardize features
+                scaler = StandardScaler()
+                features_scaled = scaler.fit_transform(features_df)
+                
+                # Cluster into decision groups (e.g., 3 clusters)
+                n_clusters = 3
+                kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10) # Set n_init explicitly
+                clusters = kmeans.fit_predict(features_scaled)
+                
+                # Add cluster labels back to the original DataFrame (handle index alignment)
+                features_df['cluster'] = clusters
+                steps_df['cluster'] = features_df['cluster'] # Assign based on index
+
+                # Analyze clusters (using steps_df which includes reward)
+                cluster_stats = steps_df.dropna(subset=['cluster']).groupby('cluster').agg(
+                    avg_asset_price=('asset_price', 'mean'),
+                    avg_asset_price_change=('asset_price_change', 'mean'),
+                    typical_action=('action_num', lambda x: x.mode()[0] if not x.mode().empty else -1), # Use action_num
+                    avg_reward=('reward', 'mean'),
+                    count=('cluster', 'size') # Add count for context
+                ).reset_index()
+
+                # Map typical_action back to string for readability if needed (0:flat, 1:long, 2:short)
+                action_map_rev = {0: 'flat', 1: 'long', 2: 'short', -1: 'unknown'}
+                cluster_stats['typical_action_str'] = cluster_stats['typical_action'].map(action_map_rev)
+
+                if not cluster_stats.empty:
+                    # Find best and worst clusters based on reward
+                    best_cluster = cluster_stats.loc[cluster_stats['avg_reward'].idxmax()]
+                    worst_cluster = cluster_stats.loc[cluster_stats['avg_reward'].idxmin()]
+                    
+                    analysis['best_decision_context'] = {
+                        'cluster_id': int(best_cluster['cluster']),
+                        'avg_asset_price': float(best_cluster['avg_asset_price']),
+                        'avg_asset_price_change': float(best_cluster['avg_asset_price_change']),
+                        'typical_action': str(best_cluster['typical_action_str']), # Use mapped string
+                        'avg_reward': float(best_cluster['avg_reward']),
+                        'count': int(best_cluster['count'])
+                    }
+                    
+                    analysis['worst_decision_context'] = {
+                        'cluster_id': int(worst_cluster['cluster']),
+                        'avg_asset_price': float(worst_cluster['avg_asset_price']),
+                        'avg_asset_price_change': float(worst_cluster['avg_asset_price_change']),
+                        'typical_action': str(worst_cluster['typical_action_str']), # Use mapped string
+                        'avg_reward': float(worst_cluster['avg_reward']),
+                        'count': int(worst_cluster['count'])
+                    }
+                    
+                    # Calculate cluster distributions
+                    cluster_counts = steps_df['cluster'].value_counts(normalize=True) * 100
+                    analysis['decision_context_distribution'] = {
+                        f"cluster_{i}": float(cluster_counts.get(i, 0)) for i in range(n_clusters)
+                    }
+                else:
+                     analysis['best_decision_context'] = None
+                     analysis['worst_decision_context'] = None
+                     analysis['decision_context_distribution'] = None
+
+            else: # features_df was empty after dropna
+                analysis['best_decision_context'] = None
+                analysis['worst_decision_context'] = None
+                analysis['decision_context_distribution'] = None
+
         except Exception as e:
-            logging.error(f"Error in clustering analysis: {e}")
-            # Skip clustering if it fails
-            pass
-    
+            logging.error(f"Error in clustering analysis: {e}", exc_info=True)
+            analysis['best_decision_context'] = None
+            analysis['worst_decision_context'] = None
+            analysis['decision_context_distribution'] = None
+            pass # Skip clustering if it fails
+
+    # 6. New Metrics (Proposed)
+    # Reward Volatility
+    if 'reward' in steps_df.columns and not steps_df['reward'].isnull().all():
+         analysis['reward_volatility'] = steps_df['reward'].std()
+    else:
+         analysis['reward_volatility'] = None
+
+    # Consecutive Action Analysis
+    if 'action_num' in steps_df.columns:
+        steps_df['action_block'] = (steps_df['action_num'].diff() != 0).cumsum()
+        action_streaks = steps_df.groupby('action_block')['action_num'].agg(['first', 'size'])
+        analysis['avg_consecutive_action_duration'] = action_streaks['size'].mean()
+        # Avg duration per action type
+        avg_duration_per_action = action_streaks.groupby('first')['size'].mean().to_dict()
+        analysis['avg_consecutive_duration_per_action'] = {
+            action_map_rev.get(k, 'unknown'): v for k, v in avg_duration_per_action.items()
+        }
+
+    # Reward per Action Type
+    if 'reward' in steps_df.columns and 'action_num' in steps_df.columns:
+         reward_by_action = steps_df.groupby('action_num')['reward'].mean().to_dict()
+         analysis['avg_reward_per_action'] = {
+             action_map_rev.get(k, 'unknown'): v for k, v in reward_by_action.items()
+         }
+
     return analysis
 
 def analyze_why_episode_performed(

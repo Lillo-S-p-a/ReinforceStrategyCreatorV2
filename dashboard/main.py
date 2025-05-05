@@ -198,21 +198,129 @@ def main():
                     if decision_analysis:
                         st.subheader("Decision Making Patterns")
                         
-                        # Action consistency
-                        st.write(f"**Action Change Rate:** {decision_analysis.get('action_change_rate', 0):.2f}% - How often the agent changes its action")
+                        # General Metrics Section - Using st.metric for better visualization
+                        metrics_col1, metrics_col2 = st.columns(2)
                         
-                        # Price responsiveness
-                        st.write(f"**Buy on Price Up Rate:** {decision_analysis.get('buy_on_price_up_rate', 0):.2f}% - How often the agent buys when price is rising")
-                        st.write(f"**Sell on Price Down Rate:** {decision_analysis.get('sell_on_price_down_rate', 0):.2f}% - How often the agent sells when price is falling")
+                        with metrics_col1:
+                            # Action consistency
+                            st.metric(
+                                label="Action Change Rate",
+                                value=f"{decision_analysis.get('action_change_rate', 0):.1f}%",
+                                help="How often the agent changes its action"
+                            )
+                            
+                            # Price responsiveness
+                            st.metric(
+                                label="Buy on Asset Price Up Rate",
+                                value=f"{decision_analysis.get('buy_on_asset_price_up_rate', 0):.1f}%",
+                                help="How often the agent buys when asset price is rising"
+                            )
+                            
+                            # Trend alignment
+                            if 'buy_in_asset_uptrend_rate' in decision_analysis:
+                                st.metric(
+                                    label="Buy in Uptrend Rate",
+                                    value=f"{decision_analysis.get('buy_in_asset_uptrend_rate', 0):.1f}%",
+                                    help="How often the agent buys during uptrends"
+                                )
                         
-                        # Trend alignment
-                        if 'buy_in_uptrend_rate' in decision_analysis:
-                            st.write(f"**Buy in Uptrend Rate:** {decision_analysis.get('buy_in_uptrend_rate', 0):.2f}% - How often the agent buys during uptrends")
-                            st.write(f"**Sell in Downtrend Rate:** {decision_analysis.get('sell_in_downtrend_rate', 0):.2f}% - How often the agent sells during downtrends")
+                        with metrics_col2:
+                            # Decision timing
+                            if 'action_future_return_correlation' in decision_analysis:
+                                st.metric(
+                                    label="Action-Future Return Correlation",
+                                    value=f"{decision_analysis.get('action_future_return_correlation', 0):.3f}",
+                                    help="How well actions correlate with future returns (higher is better)"
+                                )
+                            
+                            # Price responsiveness
+                            st.metric(
+                                label="Sell on Price Down Rate",
+                                value=f"{decision_analysis.get('sell_on_asset_price_down_rate', 0):.1f}%",
+                                help="How often the agent sells when price is falling"
+                            )
+                            
+                            # Trend alignment
+                            if 'sell_in_asset_downtrend_rate' in decision_analysis:
+                                st.metric(
+                                    label="Sell in Downtrend Rate",
+                                    value=f"{decision_analysis.get('sell_in_asset_downtrend_rate', 0):.1f}%",
+                                    help="How often the agent sells during downtrends"
+                                )
                         
-                        # Decision timing
-                        if 'action_future_return_correlation' in decision_analysis:
-                            st.write(f"**Action-Future Return Correlation:** {decision_analysis.get('action_future_return_correlation', 0):.3f} - How well actions correlate with future returns")
+                        # New metrics
+                        new_metrics_col1, new_metrics_col2 = st.columns(2)
+                        
+                        with new_metrics_col1:
+                            # Reward volatility
+                            st.metric(
+                                label="Reward Volatility",
+                                value=f"{decision_analysis.get('reward_volatility', 0):.4f}",
+                                help="Standard deviation of rewards (lower indicates more consistent performance)"
+                            )
+                        
+                        with new_metrics_col2:
+                            # Average consecutive action duration
+                            st.metric(
+                                label="Avg Consecutive Action Duration",
+                                value=f"{decision_analysis.get('avg_consecutive_action_duration', 0):.1f} steps",
+                                help="Average number of steps the agent maintains the same action"
+                            )
+                        
+                        # Per-Action Metrics Section
+                        st.subheader("Metrics per Action")
+                        
+                        # Display avg_consecutive_duration_per_action
+                        st.write("**Average Duration per Action Type:**")
+                        duration_per_action = decision_analysis.get('avg_consecutive_duration_per_action', {})
+                        flat_col, long_col, short_col = st.columns(3)
+                        
+                        with flat_col:
+                            st.metric(
+                                label="Flat (Hold)",
+                                value=f"{duration_per_action.get('flat', 0):.1f} steps",
+                                help="Average steps maintaining flat/hold position"
+                            )
+                        
+                        with long_col:
+                            st.metric(
+                                label="Long (Buy)",
+                                value=f"{duration_per_action.get('long', 0):.1f} steps",
+                                help="Average steps maintaining long/buy position"
+                            )
+                        
+                        with short_col:
+                            st.metric(
+                                label="Short (Sell)",
+                                value=f"{duration_per_action.get('short', 0):.1f} steps",
+                                help="Average steps maintaining short/sell position"
+                            )
+                        
+                        # Display avg_reward_per_action
+                        st.write("**Average Reward per Action Type:**")
+                        reward_per_action = decision_analysis.get('avg_reward_per_action', {})
+                        flat_col, long_col, short_col = st.columns(3)
+                        
+                        with flat_col:
+                            st.metric(
+                                label="Flat (Hold)",
+                                value=f"{reward_per_action.get('flat', 0):.4f}",
+                                help="Average reward when taking flat/hold action"
+                            )
+                        
+                        with long_col:
+                            st.metric(
+                                label="Long (Buy)",
+                                value=f"{reward_per_action.get('long', 0):.4f}",
+                                help="Average reward when taking long/buy action"
+                            )
+                        
+                        with short_col:
+                            st.metric(
+                                label="Short (Sell)",
+                                value=f"{reward_per_action.get('short', 0):.4f}",
+                                help="Average reward when taking short/sell action"
+                            )
                         
                         # Decision contexts
                         if 'best_decision_context' in decision_analysis and 'worst_decision_context' in decision_analysis:
@@ -220,21 +328,62 @@ def main():
                             
                             context_col1, context_col2 = st.columns(2)
                             
+                            # Get context data
+                            best = decision_analysis['best_decision_context']
+                            worst = decision_analysis['worst_decision_context']
+                            
+                            # Calculate delta for reward comparison
+                            best_reward = best.get('avg_reward', 0)
+                            worst_reward = worst.get('avg_reward', 0)
+                            reward_delta = best_reward - worst_reward
+                            
                             with context_col1:
                                 st.write("**Best Decision Context:**")
-                                best = decision_analysis['best_decision_context']
-                                st.write(f"- Typical Action: {best.get('typical_action')}")
-                                st.write(f"- Avg Price: {best.get('avg_price', 0):.2f}")
-                                st.write(f"- Avg Price Change: {best.get('avg_price_change', 0)*100:.2f}%")
-                                st.write(f"- Avg Reward: {best.get('avg_reward', 0):.4f}")
+                                
+                                # Display typical action with clear explanation
+                                st.write(f"**Typical Action:** {best.get('typical_action', 'unknown')}",
+                                         help="Most common action: flat=hold, long=buy, short=sell")
+                                
+                                # Use st.metric for numerical values
+                                st.metric(
+                                    label="Avg Price",
+                                    value=f"{best.get('avg_asset_price', 0):.2f}"
+                                )
+                                
+                                st.metric(
+                                    label="Avg Price Change",
+                                    value=f"{best.get('avg_asset_price_change', 0)*100:.2f}%"
+                                )
+                                
+                                st.metric(
+                                    label="Avg Reward",
+                                    value=f"{best_reward:.4f}"
+                                )
                             
                             with context_col2:
                                 st.write("**Worst Decision Context:**")
-                                worst = decision_analysis['worst_decision_context']
-                                st.write(f"- Typical Action: {worst.get('typical_action')}")
-                                st.write(f"- Avg Price: {worst.get('avg_price', 0):.2f}")
-                                st.write(f"- Avg Price Change: {worst.get('avg_price_change', 0)*100:.2f}%")
-                                st.write(f"- Avg Reward: {worst.get('avg_reward', 0):.4f}")
+                                
+                                # Display typical action with clear explanation
+                                st.write(f"**Typical Action:** {worst.get('typical_action', 'unknown')}",
+                                         help="Most common action: flat=hold, long=buy, short=sell")
+                                
+                                # Use st.metric for numerical values
+                                st.metric(
+                                    label="Avg Price",
+                                    value=f"{worst.get('avg_asset_price', 0):.2f}"
+                                )
+                                
+                                st.metric(
+                                    label="Avg Price Change",
+                                    value=f"{worst.get('avg_asset_price_change', 0)*100:.2f}%"
+                                )
+                                
+                                st.metric(
+                                    label="Avg Reward",
+                                    value=f"{worst_reward:.4f}",
+                                    delta=f"{-reward_delta:.4f}",
+                                    delta_color="inverse"
+                                )
                     else:
                         st.info("Insufficient data for decision analysis.")
                 

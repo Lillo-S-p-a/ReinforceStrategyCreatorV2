@@ -46,6 +46,7 @@ class Step(BaseModel):
     reward: float | None = None
     action: str | None = None
     position: str | None = None
+    asset_price: float | None = None # Added as per TASK-API-20250505-212200
 
     class Config:
         from_attributes = True

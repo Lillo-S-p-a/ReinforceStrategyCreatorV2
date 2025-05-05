@@ -73,6 +73,7 @@ class Step(Base):
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     portfolio_value = Column(Float)
     reward = Column(Float)
+    asset_price = Column(Float, nullable=True) # Price of the underlying asset at this step
     action = Column(String)  # e.g., 'buy', 'sell', 'hold'
     position = Column(String)  # e.g., 'long', 'short', 'flat'
     # Add other step-level details if necessary
