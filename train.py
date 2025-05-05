@@ -1,4 +1,4 @@
-# train.py
+# train_fix.py
 import numpy as np
 import pandas as pd
 import logging
@@ -10,7 +10,7 @@ from reinforcestrategycreator.technical_analyzer import calculate_indicators # C
 from reinforcestrategycreator.trading_environment import TradingEnv # Corrected import
 from reinforcestrategycreator.rl_agent import StrategyAgent
 from reinforcestrategycreator.db_utils import get_db_session, SessionLocal # Import session management
-from reinforcestrategycreator.db_models import TrainingRun, Episode, Step, Trade # Import DB models
+from reinforcestrategycreator.db_models import TrainingRun, Episode, Step, Trade, TradingOperation, OperationType # Import DB models
 from reinforcestrategycreator.metrics_calculator import (
     calculate_sharpe_ratio, calculate_max_drawdown, calculate_win_rate
 )
@@ -178,6 +178,9 @@ def main():
                     step_count = 0
                     episode_portfolio_values = [initial_portfolio_value] # Start with initial value for MDD calc
                     episode_step_rewards = [] # Collect step rewards for Sharpe
+                    
+                    # Track previous position for detecting changes
+                    prev_position = 0  # Start with flat position (0)
 
                     # --- Step Loop ---
                     while not done:
@@ -212,15 +215,85 @@ def main():
                         # Map action/position ints to strings (adjust if env changes)
                         action_map = {0: 'flat', 1: 'long', 2: 'short'}
                         position_map = {0: 'flat', 1: 'long', -1: 'short'}
+                        
+                        # Get current position
+                        current_position = info.get('current_position', 0)
+                        
+                        # Create Step record
                         db_step = Step(
                             episode_id=current_episode_id,
                             timestamp=step_time,
                             portfolio_value=info.get('portfolio_value'),
                             reward=float(reward), # Ensure float
                             action=action_map.get(action, str(action)), # Store string representation
-                            position=position_map.get(info.get('current_position'), str(info.get('current_position')))
+                            position=position_map.get(current_position, str(current_position))
                         )
                         db.add(db_step)
+                        db.flush()  # Flush to get the step_id
+                        
+                        # --- NEW CODE: Log TradingOperation if position changed ---
+                        # Check if position changed
+                        if current_position != prev_position:
+                            # Determine operation type based on position transition
+                            operation_type = None
+                            
+                            if prev_position == 0 and current_position == 1:
+                                # Flat to Long
+                                operation_type = OperationType.ENTRY_LONG
+                            elif prev_position == 0 and current_position == -1:
+                                # Flat to Short
+                                operation_type = OperationType.ENTRY_SHORT
+                            elif prev_position == 1 and current_position == 0:
+                                # Long to Flat
+                                operation_type = OperationType.EXIT_LONG
+                            elif prev_position == -1 and current_position == 0:
+                                # Short to Flat
+                                operation_type = OperationType.EXIT_SHORT
+                            elif prev_position == 1 and current_position == -1:
+                                # Long to Short (two operations)
+                                # First, exit long
+                                exit_long_op = TradingOperation(
+                                    step_id=db_step.step_id,
+                                    episode_id=current_episode_id,
+                                    timestamp=step_time,
+                                    operation_type=OperationType.EXIT_LONG,
+                                    size=abs(info.get('shares_held', 0)),  # Use actual shares if available
+                                    price=info.get('current_price', 0.0)  # Use actual price if available
+                                )
+                                db.add(exit_long_op)
+                                
+                                # Then, enter short
+                                operation_type = OperationType.ENTRY_SHORT
+                            elif prev_position == -1 and current_position == 1:
+                                # Short to Long (two operations)
+                                # First, exit short
+                                exit_short_op = TradingOperation(
+                                    step_id=db_step.step_id,
+                                    episode_id=current_episode_id,
+                                    timestamp=step_time,
+                                    operation_type=OperationType.EXIT_SHORT,
+                                    size=abs(info.get('shares_held', 0)),  # Use actual shares if available
+                                    price=info.get('current_price', 0.0)  # Use actual price if available
+                                )
+                                db.add(exit_short_op)
+                                
+                                # Then, enter long
+                                operation_type = OperationType.ENTRY_LONG
+                            
+                            # Create the trading operation if an operation type was determined
+                            if operation_type:
+                                trading_op = TradingOperation(
+                                    step_id=db_step.step_id,
+                                    episode_id=current_episode_id,
+                                    timestamp=step_time,
+                                    operation_type=operation_type,
+                                    size=abs(info.get('shares_held', 0)),  # Use actual shares if available
+                                    price=info.get('current_price', 0.0)  # Use actual price if available
+                                )
+                                db.add(trading_op)
+                            
+                            # Update previous position for next iteration
+                            prev_position = current_position
 
                         if done:
                             # --- Log Completed Trades for Episode ---
