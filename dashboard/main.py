@@ -153,12 +153,12 @@ def main():
             if selected_episode_id:
                 selected_episode = episodes_df.loc[episodes_df['episode_id'] == selected_episode_id].iloc[0]
                 
-                # Fetch episode data
+                # Fetch episode data (excluding model_data for now)
                 steps_df = fetch_episode_steps(selected_episode_id)
                 trades = fetch_episode_trades(selected_episode_id)
                 operations = fetch_episode_operations(selected_episode_id)
-                model_data = fetch_episode_model(selected_episode_id)
-                
+                # model_data = fetch_episode_model(selected_episode_id) # Removed from here
+
                 # Calculate additional metrics
                 additional_metrics = calculate_additional_metrics(steps_df, trades)
                 
@@ -258,15 +258,12 @@ def main():
                         st.info("No trades found for this episode.")
                 
                 # Model Analysis
-                # Add logging to check model_data before rendering this section
-                logging.info(f"Preparing Model Analysis section for episode {selected_episode_id}. Model data available: {bool(model_data)}")
-                if model_data:
-                    logging.info(f"Model data keys for episode {selected_episode_id}: {list(model_data.keys())}")
-
+                # Fetch model_data immediately before this section
+                model_data = fetch_episode_model(selected_episode_id)
                 # Move the 'if model_data' check outside the expander
                 if model_data:
                     with st.expander("🧠 Model Analysis", expanded=False):
-                        # Add episode ID to subheader for clarity
+                        # Add episode ID to subheader for clarity (Keep this for clarity)
                         st.subheader(f"Model Parameters (Episode {selected_episode_id})")
 
                         model_col1, model_col2 = st.columns(2)
@@ -293,7 +290,8 @@ def main():
 
                         with model_col2:
                             # Display radar chart
-                            fig_radar = create_model_parameter_radar(model_data, template=plot_template)
+                            st.subheader("Parameter Profile") # Add subheader for radar
+                            fig_radar = create_model_parameter_radar(model_data, selected_episode_id, template=plot_template) # Pass episode_id
                             st.plotly_chart(fig_radar, use_container_width=True)
 
                         # Feature extractors
@@ -301,24 +299,24 @@ def main():
                             st.subheader("Feature Extractors")
                             st.write(", ".join(model_data['feature_extractors']))
 
-                        # Save model button (Temporarily commented out for debugging reactivity)
-                        # if st.button("Save Model to Production"):
-                        #     # Combine episode metrics with additional metrics
-                        #     metrics = {
-                        #         'pnl': selected_episode.get('pnl'),
-                        #         'win_rate': selected_episode.get('win_rate'),
-                        #         'sharpe_ratio': selected_episode.get('sharpe_ratio'),
-                        #         'max_drawdown': selected_episode.get('max_drawdown'),
-                        #         'sortino_ratio': additional_metrics.get('sortino_ratio'),
-                        #         'calmar_ratio': additional_metrics.get('calmar_ratio'),
-                        #         'volatility': additional_metrics.get('volatility')
-                        #     }
-                        #
-                        #     saved_path = save_model_to_production(selected_episode_id, run_id, model_data, metrics)
-                        #     if saved_path:
-                        #         st.success(f"Model saved to production: {saved_path}")
-                        #     else:
-                        #         st.error("Failed to save model to production.")
+                        # Save model button
+                        if st.button("Save Model to Production"):
+                            # Combine episode metrics with additional metrics
+                            metrics = {
+                                'pnl': selected_episode.get('pnl'),
+                                'win_rate': selected_episode.get('win_rate'),
+                                'sharpe_ratio': selected_episode.get('sharpe_ratio'),
+                                'max_drawdown': selected_episode.get('max_drawdown'),
+                                'sortino_ratio': additional_metrics.get('sortino_ratio'),
+                                'calmar_ratio': additional_metrics.get('calmar_ratio'),
+                                'volatility': additional_metrics.get('volatility')
+                            }
+
+                            saved_path = save_model_to_production(selected_episode_id, run_id, model_data, metrics)
+                            if saved_path:
+                                st.success(f"Model saved to production: {saved_path}")
+                            else:
+                                st.error("Failed to save model to production.")
                 # This else corresponds to the outer 'if model_data:' check
                 else:
                     st.info(f"No model data available for episode {selected_episode_id}.")
