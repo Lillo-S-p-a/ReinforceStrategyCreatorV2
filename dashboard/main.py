@@ -285,10 +285,29 @@ def main():
                         model_col1, model_col2 = st.columns(2)
                         
                         with model_col1:
-                            # Display model parameters
-                            for param, value in model_data.items():
-                                if param not in ['episode_id', 'feature_extractors']:
-                                    st.write(f"**{param}:** {value}")
+                            st.subheader("Parameters") # Add a subheader for clarity
+                            # Attempt to extract hyperparameters, default to empty dict if not found
+                            hyperparams = model_data.get('hyperparameters', {})
+                            # Also include simple top-level params if any exist, excluding known complex/ID fields
+                            simple_params = {
+                                k: v for k, v in model_data.items()
+                                if k not in ['episode_id', 'feature_extractors', 'hyperparameters'] and not isinstance(v, (list, dict))
+                            }
+                            # Combine them, giving priority to hyperparameters if keys overlap (though unlikely)
+                            params_to_display = {**simple_params, **hyperparams}
+
+                            if params_to_display:
+                                # Filter out any remaining complex types just in case
+                                params_to_display_filtered = {
+                                    k: v for k, v in params_to_display.items() if not isinstance(v, (list, dict))
+                                }
+                                if params_to_display_filtered:
+                                    params_df = pd.DataFrame(list(params_to_display_filtered.items()), columns=['Parameter', 'Value'])
+                                    st.dataframe(params_df, use_container_width=True, hide_index=True)
+                                else:
+                                     st.info("No simple or hyperparameter parameters found to display.")
+                            else:
+                                st.info("No parameters found in model data.")
                         
                         with model_col2:
                             # Display radar chart

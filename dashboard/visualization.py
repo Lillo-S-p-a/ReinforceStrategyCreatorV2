@@ -291,10 +291,26 @@ def create_model_parameter_radar(model_data: Dict[str, Any], template="plotly_da
         "memory_size": 20000
     }
     
+    # Attempt to get hyperparameters, default to empty dict if not present
+    hyperparams = model_data.get('hyperparameters', {})
+
     for param, max_val in max_values.items():
-        if param in model_data:
-            # Normalize to 0-1 scale
-            params[param] = min(model_data[param] / max_val, 1.0)
+        # Check in hyperparameters first, then top-level model_data
+        value = hyperparams.get(param, model_data.get(param))
+
+        if value is not None:
+            # Ensure value is numeric and max_val is not zero
+            if isinstance(value, (int, float)) and max_val != 0:
+                # Normalize to 0-1 scale, handle potential negative values if needed
+                normalized_value = max(0, float(value)) / float(max_val) # Ensure float division and non-negative
+                params[param] = min(normalized_value, 1.0) # Cap at 1.0
+            else:
+                logging.warning(f"Skipping non-numeric or invalid parameter '{param}' with value '{value}' for radar chart.")
+                params[param] = 0 # Default to 0 if invalid or non-numeric
+        else:
+             # Parameter not found in either location
+             logging.warning(f"Parameter '{param}' not found in model_data or hyperparameters for radar chart.")
+             params[param] = 0 # Default to 0 if not found
     
     # Create radar chart data
     fig = go.Figure()
