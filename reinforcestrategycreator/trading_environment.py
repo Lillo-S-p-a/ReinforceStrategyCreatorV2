@@ -35,10 +35,12 @@ class TradingEnv(gym.Env):
     def __init__(self, df: pd.DataFrame, initial_balance: float = 10000.0, transaction_fee_percent: float = 0.1,
                  window_size: int = 5, sharpe_window_size: int = 20, use_sharpe_ratio: bool = True,
                  trading_frequency_penalty: float = 0.01, drawdown_penalty: float = 0.1,
-                 risk_free_rate: float = 0.0):
+                 risk_free_rate: float = 0.0,
+                 stop_loss_pct: Optional[float] = None, take_profit_pct: Optional[float] = None,
+                 position_sizing_method: str = "fixed_fractional", risk_fraction: float = 0.1):
         """
         Initialize the trading environment.
-        
+
         Args:
             df (pd.DataFrame): Historical market data for simulation, including pre-calculated technical indicators.
                                Assumes the DataFrame already contains indicator columns calculated by
@@ -51,9 +53,17 @@ class TradingEnv(gym.Env):
             trading_frequency_penalty (float): Weight for the trading frequency penalty (default: 0.01).
             drawdown_penalty (float): Weight for the drawdown penalty (default: 0.1).
             risk_free_rate (float): Risk-free rate for Sharpe ratio calculation (default: 0.0).
+            stop_loss_pct (Optional[float]): Percentage below entry price to trigger stop-loss for long positions
+                                             (or above for short positions). None to disable. (default: None).
+            take_profit_pct (Optional[float]): Percentage above entry price to trigger take-profit for long positions
+                                               (or below for short positions). None to disable. (default: None).
+            position_sizing_method (str): Method for calculating position size ('fixed_fractional' or 'all_in').
+                                          (default: "fixed_fractional").
+            risk_fraction (float): Fraction of balance to risk per trade when using 'fixed_fractional' sizing.
+                                   (default: 0.1, meaning 10%).
         """
         super(TradingEnv, self).__init__()
-        
+
         self.df = df
         self.initial_balance = initial_balance
         self.transaction_fee_percent = transaction_fee_percent
@@ -63,7 +73,11 @@ class TradingEnv(gym.Env):
         self.trading_frequency_penalty = trading_frequency_penalty
         self.drawdown_penalty = drawdown_penalty
         self.risk_free_rate = risk_free_rate
-        
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.position_sizing_method = position_sizing_method
+        self.risk_fraction = risk_fraction
+
         # Placeholder for current step in the environment
         self.current_step = 0
         
@@ -231,21 +245,61 @@ class TradingEnv(gym.Env):
         # Get the current price from the dataframe
         self.current_price = self.df.iloc[self.current_step]['close']
         
-        # Execute the trading action
+        # --- Risk Management Checks (SL/TP) ---
+        original_action = action
+        sl_triggered = False
+        tp_triggered = False
+
+        if self.current_position != 0 and self._entry_price > 0: # Check if in a position and entry price is valid
+            if self.current_position == 1: # Long position checks
+                # Stop-Loss Check
+                if self.stop_loss_pct is not None:
+                    sl_price = self._entry_price * (1 - self.stop_loss_pct / 100)
+                    if self.current_price <= sl_price:
+                        action = 0 # Force Flat action
+                        sl_triggered = True
+                        logger.info(f"Step {self.current_step}: Stop-Loss triggered for LONG position at price {self.current_price:.2f} (Entry: {self._entry_price:.2f}, SL: {sl_price:.2f})")
+
+                # Take-Profit Check (only if SL wasn't triggered)
+                if not sl_triggered and self.take_profit_pct is not None:
+                    tp_price = self._entry_price * (1 + self.take_profit_pct / 100)
+                    if self.current_price >= tp_price:
+                        action = 0 # Force Flat action
+                        tp_triggered = True
+                        logger.info(f"Step {self.current_step}: Take-Profit triggered for LONG position at price {self.current_price:.2f} (Entry: {self._entry_price:.2f}, TP: {tp_price:.2f})")
+
+            elif self.current_position == -1: # Short position checks
+                # Stop-Loss Check
+                if self.stop_loss_pct is not None:
+                    sl_price = self._entry_price * (1 + self.stop_loss_pct / 100)
+                    if self.current_price >= sl_price:
+                        action = 0 # Force Flat action
+                        sl_triggered = True
+                        logger.info(f"Step {self.current_step}: Stop-Loss triggered for SHORT position at price {self.current_price:.2f} (Entry: {self._entry_price:.2f}, SL: {sl_price:.2f})")
+
+                # Take-Profit Check (only if SL wasn't triggered)
+                if not sl_triggered and self.take_profit_pct is not None:
+                    tp_price = self._entry_price * (1 - self.take_profit_pct / 100)
+                    if self.current_price <= tp_price:
+                        action = 0 # Force Flat action
+                        tp_triggered = True
+                        logger.info(f"Step {self.current_step}: Take-Profit triggered for SHORT position at price {self.current_price:.2f} (Entry: {self._entry_price:.2f}, TP: {tp_price:.2f})")
+
+        # --- Execute Trade Action (potentially overridden by SL/TP) ---
         self._execute_trade_action(action)
-        
+
         # Calculate the current portfolio value
         self.portfolio_value = self.balance + self.shares_held * self.current_price
-        
+
         # Add current portfolio value to history for Sharpe ratio calculation
         self._portfolio_value_history.append(self.portfolio_value)
-        
-        # Calculate reward as the Sharpe ratio
+
+        # Calculate reward
         reward = self._calculate_reward()
-        
+
         # Get the new observation
         observation = self._get_observation()
-        
+
         # Prepare info dictionary
         info = {
             'balance': self.balance,
@@ -253,15 +307,19 @@ class TradingEnv(gym.Env):
             'current_price': self.current_price,
             'portfolio_value': self.portfolio_value,
             'current_position': self.current_position,
-            'step': self.current_step
+            'step': self.current_step,
+            'action_taken': action, # Actual action taken (could be overridden)
+            'original_action': original_action, # Agent's intended action
+            'sl_triggered': sl_triggered,
+            'tp_triggered': tp_triggered
         }
-        
+
         terminated = done
         truncated = False
-        
-        logger.debug(f"Step {self.current_step}: action={action}, reward={reward}, done={done}")
+
+        logger.debug(f"Step {self.current_step}: action={action}, reward={reward:.4f}, done={done}, SL={sl_triggered}, TP={tp_triggered}")
         return observation, reward, terminated, truncated, info
-    
+
     def _execute_trade_action(self, action: int) -> None:
         """
         Execute the specified trading action.
@@ -363,19 +421,29 @@ class TradingEnv(gym.Env):
         
         elif action == 1:  # Long
             if prev_position == 0:  # Flat -> Long (Buy shares)
-                # Calculate maximum shares that can be bought
-                max_shares_possible = self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100))
-                
-                # Buy all possible shares (simplified approach)
-                shares_to_buy = int(max_shares_possible)
-                
+                # --- Position Sizing ---
+                if self.position_sizing_method == "fixed_fractional":
+                    target_position_value = self.balance * self.risk_fraction
+                    shares_to_buy = int(target_position_value / self.current_price)
+                    logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_buy}")
+                else: # Default to 'all_in' or handle other methods
+                    # Calculate maximum shares that can be bought (original 'all_in' logic)
+                    max_shares_possible = self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100))
+                    shares_to_buy = int(max_shares_possible)
+                    logger.debug(f"Position Sizing (All In): Max Shares={shares_to_buy}")
+
+                # Ensure we don't try to buy more than we can afford after fees
+                cost_per_share_with_fee = self.current_price * (1 + self.transaction_fee_percent / 100)
+                affordable_shares = int(self.balance / cost_per_share_with_fee)
+                shares_to_buy = min(shares_to_buy, affordable_shares) # Take the minimum
+
                 # Check if we can buy at least 1 share
                 if shares_to_buy > 0:
                     # Calculate the cost including fees
                     cost = shares_to_buy * self.current_price
                     transaction_fee = cost * (self.transaction_fee_percent / 100)
                     total_cost = cost + transaction_fee
-                    
+
                     # Update balance and shares
                     self.balance -= total_cost
                     self.shares_held += shares_to_buy
@@ -384,10 +452,12 @@ class TradingEnv(gym.Env):
                     self._entry_step = self.current_step   # Record entry step
                     trade_occurred = True
                     self._trade_count += 1
-                    
-                    logger.debug(f"Flat -> Long: Bought {shares_to_buy} shares at {self.current_price} each, "
-                               f"total cost: {total_cost} (including fee: {transaction_fee})")
-            
+
+                    logger.debug(f"Flat -> Long: Bought {shares_to_buy} shares at {self.current_price:.2f} each, "
+                               f"total cost: {total_cost:.2f} (including fee: {transaction_fee:.2f})")
+                else:
+                    logger.debug("Flat -> Long: Cannot buy shares (insufficient funds or zero shares calculated).")
+
             elif prev_position == -1:  # Short -> Long (Cover short and then buy)
                 # First, cover the short position
                 if self.shares_held < 0:
@@ -429,16 +499,27 @@ class TradingEnv(gym.Env):
                         self._entry_price = 0.0 # Reset entry price/step after closing short
                         self._entry_step = 0
                         
-                        # Then, buy shares with remaining balance
-                        max_shares_possible = self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100))
-                        shares_to_buy = int(max_shares_possible)
-                        
+                        # Then, buy shares with remaining balance using position sizing
+                        if self.position_sizing_method == "fixed_fractional":
+                            target_position_value = self.balance * self.risk_fraction
+                            shares_to_buy = int(target_position_value / self.current_price)
+                            logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_buy}")
+                        else: # Default to 'all_in'
+                            max_shares_possible = self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100))
+                            shares_to_buy = int(max_shares_possible)
+                            logger.debug(f"Position Sizing (All In): Max Shares={shares_to_buy}")
+
+                        # Ensure affordability
+                        cost_per_share_with_fee = self.current_price * (1 + self.transaction_fee_percent / 100)
+                        affordable_shares = int(self.balance / cost_per_share_with_fee)
+                        shares_to_buy = min(shares_to_buy, affordable_shares)
+
                         if shares_to_buy > 0:
                             # Calculate the cost including fees
                             buy_cost = shares_to_buy * self.current_price
                             buy_fee = buy_cost * (self.transaction_fee_percent / 100)
                             total_buy_cost = buy_cost + buy_fee
-                            
+
                             # Update balance and shares
                             self.balance -= total_buy_cost
                             self.shares_held += shares_to_buy
@@ -447,42 +528,51 @@ class TradingEnv(gym.Env):
                             self._entry_step = self.current_step   # Record entry step for new long position
                             trade_occurred = True
                             self._trade_count += 1
-                            
-                            logger.debug(f"Short -> Long (Step 2): Bought {shares_to_buy} shares at {self.current_price} each, "
-                                       f"total cost: {total_buy_cost} (including fee: {buy_fee})")
+
+                            logger.debug(f"Short -> Long (Step 2): Bought {shares_to_buy} shares at {self.current_price:.2f} each, "
+                                       f"total cost: {total_buy_cost:.2f} (including fee: {buy_fee:.2f})")
                         else:
                             # If we can't buy any shares after covering, we're just flat
                             self.current_position = 0
-                            logger.debug("Short -> Long: Covered short position but insufficient funds to go long")
+                            logger.debug("Short -> Long: Covered short position but insufficient funds/shares to go long.")
                     else:
-                        logger.warning(f"Insufficient funds to cover short position. Required: {total_cover_cost}, Available: {self.balance}")
-        
+                        logger.warning(f"Insufficient funds to cover short position. Required: {total_cover_cost:.2f}, Available: {self.balance:.2f}")
+
         elif action == 2:  # Short
             if prev_position == 0:  # Flat -> Short (Sell short)
-                # Calculate number of shares to short (similar to buying, but we're selling shares we don't own)
-                # Use a similar approach to buying, but for shorting
-                # Calculate shares based on what could be bought (mirroring long logic for simplicity)
-                buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
-                shares_to_short = buyable_shares # Short the same amount we could buy
-                
-                if shares_to_short > 0:
+                # --- Position Sizing ---
+                if self.position_sizing_method == "fixed_fractional":
+                    # For shorting, the 'value' is based on the potential proceeds
+                    target_position_value = self.balance * self.risk_fraction # Use balance as proxy for capital base
+                    shares_to_short = int(target_position_value / self.current_price)
+                    logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_short}")
+                else: # Default to 'all_in'
+                    # Mirroring long logic for simplicity: short the amount we *could* buy
+                    buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
+                    shares_to_short = buyable_shares
+                    logger.debug(f"Position Sizing (All In): Max Shares={shares_to_short}")
+
+                # Basic check: Ensure we have some balance to act as margin (simplistic)
+                if shares_to_short > 0 and self.balance > 0:
                     # Calculate the proceeds from shorting
                     proceeds = shares_to_short * self.current_price
                     transaction_fee = proceeds * (self.transaction_fee_percent / 100)
                     total_proceeds = proceeds - transaction_fee
-                    
+
                     # Update balance and shares (negative shares for short)
-                    self.balance += total_proceeds
+                    self.balance += total_proceeds # Add proceeds (margin increases)
                     self.shares_held = -shares_to_short
                     self.current_position = -1
                     self._entry_price = self.current_price # Record entry price
                     self._entry_step = self.current_step   # Record entry step
                     trade_occurred = True
                     self._trade_count += 1
-                    
-                    logger.debug(f"Flat -> Short: Sold short {shares_to_short} shares at {self.current_price} each, "
-                               f"total proceeds: {total_proceeds} (after fee: {transaction_fee})")
-            
+
+                    logger.debug(f"Flat -> Short: Sold short {shares_to_short} shares at {self.current_price:.2f} each, "
+                               f"total proceeds: {total_proceeds:.2f} (after fee: {transaction_fee:.2f})")
+                else:
+                     logger.debug("Flat -> Short: Cannot short shares (zero shares calculated or zero balance).")
+
             elif prev_position == 1:  # Long -> Short (Sell all shares and then short)
                 # First, sell all long shares
                 if self.shares_held > 0:
@@ -522,31 +612,38 @@ class TradingEnv(gym.Env):
                     self._entry_price = 0.0 # Reset entry price/step after closing long
                     self._entry_step = 0
                     
-                    # Then, short shares
-                    # Calculate shares based on what could be bought (mirroring long logic for simplicity)
-                    buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
-                    shares_to_short = buyable_shares # Short the same amount we could buy
-                    
-                    if shares_to_short > 0:
+                    # Then, short shares using position sizing
+                    if self.position_sizing_method == "fixed_fractional":
+                        target_position_value = self.balance * self.risk_fraction
+                        shares_to_short = int(target_position_value / self.current_price)
+                        logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_short}")
+                    else: # Default to 'all_in'
+                        buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
+                        shares_to_short = buyable_shares
+                        logger.debug(f"Position Sizing (All In): Max Shares={shares_to_short}")
+
+                    if shares_to_short > 0 and self.balance > 0:
                         # Calculate the proceeds from shorting
                         proceeds = shares_to_short * self.current_price
                         short_fee = proceeds * (self.transaction_fee_percent / 100)
                         total_proceeds = proceeds - short_fee
-                        
+
                         # Update balance and shares
                         self.balance += total_proceeds
                         self.shares_held = -shares_to_short
                         self.current_position = -1
                         self._entry_price = self.current_price # Record entry price for new short position
                         self._entry_step = self.current_step   # Record entry step for new short position
-                        
-                        logger.debug(f"Long -> Short (Step 2): Sold short {shares_to_short} shares at {self.current_price} each, "
-                                   f"total proceeds: {total_proceeds} (after fee: {short_fee})")
+                        trade_occurred = True # Mark trade occurred for short entry
+                        self._trade_count += 1 # Increment trade count for short entry
+
+                        logger.debug(f"Long -> Short (Step 2): Sold short {shares_to_short} shares at {self.current_price:.2f} each, "
+                                   f"total proceeds: {total_proceeds:.2f} (after fee: {short_fee:.2f})")
                     else:
                         # If we can't short any shares after selling, we're just flat
                         self.current_position = 0
-                        logger.debug("Long -> Short: Sold long position but couldn't establish short position")
-    
+                        logger.debug("Long -> Short: Sold long position but couldn't establish short position (zero shares or balance).")
+
     def _calculate_reward(self) -> float:
         """
         Calculate the reward based on risk-adjusted returns, trading frequency, and drawdowns.

@@ -482,3 +482,172 @@ def test_close(env):
     """Test that close method runs without errors."""
     # This should not raise an exception
     env.close()
+# --- Tests for Risk Management Features ---
+
+@pytest.fixture
+def env_with_risk_mgmt(test_df, initial_balance):
+    """Create an environment with SL/TP and fixed fractional sizing enabled."""
+    return TradingEnv(
+        test_df,
+        initial_balance,
+        window_size=5,
+        stop_loss_pct=5.0,  # 5% Stop Loss
+        take_profit_pct=10.0, # 10% Take Profit
+        position_sizing_method="fixed_fractional",
+        risk_fraction=0.2 # Risk 20% of capital per trade
+    )
+
+def test_stop_loss_trigger_long(env_with_risk_mgmt, test_df):
+    """Test that stop-loss triggers correctly for a long position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go long at step 0 (price 102.0)
+    env.step(1)
+    assert env.current_position == 1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    sl_price = entry_price * (1 - env.stop_loss_pct / 100) # 103 * 0.95 = 97.85
+
+    # Modify the DataFrame to force a price drop below SL
+    # Find the index corresponding to the next step
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 97.0 # Price drops below SL (97.85)
+
+    # Take a step (agent tries to stay long, action=1)
+    _, _, _, _, info = env.step(1)
+
+    # Assert that SL triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is True
+    assert info['tp_triggered'] is False
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_take_profit_trigger_long(env_with_risk_mgmt, test_df):
+    """Test that take-profit triggers correctly for a long position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go long at step 0 (price 102.0)
+    env.step(1)
+    assert env.current_position == 1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    tp_price = entry_price * (1 + env.take_profit_pct / 100) # 103 * 1.10 = 113.3
+
+    # Modify the DataFrame to force a price rise above TP
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 114.0 # Price rises above TP (113.3)
+
+    # Take a step (agent tries to stay long, action=1)
+    _, _, _, _, info = env.step(1)
+
+    # Assert that TP triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is False
+    assert info['tp_triggered'] is True
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_stop_loss_trigger_short(env_with_risk_mgmt, test_df):
+    """Test that stop-loss triggers correctly for a short position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go short at step 0 (price 102.0)
+    env.step(2)
+    assert env.current_position == -1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    sl_price = entry_price * (1 + env.stop_loss_pct / 100) # 103 * 1.05 = 108.15
+
+    # Modify the DataFrame to force a price rise above SL
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 109.0 # Price rises above SL (108.15)
+
+    # Take a step (agent tries to stay short, action=2)
+    _, _, _, _, info = env.step(2)
+
+    # Assert that SL triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is True
+    assert info['tp_triggered'] is False
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_take_profit_trigger_short(env_with_risk_mgmt, test_df):
+    """Test that take-profit triggers correctly for a short position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go short at step 0 (price 102.0)
+    env.step(2)
+    assert env.current_position == -1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    tp_price = entry_price * (1 - env.take_profit_pct / 100) # 103 * 0.90 = 92.7
+
+    # Modify the DataFrame to force a price drop below TP
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 92.0 # Price drops below TP (92.7)
+
+    # Take a step (agent tries to stay short, action=2)
+    _, _, _, _, info = env.step(2)
+
+    # Assert that TP triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is False
+    assert info['tp_triggered'] is True
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_fixed_fractional_position_sizing_long(env_with_risk_mgmt):
+    """Test fixed fractional position sizing for a long entry."""
+    env = env_with_risk_mgmt
+    env.reset()
+    initial_balance = env.initial_balance # 10000
+    risk_fraction = env.risk_fraction     # 0.2
+    # Price at step 0 is 102.0, but trade executes at step 1 price
+    execution_price = env.df.iloc[1]['close'] # 103.0
+
+    # Expected calculation based on execution price
+    target_value = initial_balance * risk_fraction # 10000 * 0.2 = 2000
+    expected_shares = int(target_value / execution_price) # int(2000 / 103.0) = 19
+
+    # Take long action
+    env.step(1) # Executes trade at price 103.0
+
+    assert env.current_position == 1
+    assert env.shares_held == expected_shares # Should buy 19 shares
+
+    # Verify balance reduction (cost + fee) using execution_price
+    cost = expected_shares * execution_price
+    fee = cost * (env.transaction_fee_percent / 100)
+    expected_balance = initial_balance - (cost + fee) # 10000 - (19 * 103 + fee) = 8041.043
+    assert pytest.approx(env.balance) == expected_balance
+
+def test_fixed_fractional_position_sizing_short(env_with_risk_mgmt):
+    """Test fixed fractional position sizing for a short entry."""
+    env = env_with_risk_mgmt
+    env.reset()
+    initial_balance = env.initial_balance # 10000
+    risk_fraction = env.risk_fraction     # 0.2
+    # Price at step 0 is 102.0, but trade executes at step 1 price
+    execution_price = env.df.iloc[1]['close'] # 103.0
+
+    # Expected calculation (based on balance as capital base and execution price)
+    target_value = initial_balance * risk_fraction # 10000 * 0.2 = 2000
+    expected_shares = int(target_value / execution_price) # int(2000 / 103.0) = 19
+
+    # Take short action
+    env.step(2) # Executes trade at price 103.0
+
+    assert env.current_position == -1
+    assert env.shares_held == -expected_shares # Should short 19 shares
+
+    # Verify balance increase (proceeds - fee) using execution_price
+    proceeds = expected_shares * execution_price
+    fee = proceeds * (env.transaction_fee_percent / 100)
+    expected_balance = initial_balance + (proceeds - fee) # 10000 + (19 * 103 - fee) = 11955.043
+    assert pytest.approx(env.balance) == expected_balance
