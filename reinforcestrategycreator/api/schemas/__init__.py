@@ -17,6 +17,7 @@ from .metrics import (
     DataType # Expose TypeVar if needed elsewhere, good practice
 )
 
+from .operations import TradingOperationRead
 __all__ = [
     "StepBase",
     "Step",
@@ -31,4 +32,5 @@ __all__ = [
     "EpisodeSummary",
     "PaginatedResponse",
     "DataType",
+    "TradingOperationRead",
 ]

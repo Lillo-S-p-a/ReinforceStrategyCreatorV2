@@ -25,6 +25,7 @@ uvicorn = {extras = ["standard"], version = "^0.34.2"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
+ruff = "^0.4.4" # Added for linting and formatting
 
 [build-system]
 requires = ["poetry-core"]
