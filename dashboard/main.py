@@ -92,7 +92,8 @@ def main():
         # --- Overall Summary ---
         st.header("📊 Run Summary")
         summary = fetch_run_summary(run_id)
-        
+        # st.write(f"DEBUG [main.py]: summary value = {summary}") # DEBUGGING REMOVED
+
         if summary:
             with st.expander("📊 Metrics Explanation"):
                 st.markdown("""
@@ -105,18 +106,26 @@ def main():
                 """)
             
             col1, col2, col3, col4 = st.columns(4)
+            # FIX: Use correct keys from API response
             with col1:
-                st.metric("Total PnL", format_metric(summary.get('pnl'), "pnl"))
-                st.metric("Win Rate", format_metric(summary.get('win_rate'), "percentage"))
+                # Use 'average_pnl' instead of 'pnl'
+                st.metric("Avg PnL", format_metric(summary.get('average_pnl'), "pnl"))
+                # Use 'average_win_rate' instead of 'win_rate'
+                st.metric("Avg Win Rate", format_metric(summary.get('average_win_rate'), "percentage"))
             with col2:
-                st.metric("Sharpe Ratio", format_metric(summary.get('sharpe_ratio'), "ratio"))
-                st.metric("Max Drawdown", format_metric(summary.get('max_drawdown'), "percentage"))
+                # Use 'average_sharpe_ratio' instead of 'sharpe_ratio'
+                st.metric("Avg Sharpe Ratio", format_metric(summary.get('average_sharpe_ratio'), "ratio"))
+                 # Use 'average_max_drawdown' instead of 'max_drawdown'
+                st.metric("Avg Max Drawdown", format_metric(summary.get('average_max_drawdown'), "percentage"))
             with col3:
-                st.metric("Total Trades", format_metric(summary.get('total_trades'), "count"))
-                st.metric("Avg Trade PnL", format_metric(summary.get('avg_trade_pnl'), "pnl"))
+                 # API provides 'total_episodes', not 'total_trades'
+                st.metric("Total Episodes", format_metric(summary.get('total_episodes'), "count"))
+                 # API provides 'median_pnl', let's display that instead of non-existent 'avg_trade_pnl'
+                st.metric("Median PnL", format_metric(summary.get('median_pnl'), "pnl"))
             with col4:
-                st.metric("Best Episode", format_metric(summary.get('best_episode_id'), "count"))
-                st.metric("Best Episode PnL", format_metric(summary.get('best_episode_pnl'), "pnl"))
+                 # API doesn't provide best episode info in summary, display medians instead
+                st.metric("Median Sharpe", format_metric(summary.get('median_sharpe_ratio'), "ratio"))
+                st.metric("Median Win Rate", format_metric(summary.get('median_win_rate'), "percentage"))
         else:
             st.warning("No summary data available for this run.")
 
