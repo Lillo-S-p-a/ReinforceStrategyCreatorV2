@@ -37,7 +37,8 @@ class TradingEnv(gym.Env):
                  trading_frequency_penalty: float = 0.01, drawdown_penalty: float = 0.1,
                  risk_free_rate: float = 0.0,
                  stop_loss_pct: Optional[float] = None, take_profit_pct: Optional[float] = None,
-                 position_sizing_method: str = "fixed_fractional", risk_fraction: float = 0.1):
+                 position_sizing_method: str = "fixed_fractional", risk_fraction: float = 0.1,
+                 normalization_window_size: int = 20): # Added normalization window size
         """
         Initialize the trading environment.
 
@@ -60,7 +61,8 @@ class TradingEnv(gym.Env):
             position_sizing_method (str): Method for calculating position size ('fixed_fractional' or 'all_in').
                                           (default: "fixed_fractional").
             risk_fraction (float): Fraction of balance to risk per trade when using 'fixed_fractional' sizing.
-                                   (default: 0.1, meaning 10%).
+                               (default: 0.1, meaning 10%).
+       normalization_window_size (int): Window size for rolling normalization (e.g., z-score). (default: 20).
         """
         super(TradingEnv, self).__init__()
 
@@ -77,6 +79,7 @@ class TradingEnv(gym.Env):
         self.take_profit_pct = take_profit_pct
         self.position_sizing_method = position_sizing_method
         self.risk_fraction = risk_fraction
+        self.normalization_window_size = normalization_window_size # Added normalization window size attribute
 
         # Placeholder for current step in the environment
         self.current_step = 0
@@ -714,62 +717,90 @@ class TradingEnv(gym.Env):
     
     def _get_observation(self) -> np.ndarray:
         """
-        Get the current observation (state representation) using a sliding window approach.
-        
+        Get the current observation (state representation) using a sliding window approach
+        with rolling z-score normalization for market features.
+
         Returns:
-            np.ndarray: The current state observation including windowed price data, technical indicators,
-                       and account information.
+            np.ndarray: The current state observation including normalized windowed price data,
+                       technical indicators, and normalized account information.
         """
-        # Calculate the start index for the window
+        # Calculate the start index for the observation window
         window_start = max(0, self.current_step - self.window_size + 1)
-        
-        # Initialize an empty list to store the windowed market data
+
+        # Initialize an empty list to store the normalized windowed market data
         windowed_data = []
+
+        # --- Calculate Rolling Stats for Normalization ---
+        # Use data up to the current step for calculating normalization stats
+        # Ensure we only select numeric columns if df might contain non-numeric ones
+        numeric_df = self.df.select_dtypes(include=np.number)
+        history_df = numeric_df.iloc[:self.current_step + 1]
+
+        # Use expanding window until normalization_window_size is reached
+        rolling_mean = history_df.rolling(window=self.normalization_window_size, min_periods=1).mean()
+        rolling_std = history_df.rolling(window=self.normalization_window_size, min_periods=1).std()
+
+        # Get mean and std for the current step (last row of rolling calculation)
+        current_mean = rolling_mean.iloc[-1].fillna(0) # Fill potential NaNs in mean
+        # Add epsilon to std to prevent division by zero, fill NaN std (e.g., first step)
+        current_std = rolling_std.iloc[-1].fillna(1e-8) + 1e-8
         
-        # If we're at the beginning and don't have enough history, we need to pad
+        # Get mean and std for the earliest step (for padding normalization)
+        earliest_mean = rolling_mean.iloc[0].fillna(0) # Fill potential NaNs in mean
+        earliest_std = rolling_std.iloc[0].fillna(1e-8) + 1e-8
+        # -------------------------------------------------
+
+        # Determine padding needed for the observation window
         padding_needed = max(0, self.window_size - (self.current_step + 1))
-        
-        # Add padding if needed (repeat the earliest available data)
+
+        # Add padding if needed (repeat the earliest available data, normalized)
         if padding_needed > 0:
-            # Get the earliest available data
-            earliest_data = self.df.iloc[0].values
-            earliest_data = np.nan_to_num(earliest_data, nan=0.0)
-            
-            # Normalize the earliest data
-            max_abs_val = np.max(np.abs(earliest_data)) + 1e-10
-            earliest_data_normalized = earliest_data / max_abs_val
-            
-            # Add padding by repeating the earliest data
+            # Get the earliest available raw data (numeric columns only)
+            earliest_data = numeric_df.iloc[0].values
+            earliest_data = np.nan_to_num(earliest_data, nan=0.0) # Handle NaNs
+
+            # Normalize the earliest data using its corresponding rolling stats
+            earliest_data_normalized = (earliest_data - earliest_mean.values) / earliest_std.values
+
+            # Add padding by repeating the normalized earliest data
             for _ in range(padding_needed):
                 windowed_data.append(earliest_data_normalized)
-        
-        # Add actual historical data
+
+        # Add actual historical data (normalized) from the observation window
         for i in range(window_start, self.current_step + 1):
-            # Get market data for this step
-            market_data = self.df.iloc[i].values
-            
-            # Handle NaN values
+            # Get market data for this step (numeric columns only)
+            market_data = numeric_df.iloc[i].values
+
+            # Handle NaN values before normalization
             market_data = np.nan_to_num(market_data, nan=0.0)
-            
-            # Normalize the market data
-            max_abs_val = np.max(np.abs(market_data)) + 1e-10
-            market_data_normalized = market_data / max_abs_val
-            
+
+            # Normalize the market data using the *current* step's rolling stats
+            # (Applying current stats to past data in the window)
+            market_data_normalized = (market_data - current_mean.values) / current_std.values
+
             # Add to windowed data
             windowed_data.append(market_data_normalized)
-        
+
         # Flatten the windowed data
-        flattened_market_data = np.concatenate(windowed_data)
+        # Ensure windowed_data is not empty before concatenating
+        if not windowed_data:
+             # Should not happen if window_size > 0, but handle defensively
+             num_market_features = len(numeric_df.columns)
+             flattened_market_data = np.zeros(self.window_size * num_market_features)
+        else:
+            flattened_market_data = np.concatenate(windowed_data)
+
+        # Add account information (balance and position value relative to initial balance)
+        # Normalize these values relative to the initial balance
+        normalized_balance = self.balance / self.initial_balance if self.initial_balance > 0 else 0
+        # Ensure current_price is updated before calling _get_observation (should be done in step)
+        # Use nan_to_num for current_price robustness
+        safe_current_price = np.nan_to_num(self.current_price, nan=0.0)
+        normalized_position_value = self.shares_held * safe_current_price / self.initial_balance if self.initial_balance > 0 else 0
         
-        # Add account information (balance and shares held)
-        # Normalize these values as well
-        normalized_balance = self.balance / self.initial_balance
-        # Use current_position instead of just shares_held for position representation
-        normalized_position = self.shares_held * self.current_price / self.initial_balance
-        
-        # Combine windowed market data and account information
-        observation = np.append(flattened_market_data, [normalized_balance, normalized_position])
-        
+        # Combine normalized windowed market data and normalized account information
+        observation = np.append(flattened_market_data, [normalized_balance, normalized_position_value])
+
         return observation.astype(np.float32)
     
     def render(self, mode: str = 'human') -> Optional[np.ndarray]:

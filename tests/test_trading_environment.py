@@ -477,6 +477,98 @@ def test_window_size_parameter():
     assert env2.observation_space.shape[0] == (3 * num_market_features) + num_portfolio_features
     assert env3.observation_space.shape[0] == (4 * num_market_features) + num_portfolio_features
 
+# --- New Test for Normalization ---
+
+@pytest.fixture
+def simple_df_for_norm():
+    """DataFrame for testing normalization."""
+    return pd.DataFrame({'close': [10.0, 11.0, 12.0, 11.5, 12.5, 13.0]})
+
+@pytest.fixture
+def env_for_norm(simple_df_for_norm):
+    """Environment specifically for testing normalization."""
+    # Add dummy indicator columns expected by the env structure
+    df = simple_df_for_norm.copy()
+    df['RSI_14'] = 50.0 # Dummy value
+    df['MACD_12_26_9'] = 0.1 # Dummy value
+    return TradingEnv(df, window_size=2, normalization_window_size=3)
+
+def test_observation_normalization(env_for_norm):
+    """Test the rolling z-score normalization in _get_observation."""
+    df = env_for_norm.df.select_dtypes(include=np.number) # Use numeric part
+    obs_window = env_for_norm.window_size
+    norm_window = env_for_norm.normalization_window_size
+    num_market_features = len(df.columns)
+    num_portfolio_features = 2
+
+    env_for_norm.reset()
+
+    # --- Step 0 ---
+    env_for_norm.current_step = 0
+    env_for_norm.current_price = df.iloc[0]['close']
+    obs0 = env_for_norm._get_observation()
+    market_obs0 = obs0[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 0 (expanding window size 1)
+    mean0 = df.iloc[[0]].mean()
+    std0 = df.iloc[[0]].std().fillna(1e-8) + 1e-8 # Std of 1 element is NaN
+    # Expected normalized data for step 0 (using stats from step 0)
+    expected_norm0_at_0 = (df.iloc[0] - mean0) / std0
+    # Observation window at step 0 includes padding (normalized earliest) + step 0 data
+    # Padding uses earliest stats, step 0 uses current stats. Here they are the same.
+    assert pytest.approx(market_obs0[0]) == expected_norm0_at_0.values # Padding
+    assert pytest.approx(market_obs0[1]) == expected_norm0_at_0.values # Step 0 data
+
+    # --- Step 1 ---
+    env_for_norm.current_step = 1
+    env_for_norm.current_price = df.iloc[1]['close']
+    obs1 = env_for_norm._get_observation()
+    market_obs1 = obs1[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 1 (expanding window size 2)
+    mean1 = df.iloc[:2].mean()
+    std1 = df.iloc[:2].std().fillna(1e-8) + 1e-8
+    # Expected normalized data for step 0 (using stats from step 1)
+    expected_norm0_at_1 = (df.iloc[0] - mean1) / std1
+    # Expected normalized data for step 1 (using stats from step 1)
+    expected_norm1_at_1 = (df.iloc[1] - mean1) / std1
+    # Observation window at step 1 includes step 0 and step 1 data, both normalized using stats@1
+    assert pytest.approx(market_obs1[0]) == expected_norm0_at_1.values
+    assert pytest.approx(market_obs1[1]) == expected_norm1_at_1.values
+
+    # --- Step 2 ---
+    env_for_norm.current_step = 2
+    env_for_norm.current_price = df.iloc[2]['close']
+    obs2 = env_for_norm._get_observation()
+    market_obs2 = obs2[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 2 (rolling window size 3)
+    mean2 = df.iloc[:3].rolling(window=norm_window, min_periods=1).mean().iloc[-1]
+    std2 = df.iloc[:3].rolling(window=norm_window, min_periods=1).std().iloc[-1].fillna(1e-8) + 1e-8
+    # Expected normalized data for step 1 (using stats from step 2)
+    expected_norm1_at_2 = (df.iloc[1] - mean2) / std2
+    # Expected normalized data for step 2 (using stats from step 2)
+    expected_norm2_at_2 = (df.iloc[2] - mean2) / std2
+    # Observation window at step 2 includes step 1 and step 2 data, both normalized using stats@2
+    assert pytest.approx(market_obs2[0]) == expected_norm1_at_2.values
+    assert pytest.approx(market_obs2[1]) == expected_norm2_at_2.values
+
+    # --- Step 3 ---
+    env_for_norm.current_step = 3
+    env_for_norm.current_price = df.iloc[3]['close']
+    obs3 = env_for_norm._get_observation()
+    market_obs3 = obs3[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 3 (rolling window size 3)
+    mean3 = df.iloc[:4].rolling(window=norm_window, min_periods=1).mean().iloc[-1]
+    std3 = df.iloc[:4].rolling(window=norm_window, min_periods=1).std().iloc[-1].fillna(1e-8) + 1e-8
+    # Expected normalized data for step 2 (using stats from step 3)
+    expected_norm2_at_3 = (df.iloc[2] - mean3) / std3
+    # Expected normalized data for step 3 (using stats from step 3)
+    expected_norm3_at_3 = (df.iloc[3] - mean3) / std3
+    # Observation window at step 3 includes step 2 and step 3 data, both normalized using stats@3
+    assert pytest.approx(market_obs3[0]) == expected_norm2_at_3.values
+    assert pytest.approx(market_obs3[1]) == expected_norm3_at_3.values
 
 def test_close(env):
     """Test that close method runs without errors."""
