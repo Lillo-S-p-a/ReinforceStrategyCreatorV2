@@ -354,3 +354,31 @@ This comprehensive approach aims to create a system that not only seeks profit b
 ## 8. Conclusion
 
 This paper has proposed a novel and comprehensive multi-agent trading system architecture centered around a Hierarchical Reinforcement Learning framework, informed by specialized analytical agents leveraging LSTM, LLM, and Gradient Boosting methodologies. By decomposing the complex trading problem into a hierarchy of manageable tasks and integrating diverse sources of market intelligence, the system aims to achieve a new level of sophistication in automated trading. The proposed architecture offers potential for enhanced predictive power, adaptive strategic decision-making, and optimized execution, ultimately targeting superior risk-adjusted returns. While significant challenges in implementation and research remain, this framework provides a robust conceptual blueprint for developing next-generation intelligent trading systems capable of navigating the intricacies of modern financial markets.
+
+## 9. References
+
+1. Fischer, T., & Krauss, C. (2018). Deep learning with long short-term memory networks for financial market predictions. European Journal of Operational Research, 270(2), 654-669.
+
+2. Ding, X., Zhang, Y., Liu, T., & Duan, J. (2015). Deep learning for event-driven stock prediction. In Proceedings of the 24th International Joint Conference on Artificial Intelligence (IJCAI), 2327-2333.
+
+3. Gu, S., Kelly, B., & Xiu, D. (2020). Empirical asset pricing via machine learning. The Review of Financial Studies, 33(5), 2223-2273.
+
+4. Deng, Y., Bao, F., Kong, Y., Ren, Z., & Dai, Q. (2017). Deep direct reinforcement learning for financial signal representation and trading. IEEE Transactions on Neural Networks and Learning Systems, 28(3), 653-664.
+
+5. Sutton, R. S., Precup, D., & Singh, S. (1999). Between MDPs and semi-MDPs: A framework for temporal abstraction in reinforcement learning. Artificial Intelligence, 112(1-2), 181-211.
+
+6. Dietterich, T. G. (2000). Hierarchical reinforcement learning with the MAXQ value function decomposition. Journal of Artificial Intelligence Research, 13, 227-303.
+
+7. Tesfatsion, L. (2006). Agent-based computational economics: A constructive approach to economic theory. Handbook of Computational Economics, 2, 831-880.
+
+8. BANK-RL: Multi-agent hierarchical reinforcement learning for bank asset-liability management. (2025). SSRN Electronic Journal, 5071840.
+
+9. HedgeAgents: LLM-driven multi-agent systems for robust hedging strategies. (2025). arXiv:2502.13165v1.
+
+10. Hierarchical risk management in reinforcement learning for financial markets. (2025). arXiv:2410.14927v1.
+
+11. Exogenous MDPs for financial market simulation. (2025). arXiv:2411.12746v1.
+
+12. Multi-agent coordination in financial trading systems. (2025). arXiv:2408.10932v1.
+
+13. Experience replay mechanisms in financial reinforcement learning. (2025). Proceedings of the International Conference on Financial Technology, 131912.
