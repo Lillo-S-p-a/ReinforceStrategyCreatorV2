@@ -1,0 +1,23 @@
+
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb_market_data
+    environment:
+      POSTGRES_USER: ${TIMESCALEDB_USER:-user}
+      POSTGRES_PASSWORD: ${TIMESCALEDB_PASSWORD:-password}
+      POSTGRES_DB: ${TIMESCALEDB_DB:-marketdata}
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+volumes:
+  timescaledb_data:
+
+networks:
+  app-network:
+    driver: bridge
