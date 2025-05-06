@@ -24,9 +24,9 @@ TRAINING_EPISODES = 10 # Reverted for debugging agent inactivity
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
 
 # Environment Tuning Parameters (Phase 1 Debug)
-ENV_DRAWDOWN_PENALTY = 0.01 # Reduced from 0.1 default
-ENV_TRADING_PENALTY = 0.005 # Reduced from 0.01 default
-ENV_RISK_FRACTION = 0.02    # Reduced from 0.1 default
+ENV_DRAWDOWN_PENALTY = 0.001 # Further reduced from 0.01
+ENV_TRADING_PENALTY = 0.0005 # Further reduced from 0.005
+ENV_RISK_FRACTION = 0.1    # Increased from 0.02, back to original default
 ENV_STOP_LOSS_PCT = 5.0     # Enabled, was None (disabled)
 
 # Agent Hyperparameters (Example values, use defaults or tune later)
@@ -39,7 +39,7 @@ AGENT_EPSILON = 1.0
 AGENT_EPSILON_DECAY = 0.995
 AGENT_EPSILON_MIN = 0.01
 AGENT_LEARNING_RATE = 0.001
-AGENT_TARGET_UPDATE_FREQ = 5 # Example value
+AGENT_TARGET_UPDATE_FREQ = 50 # Changed from 5 to 50 for stability
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
