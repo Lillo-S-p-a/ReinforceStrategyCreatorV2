@@ -38,7 +38,7 @@ AGENT_GAMMA = 0.95
 AGENT_EPSILON = 1.0
 AGENT_EPSILON_DECAY = 0.995
 AGENT_EPSILON_MIN = 0.01
-AGENT_LEARNING_RATE = 0.001
+AGENT_LEARNING_RATE = 0.0001 # Iteration 3: Reduced learning rate
 AGENT_TARGET_UPDATE_FREQ = 50 # Changed from 5 to 50 for stability
 
 # Logging setup
