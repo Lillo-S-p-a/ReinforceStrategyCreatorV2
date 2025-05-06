@@ -232,16 +232,22 @@ This section provides a conceptual mathematical framework for the agents and the
 
 *   **LSTM-based Time-Series Forecasting Agent (TSFA):**
     Let $y_t$ be the true price/volatility at time $t$, and $\hat{y}_t(\theta_{LSTM})$ be the LSTM's prediction with parameters $\theta_{LSTM}$. The objective is to minimize a loss function, e.g., Mean Squared Error (MSE):
-    $$L_{LSTM}(\theta_{LSTM}) = \frac{1}{T} \sum_{t=1}^{T} (y_t - \hat{y}_t(\theta_{LSTM}))^2$$
+    ```math
+    L_{LSTM}(\theta_{LSTM}) = \frac{1}{T} \sum_{t=1}^{T} (y_t - \hat{y}_t(\theta_{LSTM}))^2
+    ```
 
 *   **LLM-based Information Processing Agent (IPA):**
     For sentiment analysis, let $s_i$ be the true sentiment (e.g., positive, negative, neutral) of document $i$, and $\hat{s}_i(\theta_{LLM})$ be the LLM's predicted sentiment. The objective is to maximize accuracy or minimize cross-entropy loss:
-    $$L_{LLM}(\theta_{LLM}) = -\frac{1}{N} \sum_{i=1}^{N} \sum_{c \in C} s_{i,c} \log(\hat{s}_{i,c}(\theta_{LLM}))$$
+    ```math
+    L_{LLM}(\theta_{LLM}) = -\frac{1}{N} \sum_{i=1}^{N} \sum_{c \in C} s_{i,c} \log(\hat{s}_{i,c}(\theta_{LLM}))
+    ```
     For information extraction, the objective might be maximizing F1-score for identifying relevant entities or events.
 
 *   **Gradient Boosting Market Regime Agent (MRA):**
     Let $r_j$ be the true market regime for observation $j$, and $\hat{r}_j(\theta_{GB})$ be the Gradient Boosting model's prediction. For classification, the objective could be maximizing accuracy or F1-score, or minimizing a loss function like log-loss.
-    $$L_{GB}(\theta_{GB}) = \text{LossFunction}(r, \hat{r}(\theta_{GB}))$$
+    ```math
+    L_{GB}(\theta_{GB}) = \text{LossFunction}(r, \hat{r}(\theta_{GB}))
+    ```
 
 ### 5.2 Hierarchical Reinforcement Learning (HRL) Framework
 
@@ -250,20 +256,42 @@ We define a semi-Markov Decision Process (SMDP) for each level of the hierarchy.
 *   **State Space ($S_k$):** The state for an agent at level $k$ includes relevant market information from the SKB, its current holdings/position, and directives from level $k-1$.
 *   **Action Space ($A_k$):** Actions at level $k$ can be primitive actions (for EMAs) or options (sub-goals) for agents at level $k+1$.
 *   **Reward Function ($R_k$):**
-    *   **HRL-L3 (EMAs):** Rewards based on execution quality, e.g., $R_{EMA} = -(\text{slippage} + \text{commission}) + \text{bonus_for_price_improvement}$.
-    *   **HRL-L2 (TAAs):** Rewards based on the performance of their sub-portfolio relative to benchmarks or targets set by SAA, adjusted for risk. $R_{TAA} = \alpha \cdot \text{PnL}_{sub-portfolio} - \lambda \cdot \text{Risk}_{sub-portfolio} + \text{IntrinsicRewardFromSAA}$.
-    *   **HRL-L1 (SAA):** Rewards based on overall long-term portfolio growth and risk-adjusted return (e.g., change in Sharpe ratio of the total portfolio). $R_{SAA} = \Delta \text{PortfolioValue} - \gamma \cdot \text{PortfolioRisk}$.
+    *   **HRL-L3 (EMAs):** Rewards based on execution quality, e.g.:
+    
+        ```math
+        R_{EMA} = -(\text{slippage} + \text{commission}) + \text{bonus\_for\_price\_improvement}
+        ```
+    
+    *   **HRL-L2 (TAAs):** Rewards based on the performance of their sub-portfolio relative to benchmarks or targets set by SAA, adjusted for risk:
+    
+        ```math
+        R_{TAA} = \alpha \cdot \text{PnL}_{sub-portfolio} - \lambda \cdot \text{Risk}_{sub-portfolio} + \text{IntrinsicRewardFromSAA}
+        ```
+    
+    *   **HRL-L1 (SAA):** Rewards based on overall long-term portfolio growth and risk-adjusted return (e.g., change in Sharpe ratio of the total portfolio):
+    
+        ```math
+        R_{SAA} = \Delta \text{PortfolioValue} - \gamma \cdot \text{PortfolioRisk}
+        ```
 
 The objective for each RL agent is to learn a policy $\pi_k^*$ that maximizes the expected discounted cumulative reward:
-$$\pi_k^* = \arg\max_{\pi_k} E \left[ \sum_{t=0}^{\infty} \gamma^t R_{k,t+1} | S_{k,0}, \pi_k \right]$$
+```math
+\pi_k^* = \arg\max_{\pi_k} E \left[ \sum_{t=0}^{\infty} \gamma^t R_{k,t+1} | S_{k,0}, \pi_k \right]
+```
+
 This can be solved using various RL algorithms like Policy Gradients (e.g., A2C, PPO) or Q-learning variants adapted for HRL (e.g., Feudal RL, Options framework). The Bellman equation for an option $o$ at level $k$ can be written as:
-$$Q_k(s, o) = E \left[ \sum_{t=0}^{\tau-1} \gamma^t R_{k,t+1} + \gamma^{\tau} \max_{o'} Q_k(s', o') | s_0=s, o \text{ taken} \right]$$
+
+```math
+Q_k(s, o) = E \left[ \sum_{t=0}^{\tau-1} \gamma^t R_{k,t+1} + \gamma^{\tau} \max_{o'} Q_k(s', o') | s_0=s, o \text{ taken} \right]
+```
 where $\tau$ is the duration of option $o$.
 
 ### 5.3 Overall System Objective
 
 The overarching goal is to maximize a utility function $U$ that balances expected portfolio return $E[R_P]$ and portfolio risk $\text{Risk}_P$ (e.g., VaR, CVaR, volatility):
-$$\max U(E[R_P], \text{Risk}_P) = E[R_P] - \lambda_U \cdot \text{Risk}_P$$
+```math
+\max U(E[R_P], \text{Risk}_P) = E[R_P] - \lambda_U \cdot \text{Risk}_P
+```
 where $\lambda_U$ is a risk aversion coefficient.
 
 ### 5.4 Advanced Risk Management Integration
@@ -277,7 +305,11 @@ Effective risk management is paramount and is deeply embedded within the system'
 
 *   **Risk-Aware Reward Structures:**
     *   The reward functions for all RL agents at each hierarchical level are explicitly designed to penalize excessive risk-taking. This is often achieved by incorporating risk-adjusted performance metrics, such as the Sharpe ratio or Sortino ratio, directly into the reward signal [arXiv:2410.14927v1, dl.acm.org/doi/10.1145/3677052.3698688].
-    *   Constraints can be formally added to the RL optimization problem, for example, ensuring that the portfolio's VaR remains below a predefined maximum: $$\text{VaR}(\text{Portfolio}) \leq \text{VaR}_{max}$$.
+    *   Constraints can be formally added to the RL optimization problem, for example, ensuring that the portfolio's VaR remains below a predefined maximum:
+    
+        ```math
+        \text{VaR}(\text{Portfolio}) \leq \text{VaR}_{max}
+        ```
 
 *   **Adaptation to Market Conditions:**
     *   The system is designed for adaptability through techniques such as phased training protocols, where agents are jointly trained across simulated bull and bear market scenarios to improve robustness to different market regimes [arXiv:2410.14927v1].
