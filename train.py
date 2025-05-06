@@ -20,12 +20,12 @@ from reinforcestrategycreator.metrics_calculator import (
 TICKER = "SPY"
 START_DATE = "2020-01-01"
 END_DATE = "2023-12-31"
-TRAINING_EPISODES = 10 # Reverted for debugging agent inactivity
+TRAINING_EPISODES = 5 # Reduced for testing, increase for actual training
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
 
 # Environment Tuning Parameters (Phase 1 Debug)
-ENV_DRAWDOWN_PENALTY = 0.001 # Further reduced from 0.01
-ENV_TRADING_PENALTY = 0.0005 # Further reduced from 0.005
+ENV_DRAWDOWN_PENALTY = 0.005 # Iteration 2: Increased penalty slightly
+ENV_TRADING_PENALTY = 0.002 # Iteration 2: Increased penalty slightly
 ENV_RISK_FRACTION = 0.1    # Increased from 0.02, back to original default
 ENV_STOP_LOSS_PCT = 5.0     # Enabled, was None (disabled)
 
