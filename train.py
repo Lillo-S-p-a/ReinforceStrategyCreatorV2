@@ -20,7 +20,7 @@ from reinforcestrategycreator.metrics_calculator import (
 TICKER = "SPY"
 START_DATE = "2020-01-01"
 END_DATE = "2023-12-31"
-TRAINING_EPISODES = 5 # Reduced for testing, increase for actual training
+TRAINING_EPISODES = 50 # Iteration 4: Set for optimization loop
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
 
 # Environment Tuning Parameters (Phase 1 Debug)
@@ -38,7 +38,7 @@ AGENT_GAMMA = 0.95
 AGENT_EPSILON = 1.0
 AGENT_EPSILON_DECAY = 0.995
 AGENT_EPSILON_MIN = 0.01
-AGENT_LEARNING_RATE = 0.0001 # Iteration 3: Reduced learning rate
+AGENT_LEARNING_RATE = 0.001 # Iteration 4: Reverted learning rate
 AGENT_TARGET_UPDATE_FREQ = 50 # Changed from 5 to 50 for stability
 
 # Logging setup
@@ -96,7 +96,8 @@ def main():
             drawdown_penalty=ENV_DRAWDOWN_PENALTY,
             trading_frequency_penalty=ENV_TRADING_PENALTY,
             risk_fraction=ENV_RISK_FRACTION,
-            stop_loss_pct=ENV_STOP_LOSS_PCT
+            stop_loss_pct=ENV_STOP_LOSS_PCT,
+            use_sharpe_ratio=False # Iteration 4: Disable Sharpe reward
             # Note: take_profit_pct remains None (default) for now
         )
         STATE_SIZE = env.observation_space.shape[0]
