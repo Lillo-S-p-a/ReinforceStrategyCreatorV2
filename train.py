@@ -20,7 +20,7 @@ from reinforcestrategycreator.metrics_calculator import (
 TICKER = "SPY"
 START_DATE = "2020-01-01"
 END_DATE = "2023-12-31"
-TRAINING_EPISODES = 50 # Iteration 4: Set for optimization loop
+TRAINING_EPISODES = 5 # Iteration 4: Reduced for faster iterations
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
 
 # Environment Tuning Parameters (Phase 1 Debug)
