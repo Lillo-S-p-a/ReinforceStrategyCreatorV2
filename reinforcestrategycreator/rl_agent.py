@@ -88,6 +88,27 @@ class StrategyAgent:
         self.target_update_freq = target_update_freq
         self.update_counter = 0 # Counter for target network updates
 
+        # --- Device Check & Configuration (MPS for Apple Silicon) ---
+        try:
+            physical_gpus = tf.config.list_physical_devices('GPU')
+            if physical_gpus:
+                # Standard GPU (CUDA) found - less likely on Mac but check first
+                logger.info(f"TensorFlow GPU device(s) found: {physical_gpus}")
+                # Configuration for standard GPUs usually happens automatically or via CUDA env vars
+            elif tf.config.backends.mps.is_available():
+                logger.info("TensorFlow MPS (Metal Performance Shaders) device found.")
+                # Explicitly enable memory growth for MPS if needed, although often default
+                # tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('MPS')[0], True) # MPS doesn't have explicit memory growth setting like CUDA
+                logger.info("TensorFlow should automatically utilize MPS device on compatible versions.")
+                # We don't typically need tf.device('/MPS:0') context manager for the whole class,
+                # Keras/TF should handle placement if MPS is available and tensorflow-metal is installed.
+                # Logging confirms awareness. Performance will be the real test.
+            else:
+                logger.warning("No GPU or MPS device found. TensorFlow will use CPU.")
+        except Exception as e:
+            logger.error(f"Error during device check/configuration: {e}")
+        # --- End Device Check ---
+
         # Initialize replay memory
         self.memory = deque(maxlen=self.memory_size)
 

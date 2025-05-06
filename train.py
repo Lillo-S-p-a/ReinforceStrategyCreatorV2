@@ -20,7 +20,7 @@ from reinforcestrategycreator.metrics_calculator import (
 TICKER = "SPY"
 START_DATE = "2020-01-01"
 END_DATE = "2023-12-31"
-TRAINING_EPISODES = 10 # Start with a small number for testing
+TRAINING_EPISODES = 10 # Reverted for debugging agent inactivity
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
 
 # Environment Tuning Parameters (Phase 1 Debug)
