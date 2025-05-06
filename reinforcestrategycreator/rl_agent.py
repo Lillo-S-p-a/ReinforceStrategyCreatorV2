@@ -201,6 +201,7 @@ class StrategyAgent:
 
             # Predict Q-values for the state
             q_values = self.model.predict(state, verbose=0) # verbose=0 suppresses Keras prediction logs
+            logger.info(f"Q-values for exploitation: {q_values[0]}") # Log Q-values before argmax
             action = np.argmax(q_values[0])
             logger.debug(f"Exploitation: Q-values={q_values[0]}, Selected action {action}")
 
