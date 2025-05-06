@@ -20,12 +20,12 @@ from reinforcestrategycreator.metrics_calculator import (
 TICKER = "SPY"
 START_DATE = "2020-01-01"
 END_DATE = "2023-12-31"
-TRAINING_EPISODES = 5 # Iteration 4: Reduced for faster iterations
+TRAINING_EPISODES = 1000 # Iteration 2: Increased for better convergence
 SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
 
 # Environment Tuning Parameters (Phase 1 Debug)
-ENV_DRAWDOWN_PENALTY = 0.005 # Iteration 2: Increased penalty slightly
-ENV_TRADING_PENALTY = 0.002 # Iteration 2: Increased penalty slightly
+ENV_DRAWDOWN_PENALTY = 0.05 # Iteration 2: Increased penalty for better risk management
+ENV_TRADING_PENALTY = 0.005 # Iteration 2: Increased penalty to reduce excessive trading
 ENV_RISK_FRACTION = 0.1    # Increased from 0.02, back to original default
 ENV_STOP_LOSS_PCT = 5.0     # Enabled, was None (disabled)
 
@@ -34,12 +34,12 @@ STATE_SIZE = None # Will be determined from env
 ACTION_SIZE = None # Will be determined from env
 AGENT_MEMORY_SIZE = 2000
 AGENT_BATCH_SIZE = 32
-AGENT_GAMMA = 0.90 # Iteration 6: Lower gamma for more focus on immediate rewards
+AGENT_GAMMA = 0.99 # Iteration 2: Higher gamma for better long-term reward consideration
 AGENT_EPSILON = 1.0
-AGENT_EPSILON_DECAY = 0.995 # Iteration 6: Reverted epsilon decay
+AGENT_EPSILON_DECAY = 0.9999 # Iteration 2: Slower decay for more exploration
 AGENT_EPSILON_MIN = 0.01
 AGENT_LEARNING_RATE = 0.001 # Iteration 4: Reverted learning rate
-AGENT_TARGET_UPDATE_FREQ = 50 # Changed from 5 to 50 for stability
+AGENT_TARGET_UPDATE_FREQ = 100 # Iteration 2: Increased for more stable target network
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -97,7 +97,7 @@ def main():
             trading_frequency_penalty=ENV_TRADING_PENALTY,
             risk_fraction=ENV_RISK_FRACTION,
             stop_loss_pct=ENV_STOP_LOSS_PCT,
-            use_sharpe_ratio=False # Iteration 4: Disable Sharpe reward
+            use_sharpe_ratio=True # Iteration 2: Enable Sharpe ratio for better risk-adjusted rewards
             # Note: take_profit_pct remains None (default) for now
         )
         STATE_SIZE = env.observation_space.shape[0]
