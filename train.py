@@ -4,6 +4,8 @@ import pandas as pd
 import logging
 import datetime
 import uuid
+import json # Added for config loading
+import argparse # Added for command-line arguments
 # import csv # Removed for DB logging
 import os
 from reinforcestrategycreator.data_fetcher import fetch_historical_data # Corrected import
@@ -16,36 +18,72 @@ from reinforcestrategycreator.metrics_calculator import (
     calculate_sharpe_ratio, calculate_max_drawdown, calculate_win_rate
 )
 
-# --- Configuration ---
-TICKER = "SPY"
-START_DATE = "2020-01-01"
-END_DATE = "2023-12-31"
-TRAINING_EPISODES = 10 # User request: Run for 10 episodes for faster iteration
-SHARPE_WINDOW_SIZE = 100 # Example value, adjust if needed based on env implementation
-
-# Environment Tuning Parameters (Phase 1 Debug)
-ENV_DRAWDOWN_PENALTY = 0.05 # Iteration 2: Increased penalty for better risk management
-ENV_TRADING_PENALTY = 0.0001 # User request: Encourage more trades by reducing penalty
-ENV_RISK_FRACTION = 0.1    # Increased from 0.02, back to original default
-ENV_STOP_LOSS_PCT = 5.0     # Enabled, was None (disabled)
-
-# Agent Hyperparameters (Example values, use defaults or tune later)
-STATE_SIZE = None # Will be determined from env
-ACTION_SIZE = None # Will be determined from env
-AGENT_MEMORY_SIZE = 2000
-AGENT_BATCH_SIZE = 32
-AGENT_GAMMA = 0.99 # Iteration 2: Higher gamma for better long-term reward consideration
-AGENT_EPSILON = 1.0
-AGENT_EPSILON_DECAY = 0.9999 # Iteration 2: Slower decay for more exploration
-AGENT_EPSILON_MIN = 0.01
-AGENT_LEARNING_RATE = 0.001 # Iteration 4: Reverted learning rate
-AGENT_TARGET_UPDATE_FREQ = 100 # Iteration 2: Increased for more stable target network
-
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Global config variable to be populated by load_config
+CONFIG = {}
+
+def load_config(config_path):
+    """Loads configuration from a JSON file."""
+    global CONFIG
+    try:
+        with open(config_path, 'r') as f:
+            CONFIG = json.load(f)
+        logging.info(f"Successfully loaded configuration from {config_path}")
+    except FileNotFoundError:
+        logging.error(f"Configuration file not found: {config_path}")
+        raise
+    except json.JSONDecodeError:
+        logging.error(f"Error decoding JSON from configuration file: {config_path}")
+        raise
+    except Exception as e:
+        logging.error(f"An unexpected error occurred while loading configuration: {e}")
+        raise
+
 def main():
-    logging.info(f"Starting training for {TICKER} from {START_DATE} to {END_DATE}")
+    parser = argparse.ArgumentParser(description="Train RL Trading Agent")
+    parser.add_argument("--config", type=str, required=True, help="Path to the JSON configuration file")
+    args = parser.parse_args()
+
+    try:
+        load_config(args.config)
+    except Exception:
+        return # Exit if config loading fails
+
+    # Extract parameters from CONFIG
+    data_params = CONFIG.get('data_params', {})
+    env_params = CONFIG.get('env_params', {})
+    rl_params = CONFIG.get('rl_params', {})
+    experiment_id = CONFIG.get('experiment_id', 'DEFAULT_EXP')
+
+    TICKER = data_params.get('ticker', "SPY")
+    START_DATE = data_params.get('train_start_date', "2020-01-01") # Use train_start_date
+    END_DATE = data_params.get('train_end_date', "2023-12-31") # Use train_end_date
+    TRAINING_EPISODES = rl_params.get('episodes', 10)
+    
+    # Environment parameters
+    SHARPE_WINDOW_SIZE = env_params.get('sharpe_window_size', 100)
+    ENV_DRAWDOWN_PENALTY = env_params.get('drawdown_penalty', 0.05)
+    ENV_TRADING_PENALTY = env_params.get('trading_frequency_penalty', 0.0001)
+    ENV_RISK_FRACTION = env_params.get('risk_fraction', 0.1)
+    ENV_STOP_LOSS_PCT = env_params.get('stop_loss_pct', 5.0)
+    TRANSACTION_FEE_PERCENT = env_params.get('transaction_cost_pct', 0.001) # New from config
+
+    # Agent Hyperparameters
+    # STATE_SIZE and ACTION_SIZE will be determined from env
+    AGENT_MEMORY_SIZE = rl_params.get('memory_size', 2000)
+    AGENT_BATCH_SIZE = rl_params.get('batch_size', 32)
+    AGENT_GAMMA = rl_params.get('gamma', 0.99)
+    AGENT_EPSILON = rl_params.get('epsilon_start', 1.0)
+    AGENT_EPSILON_DECAY = rl_params.get('epsilon_decay', 0.9999)
+    AGENT_EPSILON_MIN = rl_params.get('epsilon_min', 0.01)
+    AGENT_LEARNING_RATE = rl_params.get('learning_rate', 0.001)
+    AGENT_TARGET_UPDATE_FREQ = rl_params.get('target_update_freq', 100)
+
+
+    logging.info(f"Starting training for {TICKER} from {START_DATE} to {END_DATE} using config: {args.config}")
+    logging.info(f"Experiment ID: {experiment_id}")
 
     # --- 1. Data Pipeline ---
     logging.info("Fetching historical data...")
@@ -92,14 +130,15 @@ def main():
         env = TradingEnv(
             data_with_indicators,
             sharpe_window_size=SHARPE_WINDOW_SIZE,
-            transaction_fee_percent=0.001, # Keep existing fee
+            transaction_fee_percent=TRANSACTION_FEE_PERCENT, # Use from config
             drawdown_penalty=ENV_DRAWDOWN_PENALTY,
             trading_frequency_penalty=ENV_TRADING_PENALTY,
             risk_fraction=ENV_RISK_FRACTION,
             stop_loss_pct=ENV_STOP_LOSS_PCT,
-            use_sharpe_ratio=True # Iteration 2: Enable Sharpe ratio for better risk-adjusted rewards
+            use_sharpe_ratio=env_params.get('use_sharpe_ratio_reward', True) # Use from config
             # Note: take_profit_pct remains None (default) for now
         )
+        # These are determined by the environment after initialization
         STATE_SIZE = env.observation_space.shape[0]
         ACTION_SIZE = env.action_space.n
         logging.info(f"Environment initialized. State size: {STATE_SIZE}, Action size: {ACTION_SIZE}")
@@ -136,25 +175,28 @@ def main():
 
     # Store parameters for logging
     run_params = {
+        "experiment_id": experiment_id, # Added experiment_id
+        "config_file": args.config, # Added config file path
         "ticker": TICKER,
-        "start_date": START_DATE,
-        "end_date": END_DATE,
+        "train_start_date": START_DATE, # Clarified date type
+        "train_end_date": END_DATE,     # Clarified date type
         "training_episodes": TRAINING_EPISODES,
         "sharpe_window_size": SHARPE_WINDOW_SIZE,
         "agent_memory_size": AGENT_MEMORY_SIZE,
         "agent_batch_size": AGENT_BATCH_SIZE,
         "agent_gamma": AGENT_GAMMA,
-        "agent_epsilon_start": AGENT_EPSILON,
+        "agent_epsilon_start": AGENT_EPSILON, # Already using the correct variable name
         "agent_epsilon_decay": AGENT_EPSILON_DECAY,
         "agent_epsilon_min": AGENT_EPSILON_MIN,
         "agent_learning_rate": AGENT_LEARNING_RATE,
         "agent_target_update_freq": AGENT_TARGET_UPDATE_FREQ,
-        "env_transaction_fee": env.transaction_fee_percent,
-        "env_window_size": env.window_size,
-        "env_drawdown_penalty": env.drawdown_penalty, # Log tuned value
-        "env_trading_penalty": env.trading_frequency_penalty, # Log tuned value
-        "env_risk_fraction": env.risk_fraction, # Log tuned value
-        "env_stop_loss_pct": env.stop_loss_pct # Log tuned value
+        "env_transaction_fee": env.transaction_fee_percent, # This is TRANSACTION_FEE_PERCENT
+        "env_window_size": env.window_size, # This is from env, not directly from config top-level
+        "env_drawdown_penalty": ENV_DRAWDOWN_PENALTY,
+        "env_trading_penalty": ENV_TRADING_PENALTY,
+        "env_risk_fraction": ENV_RISK_FRACTION,
+        "env_stop_loss_pct": ENV_STOP_LOSS_PCT,
+        "env_use_sharpe_ratio_reward": env_params.get('use_sharpe_ratio_reward', True)
     }
 
     # Use a 'with' statement to manage the DB session lifecycle
@@ -363,16 +405,16 @@ def main():
                             logging.info(f"Episode: {episode_num+1}/{TRAINING_EPISODES}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.2f}, Steps: {step_count}, Final Portfolio: {info.get('portfolio_value', 'N/A'):.2f}")
 # --- ADDED: Save Model Weights for this Episode ---
                             try:
-                                model_save_path = f"models/episode_{current_episode_id}_model.keras" # Save as Keras native format # Adjust extension if needed (.h5, .keras, etc.)
+                                # Updated model saving path to include experiment_id
+                                model_save_path = f"models/model_{experiment_id}_ep{current_episode_id}.keras"
                                 os.makedirs("models", exist_ok=True) # Ensure the 'models' directory exists
-                                # !!! IMPORTANT: Replace 'save_weights' with the actual method name of your StrategyAgent class !!!
-                                agent.model.save(model_save_path)  # Use save() for SavedModel format 
-                                logging.info(f"Saved Keras model for episode {current_episode_id} to {model_save_path}")
+                                agent.model.save(model_save_path)
+                                logging.info(f"Saved Keras model for episode {current_episode_id} (Experiment: {experiment_id}) to {model_save_path}")
                             except AttributeError:
-                                logging.error(f"Agent does not have a 'save_weights' method. Please implement or correct the method name.")
+                                logging.error(f"Agent model does not have a 'save' method. Please ensure it's a Keras model.")
                             except Exception as save_err:
-                                logging.error(f"Error saving model weights for episode {current_episode_id}: {save_err}")
-                            # --- END OF ADDED PART ---
+                                logging.error(f"Error saving Keras model for episode {current_episode_id} (Experiment: {experiment_id}): {save_err}")
+                            # --- END OF MODIFIED PART ---
 
                     # Commit changes at the end of each episode (steps, trades, episode summary)
                     db.commit()
