@@ -1,0 +1,16 @@
+{
+    "evaluation_period": {
+        "start_date": "2020-01-01",
+        "end_date": "2023-12-31"
+    },
+    "rl_agent_performance": {
+        "total_return_pct": -0.019985182800417535,
+        "sharpe_ratio": 0.0004105393587818943,
+        "max_drawdown_pct": 3.0068811411715015
+    },
+    "spy_benchmark_performance": {
+        "total_return_pct": 55.80951453731537,
+        "sharpe_ratio": 0.038123990690866104,
+        "max_drawdown_pct": 33.71726392781539
+    }
+}
