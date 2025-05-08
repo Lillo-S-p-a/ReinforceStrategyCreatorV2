@@ -43,27 +43,34 @@ def load_config(config_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Train RL Trading Agent")
-    parser.add_argument("--config", type=str, required=True, help="Path to the JSON configuration file")
+    parser.add_argument("--config", type=str, required=False, help="Path to the JSON configuration file (optional)")
     args = parser.parse_args()
 
-    try:
-        load_config(args.config)
-    except Exception:
-        return # Exit if config loading fails
+    if args.config:
+        try:
+            load_config(args.config)
+            logging.info(f"Using configuration from: {args.config}")
+        except Exception:
+            logging.warning(f"Failed to load configuration from {args.config}. Using default parameters.")
+            # CONFIG will remain empty, defaults will be used.
+    else:
+        logging.info("No configuration file provided. Using default parameters.")
+        # CONFIG is already an empty dict, defaults will be used.
 
-    # Extract parameters from CONFIG
+    # Extract parameters from CONFIG, falling back to defaults if not found or CONFIG is empty
     data_params = CONFIG.get('data_params', {})
     env_params = CONFIG.get('env_params', {})
     rl_params = CONFIG.get('rl_params', {})
     experiment_id = CONFIG.get('experiment_id', 'DEFAULT_EXP')
 
     TICKER = data_params.get('ticker', "SPY")
-    START_DATE = data_params.get('train_start_date', "2020-01-01") # Use train_start_date
-    END_DATE = data_params.get('train_end_date', "2023-12-31") # Use train_end_date
-    TRAINING_EPISODES = rl_params.get('episodes', 10)
+    START_DATE = data_params.get('train_start_date', "2020-01-01")
+    END_DATE = data_params.get('train_end_date', "2023-12-31")
+    TRAINING_EPISODES = rl_params.get('training_episodes', 10) # Changed 'episodes' to 'training_episodes'
     
     # Environment parameters
-    SHARPE_WINDOW_SIZE = env_params.get('sharpe_window_size', 100)
+    # Corrected location for sharpe_window_size is data_params as per config_EXP001.json
+    SHARPE_WINDOW_SIZE = data_params.get('sharpe_window_size', 100) # Corrected to data_params
     ENV_DRAWDOWN_PENALTY = env_params.get('drawdown_penalty', 0.05)
     ENV_TRADING_PENALTY = env_params.get('trading_frequency_penalty', 0.0001)
     ENV_RISK_FRACTION = env_params.get('risk_fraction', 0.1)
