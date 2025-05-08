@@ -25,7 +25,7 @@ uvicorn = {extras = ["standard"], version = "^0.34.2"}
 scikit-learn = "^1.6.1"
 plotly = "^6.0.1"
 python-dotenv = "^1.0.1" # Added for loading .env file
-tensorflow-metal = "^1.2.0"
+# tensorflow-metal = "^1.2.0"  # Temporarily commented out for Linux compatibility (Run 3)
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
