@@ -13,6 +13,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from typing import Tuple, Dict, Any, Optional, Union, List
 from collections import deque
+import ray # Added for RLlib integration
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -32,65 +33,55 @@ class TradingEnv(gym.Env):
         observation_space (gym.spaces.Space): The observation space of the environment.
     """
     
-    def __init__(self, df: pd.DataFrame, initial_balance: float = 10000.0, transaction_fee_percent: float = 0.1,
-                 window_size: int = 5, sharpe_window_size: int = 20, use_sharpe_ratio: bool = True,
-                 trading_frequency_penalty: float = 0.01, drawdown_penalty: float = 0.1,
-                 risk_free_rate: float = 0.0,
-                 stop_loss_pct: Optional[float] = None, take_profit_pct: Optional[float] = None,
-                 position_sizing_method: str = "fixed_fractional", risk_fraction: float = 0.1,
-                 normalization_window_size: int = 20): # Added normalization window size
+    def __init__(self, env_config: dict):
         """
         Initialize the trading environment.
 
         Args:
-            df (pd.DataFrame): Historical market data for simulation, including pre-calculated technical indicators.
-                               Assumes the DataFrame already contains indicator columns calculated by
-                               technical_analyzer.calculate_indicators().
-            initial_balance (float): Initial account balance.
-            transaction_fee_percent (float): Fee percentage for each transaction (default: 0.1%).
-            window_size (int): Number of time steps to include in each observation (default: 5).
-            sharpe_window_size (int): Number of time steps to use for Sharpe ratio calculation (default: 20).
-            use_sharpe_ratio (bool): Whether to use Sharpe ratio for reward calculation (default: True).
-            trading_frequency_penalty (float): Weight for the trading frequency penalty (default: 0.01).
-            drawdown_penalty (float): Weight for the drawdown penalty (default: 0.1).
-            risk_free_rate (float): Risk-free rate for Sharpe ratio calculation (default: 0.0).
-            stop_loss_pct (Optional[float]): Percentage below entry price to trigger stop-loss for long positions
-                                             (or above for short positions). None to disable. (default: None).
-            take_profit_pct (Optional[float]): Percentage above entry price to trigger take-profit for long positions
-                                               (or below for short positions). None to disable. (default: None).
-            position_sizing_method (str): Method for calculating position size ('fixed_fractional' or 'all_in').
-                                          (default: "fixed_fractional").
-            risk_fraction (float): Fraction of balance to risk per trade when using 'fixed_fractional' sizing.
-                               (default: 0.1, meaning 10%).
-       normalization_window_size (int): Window size for rolling normalization (e.g., z-score). (default: 20).
+            env_config (dict): Configuration dictionary for the environment. Expected keys:
+                df (pd.DataFrame): Historical market data.
+                initial_balance (float): Initial account balance.
+                transaction_fee_percent (float): Fee percentage for each transaction.
+                window_size (int): Number of time steps for observation.
+                sharpe_window_size (int): Window for Sharpe ratio calculation.
+                use_sharpe_ratio (bool): Whether to use Sharpe ratio for reward.
+                trading_frequency_penalty (float): Penalty for frequent trading.
+                drawdown_penalty (float): Penalty for drawdowns.
+                risk_free_rate (float): Risk-free rate for Sharpe ratio.
+                stop_loss_pct (Optional[float]): Stop-loss percentage.
+                take_profit_pct (Optional[float]): Take-profit percentage.
+                position_sizing_method (str): 'fixed_fractional' or 'all_in'.
+                risk_fraction (float): Fraction of balance to risk.
+                normalization_window_size (int): Window for rolling normalization.
         """
         super(TradingEnv, self).__init__()
 
-        self.df = df
-        self.initial_balance = initial_balance
-        self.transaction_fee_percent = transaction_fee_percent
-        self.window_size = window_size
-        self.sharpe_window_size = sharpe_window_size
-        self.use_sharpe_ratio = use_sharpe_ratio
-        self.trading_frequency_penalty = trading_frequency_penalty
-        self.drawdown_penalty = drawdown_penalty
-        self.risk_free_rate = risk_free_rate
-        self.stop_loss_pct = stop_loss_pct
-        self.take_profit_pct = take_profit_pct
-        self.position_sizing_method = position_sizing_method
-        self.risk_fraction = risk_fraction
-        self.normalization_window_size = normalization_window_size # Added normalization window size attribute
+        # Extract parameters from env_config
+        self.df = env_config["df"]
+        self.initial_balance = env_config.get("initial_balance", 10000.0)
+        self.transaction_fee_percent = env_config.get("transaction_fee_percent", 0.1)
+        self.window_size = env_config.get("window_size", 5)
+        self.sharpe_window_size = env_config.get("sharpe_window_size", 20)
+        self.use_sharpe_ratio = env_config.get("use_sharpe_ratio", True)
+        self.trading_frequency_penalty = env_config.get("trading_frequency_penalty", 0.01)
+        self.drawdown_penalty = env_config.get("drawdown_penalty", 0.1)
+        self.risk_free_rate = env_config.get("risk_free_rate", 0.0)
+        self.stop_loss_pct = env_config.get("stop_loss_pct", None)
+        self.take_profit_pct = env_config.get("take_profit_pct", None)
+        self.position_sizing_method = env_config.get("position_sizing_method", "fixed_fractional")
+        self.risk_fraction = env_config.get("risk_fraction", 0.1)
+        self.normalization_window_size = env_config.get("normalization_window_size", 20)
 
         # Placeholder for current step in the environment
         self.current_step = 0
         
         # Portfolio state
-        self.balance = initial_balance
+        self.balance = self.initial_balance # Corrected: use self.initial_balance
         self.shares_held = 0
         self.current_price = 0
-        self.portfolio_value = initial_balance
-        self.last_portfolio_value = initial_balance
-        self.max_portfolio_value = initial_balance  # Track maximum portfolio value for drawdown calculation
+        self.portfolio_value = self.initial_balance # Corrected: use self.initial_balance
+        self.last_portfolio_value = self.initial_balance # Corrected: use self.initial_balance
+        self.max_portfolio_value = self.initial_balance  # Corrected: use self.initial_balance
         
         # List to store details of completed trades
         self._completed_trades = [] # Fix: Initialize the missing attribute
@@ -99,8 +90,8 @@ class TradingEnv(gym.Env):
         self._trade_count = 0       # Count of trades in the current episode
         
         # Portfolio value history for Sharpe ratio calculation
-        self._portfolio_value_history = deque(maxlen=sharpe_window_size)
-        self._portfolio_returns = deque(maxlen=sharpe_window_size)  # Store returns for Sharpe ratio
+        self._portfolio_value_history = deque(maxlen=self.sharpe_window_size) # Corrected
+        self._portfolio_returns = deque(maxlen=self.sharpe_window_size)  # Corrected: Store returns for Sharpe ratio
         
         # Current position state: 0 = Flat, 1 = Long, -1 = Short
         self.current_position = 0
@@ -112,15 +103,15 @@ class TradingEnv(gym.Env):
         # Observation space: market data features + technical indicators + account information
         # Features include price data, indicators, balance, and position
         # For sliding window, we include window_size steps of market data plus current account information
-        num_market_features = len(df.columns)
+        num_market_features = len(self.df.columns) # Corrected
         num_portfolio_features = 2  # balance and position
-        total_features = (window_size * num_market_features) + num_portfolio_features
+        total_features = (self.window_size * num_market_features) + num_portfolio_features # Corrected
         
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(total_features,), dtype=np.float32
         )
         
-        logger.info(f"TradingEnv initialized with {len(df)} data points (including indicators) and initial balance {initial_balance}")
+        logger.info(f"TradingEnv initialized with {len(self.df)} data points (including indicators) and initial balance {self.initial_balance}") # Corrected
     
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
@@ -840,3 +831,8 @@ class TradingEnv(gym.Env):
         # Placeholder implementation
         # Will be expanded if needed in future tasks
         logger.info("Environment closed")
+def register_rllib_env():
+    """Registers the TradingEnv with RLlib."""
+    from ray.tune.registry import register_env
+    register_env("TradingEnv-v0", lambda config: TradingEnv(config))
+    logger.info("TradingEnv-v0 registered with RLlib.")

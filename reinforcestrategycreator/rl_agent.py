@@ -1,5 +1,5 @@
 """
-Reinforcement Learning Agent Module
+Reinforcement Learning Agent Module (PyTorch Version)
 
 This module provides a reinforcement learning agent for strategy creation.
 :ComponentRole RLAgent
@@ -10,20 +10,19 @@ import logging
 import numpy as np
 import random
 from typing import List, Tuple, Any, Union
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Input # Added Input
-from tensorflow.keras.optimizers import Adam
+from collections import deque
 
-from collections import deque # Added import
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F # For loss function if needed, or use nn.MSELoss
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
 class StrategyAgent:
     """
-    Reinforcement Learning agent for trading strategy creation using DQN.
+    Reinforcement Learning agent for trading strategy creation using DQN (PyTorch).
     :Algorithm DQN
 
     This class implements a Deep Q-Network (DQN) agent that learns to create
@@ -32,7 +31,10 @@ class StrategyAgent:
     Attributes:
         state_size (int): Dimension of the state space.
         action_size (int): Dimension of the action space.
-        model (keras.Model): The Q-network model.
+        device (torch.device): Device to run the model on (e.g., 'cuda', 'mps', 'cpu').
+        model (nn.Module): The Q-network model.
+        target_model (nn.Module): The target Q-network model for stable learning.
+        optimizer (optim.Optimizer): Optimizer for training the model.
         learning_rate (float): Learning rate for the optimizer.
         epsilon (float): Current exploration rate for epsilon-greedy policy.
         epsilon_min (float): Minimum exploration rate.
@@ -41,7 +43,6 @@ class StrategyAgent:
         memory_size (int): Maximum size of the replay buffer.
         batch_size (int): Size of the mini-batch sampled from memory for training.
         gamma (float): Discount factor for future rewards.
-        target_model (keras.Model): The target Q-network model for stable learning.
         target_update_freq (int): Frequency (in learning steps) to update the target network.
         update_counter (int): Counter for tracking steps until the next target network update.
     """
@@ -53,11 +54,11 @@ class StrategyAgent:
                  epsilon_decay: float = 0.995,
                  memory_size: int = 2000, batch_size: int = 32,
                  gamma: float = 0.95,
-                 target_update_freq: int = 100): # <-- Add target_update_freq
+                 target_update_freq: int = 100):
         """
-        Initialize the DQN agent with Experience Replay and Target Network.
+        Initialize the DQN agent with Experience Replay and Target Network (PyTorch).
 
-        Builds and compiles the main Q-network and the target Q-network,
+        Builds the main Q-network and the target Q-network using PyTorch,
         sets up epsilon-greedy parameters, initializes the experience replay memory,
         and configures the target network update frequency.
         :Algorithm EpsilonGreedyExploration
@@ -86,57 +87,42 @@ class StrategyAgent:
         self.batch_size = batch_size
         self.gamma = gamma
         self.target_update_freq = target_update_freq
-        self.update_counter = 0 # Counter for target network updates
+        self.update_counter = 0
 
-        # --- Device Check & Configuration (MPS for Apple Silicon) ---
-        try:
-            physical_gpus = tf.config.list_physical_devices('GPU')
-            if physical_gpus:
-                # Standard GPU (CUDA) found - less likely on Mac but check first
-                logger.info(f"TensorFlow GPU device(s) found: {physical_gpus}")
-                # Configuration for standard GPUs usually happens automatically or via CUDA env vars
-            elif tf.config.backends.mps.is_available():
-                logger.info("TensorFlow MPS (Metal Performance Shaders) device found.")
-                # Explicitly enable memory growth for MPS if needed, although often default
-                # tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('MPS')[0], True) # MPS doesn't have explicit memory growth setting like CUDA
-                logger.info("TensorFlow should automatically utilize MPS device on compatible versions.")
-                # We don't typically need tf.device('/MPS:0') context manager for the whole class,
-                # Keras/TF should handle placement if MPS is available and tensorflow-metal is installed.
-                # Logging confirms awareness. Performance will be the real test.
-            else:
-                logger.warning("No GPU or MPS device found. TensorFlow will use CPU.")
-        except Exception as e:
-            logger.error(f"Error during device check/configuration: {e}")
-        # --- End Device Check ---
+        # --- Device Configuration ---
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            logger.info("PyTorch CUDA device found. Using GPU.")
+        elif torch.backends.mps.is_available(): # For Apple Silicon
+            self.device = torch.device("mps")
+            logger.info("PyTorch MPS device found. Using Apple Silicon GPU.")
+        else:
+            self.device = torch.device("cpu")
+            logger.info("No GPU or MPS found. PyTorch will use CPU.")
+        # --- End Device Configuration ---
 
-        # Initialize replay memory
         self.memory = deque(maxlen=self.memory_size)
 
-        # Build the main Q-Network model
-        self.model = self._build_model()
+        self.model = self._build_model().to(self.device)
+        self.target_model = self._build_model().to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        
+        self.update_target_model() # Initialize target model weights
 
-        # Build the target Q-Network model
-        self.target_model = self._build_model()
-        # Initialize target model weights to match the main model
-        self.update_target_model()
+        logger.info(f"StrategyAgent (PyTorch DQN with Target Network) initialized: state_size={state_size}, "
+                    f"action_size={action_size}, learning_rate={learning_rate}, device={self.device}. "
+                    "Models built. Target model initialized. Replay memory initialized.")
 
-        logger.info(f"StrategyAgent (DQN with Target Network) initialized: state_size={state_size}, "
-                    f"action_size={action_size}, learning_rate={learning_rate}, "
-                    f"epsilon={epsilon}, epsilon_min={epsilon_min}, epsilon_decay={epsilon_decay}, "
-                    f"memory_size={memory_size}, batch_size={batch_size}, gamma={gamma}, "
-                    f"target_update_freq={target_update_freq}. "
-                    "Models built and compiled. Target model initialized. Replay memory initialized.")
-
-    def _build_model(self) -> keras.Model:
-        """Builds the Keras model for the Q-network."""
-        model = Sequential([
-            Input(shape=(self.state_size,)), # Explicit Input layer
-            Dense(64, activation='relu'),     # No input_dim needed here
-            Dense(64, activation='relu'),
-            Dense(self.action_size, activation='linear')
-        ])
-        model.compile(loss='mse', optimizer=Adam(learning_rate=self.learning_rate))
-        logger.debug("Q-Network model built and compiled.")
+    def _build_model(self) -> nn.Module:
+        """Builds the PyTorch model for the Q-network."""
+        model = nn.Sequential(
+            nn.Linear(self.state_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.action_size)  # Output layer, linear activation for Q-values
+        )
+        logger.debug("PyTorch Q-Network model built.")
         return model
 
     def remember(self, state: Union[List[float], np.ndarray],
@@ -144,159 +130,117 @@ class StrategyAgent:
                  reward: float,
                  next_state: Union[List[float], np.ndarray],
                  done: bool) -> None:
-        """
-        Store an experience tuple in the replay memory.
-        :Algorithm ExperienceReplay
-
-        Args:
-            state (Union[List[float], np.ndarray]): The starting state.
-            action (int): The action taken.
-            reward (float): The reward received.
-            next_state (Union[List[float], np.ndarray]): The next state observed.
-            done (bool): Whether the episode has ended.
-        """
-        # Ensure states are numpy arrays for consistency in memory
+        """Store an experience tuple in the replay memory."""
+        # Ensure states are numpy arrays for consistency before potential tensor conversion
         if isinstance(state, list):
-            state = np.array(state)
+            state = np.array(state, dtype=np.float32)
         if isinstance(next_state, list):
-            next_state = np.array(next_state)
-
-        # Reshape states to ensure they have the expected shape (1, state_size)
-        # This helps maintain consistency when sampling batches later
-        state = np.reshape(state, [1, self.state_size])
-        next_state = np.reshape(next_state, [1, self.state_size])
-
+            next_state = np.array(next_state, dtype=np.float32)
+        
+        # No need to reshape here if RLlib handles batching correctly later
         self.memory.append((state, action, reward, next_state, done))
-        logger.debug(f"Remembered experience: state shape={state.shape}, action={action}, reward={reward}, "
-                     f"next_state shape={next_state.shape}, done={done}. Memory size: {len(self.memory)}")
+        # logger.debug(f"Remembered experience. Memory size: {len(self.memory)}")
 
 
     def select_action(self, state: Union[List[float], np.ndarray]) -> int:
-        """
-        Select an action based on the current state using an epsilon-greedy policy.
-        
-        With probability epsilon, a random action is chosen (exploration).
-        Otherwise, the action with the highest predicted Q-value is chosen (exploitation).
-        
-        Args:
-            state (Union[List[float], np.ndarray]): The current state observation.
-            
-        Returns:
-            int: The selected action index.
-        """
-        # Epsilon-greedy action selection
+        """Select an action based on the current state using an epsilon-greedy policy."""
         if np.random.rand() <= self.epsilon:
             action = np.random.randint(self.action_size)
-            logger.debug(f"Exploration: Selected random action {action}")
+            # logger.debug(f"Exploration: Selected random action {action}")
         else:
-            # Ensure state is a numpy array and reshape for the model
-            if isinstance(state, list):
-                state = np.array(state)
-            if state.ndim == 1: # Reshape if it's a flat array
-                 state = np.reshape(state, [1, self.state_size])
-            elif state.shape[0] != 1: # Ensure batch dimension is 1 if already 2D+
-                 # This case might indicate an issue elsewhere, but we handle reshaping defensively
-                 logger.warning(f"Unexpected state shape {state.shape} received in select_action. Reshaping first element.")
-                 state = np.reshape(state[0], [1, self.state_size]) # Attempt to use the first element
+            if isinstance(state, list) or isinstance(state, np.ndarray):
+                # Ensure state is a flat numpy array first if it's a list
+                if isinstance(state, list):
+                    state = np.array(state, dtype=np.float32)
+                # Convert to PyTorch tensor, add batch dimension, and send to device
+                state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
+            else: # Assuming state is already a tensor (e.g. from RLlib)
+                state_tensor = state.float().unsqueeze(0).to(self.device)
 
-            # Predict Q-values for the state
-            q_values = self.model.predict(state, verbose=0) # verbose=0 suppresses Keras prediction logs
-            logger.info(f"Q-values for exploitation: {q_values[0]}") # Log Q-values before argmax
-            action = np.argmax(q_values[0])
-            logger.debug(f"Exploitation: Q-values={q_values[0]}, Selected action {action}")
+            self.model.eval() # Set model to evaluation mode for inference
+            with torch.no_grad(): # Disable gradient calculations for inference
+                q_values = self.model(state_tensor)
+            self.model.train() # Set model back to training mode
 
-        # Decay epsilon (optional placement, could be in learn method)
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-            logger.debug(f"Epsilon decayed to {self.epsilon}")
-            
-        return int(action) # Ensure standard Python int is returned
-
-    def learn(self) -> None:
-        """
-        Samples a batch from memory, calculates target Q-values, and trains the Q-network.
-
-        This method implements the core DQN learning step:
-        1. Samples a minibatch of experiences from the replay memory.
-        2. Predicts Q-values for the next states using the main Q-network.
-        3. Calculates the target Q-values using the Bellman equation:
-           target = reward + gamma * max(Q(next_state, a')) * (1 - done)
-        4. Predicts the current Q-values for the sampled states.
-        5. Creates a target Q-value array where only the Q-value for the action
-           actually taken is updated with the calculated Bellman target.
-        6. Trains the main Q-network model using the states and the constructed
-           target Q-value array.
-
-        :Algorithm DQN
-        :Algorithm ExperienceReplay
-        :Context ModelTraining
-        :Context BatchProcessing
-        """
-        # Check if enough samples are available in memory to form a batch
-        if len(self.memory) < self.batch_size:
-            logger.debug(f"Learn called but not enough samples in memory ({len(self.memory)}/{self.batch_size}). Skipping learning step.")
-            return # Not enough samples to train
-
-        # Sample a random minibatch from memory
-        minibatch = random.sample(self.memory, self.batch_size)
-        logger.debug(f"Sampled minibatch of size {self.batch_size}")
-
-        # Extract components from the minibatch
-        # States and next_states are already shaped (1, state_size) in memory
-        # We stack them vertically to get (batch_size, state_size)
-        states = np.vstack([experience[0] for experience in minibatch])
-        actions = np.array([experience[1] for experience in minibatch])
-        rewards = np.array([experience[2] for experience in minibatch])
-        next_states = np.vstack([experience[3] for experience in minibatch])
-        # Convert dones to uint8 for (1 - dones) calculation
-        dones = np.array([experience[4] for experience in minibatch]).astype(np.uint8)
-
-        logger.debug(f"Prepared batch data: states shape {states.shape}, actions shape {actions.shape}, "
-                     f"rewards shape {rewards.shape}, next_states shape {next_states.shape}, dones shape {dones.shape}")
-
-        # --- Q-Value Target Calculation and Training ---
-        # 1. Predict Q-values for the next states using the *target* model for stability
-        next_q_values = self.target_model.predict(next_states, verbose=0) # Use target_model here
-        logger.debug(f"Predicted next_q_values (using target model) shape: {next_q_values.shape}")
-
-        # 2. Calculate the target Q-value using the Bellman equation
-        # Target is reward if done, otherwise reward + discounted max future Q
-        target = rewards + self.gamma * np.amax(next_q_values, axis=1) * (1 - dones)
-        logger.debug(f"Calculated target shape: {target.shape}")
-
-        # 3. Predict current Q-values for the states in the batch
-        current_q_values = self.model.predict(states, verbose=0)
-        logger.debug(f"Predicted current_q_values shape: {current_q_values.shape}")
-
-        # 4. Create the target Q-value array for training
-        # Start with current Q-values, then update only the Q-value for the action taken
-        target_q_values = current_q_values.copy()
-        batch_indices = np.arange(self.batch_size)
-        target_q_values[batch_indices, actions] = target
-        logger.debug(f"Constructed target_q_values shape: {target_q_values.shape}")
-
-        # 5. Train the main model using the states and the calculated target Q-values
-        history = self.model.fit(states, target_q_values, epochs=1, verbose=0)
-        loss = history.history['loss'][0]
-        logger.debug(f"Training complete for one batch. Loss: {loss}")
-
-        # Increment counter and update target network if needed
-        self._update_target_if_needed()
-
-        # Optional: Update epsilon decay here instead of in select_action if preferred
+            action = torch.argmax(q_values[0]).item() # Get action with max Q-value
+            # logger.debug(f"Exploitation: Q-values={q_values[0].cpu().numpy()}, Selected action {action}")
+        
+        # Epsilon decay is typically handled by RLlib's exploration config when integrated
+        # If running standalone, uncomment:
         # if self.epsilon > self.epsilon_min:
         #     self.epsilon *= self.epsilon_decay
+        #     logger.debug(f"Epsilon decayed to {self.epsilon}")
+            
+        return int(action)
+
+    def learn(self) -> None:
+        """Samples a batch from memory, calculates target Q-values, and trains the Q-network."""
+        if len(self.memory) < self.batch_size:
+            # logger.debug(f"Learn called but not enough samples in memory ({len(self.memory)}/{self.batch_size}).")
+            return
+
+        minibatch = random.sample(self.memory, self.batch_size)
+        
+        states = np.array([experience[0] for experience in minibatch], dtype=np.float32)
+        actions = np.array([experience[1] for experience in minibatch])
+        rewards = np.array([experience[2] for experience in minibatch], dtype=np.float32)
+        next_states = np.array([experience[3] for experience in minibatch], dtype=np.float32)
+        dones = np.array([experience[4] for experience in minibatch], dtype=np.uint8)
+
+        states_tensor = torch.from_numpy(states).float().to(self.device)
+        actions_tensor = torch.from_numpy(actions).long().to(self.device) # Actions are indices
+        rewards_tensor = torch.from_numpy(rewards).float().to(self.device)
+        next_states_tensor = torch.from_numpy(next_states).float().to(self.device)
+        dones_tensor = torch.from_numpy(dones).float().to(self.device) # Float for (1 - dones)
+
+        # Get Q-values for next states from target model
+        next_q_values_target = self.target_model(next_states_tensor).detach()
+        # Select max Q-value for next states (Double DQN would use main model here for action selection)
+        max_next_q_values = torch.max(next_q_values_target, dim=1)[0]
+        
+        # Compute target Q-values: R + gamma * max_a' Q_target(s', a')
+        target_q_val = rewards_tensor + self.gamma * max_next_q_values * (1 - dones_tensor)
+
+        # Get current Q-values from main model
+        current_q_values = self.model(states_tensor)
+        # Gather Q-values for the actions taken
+        action_q_values = current_q_values.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
+
+        # Compute loss (e.g., MSELoss or SmoothL1Loss)
+        loss = F.mse_loss(action_q_values, target_q_val)
+        # loss = nn.MSELoss()(action_q_values, target_q_val)
+
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        
+        # logger.debug(f"Training batch complete. Loss: {loss.item()}")
+
+        self._update_target_if_needed()
 
     def _update_target_if_needed(self) -> None:
         """Checks the counter and updates the target network weights if the frequency is met."""
         self.update_counter += 1
         if self.update_counter % self.target_update_freq == 0:
             self.update_target_model()
-            logger.info(f"Target network updated at step {self.update_counter}")
-            # Optional: Reset counter if you prefer counting from 0 each time
-            # self.update_counter = 0
+            # logger.info(f"Target network updated at step {self.update_counter}")
 
     def update_target_model(self) -> None:
         """Copies weights from the main model to the target model."""
-        logger.debug("Updating target model weights from main model.")
-        self.target_model.set_weights(self.model.get_weights())
+        # logger.debug("Updating target model weights from main model.")
+        self.target_model.load_state_dict(self.model.state_dict())
+
+    # Placeholder for saving/loading, RLlib will handle this when integrated
+    def save_model(self, path: str):
+        """Saves the model state_dict."""
+        # torch.save(self.model.state_dict(), path)
+        # logger.info(f"PyTorch model saved to {path}")
+        pass # RLlib handles saving
+
+    def load_model(self, path: str):
+        """Loads the model state_dict."""
+        # self.model.load_state_dict(torch.load(path, map_location=self.device))
+        # self.update_target_model() # Ensure target model is also updated
+        # logger.info(f"PyTorch model loaded from {path}")
+        pass # RLlib handles loading
