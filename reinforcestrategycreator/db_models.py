@@ -40,10 +40,12 @@ class Episode(Base):
     run_id = Column(
         String, ForeignKey("training_runs.run_id"), nullable=False, index=True
     )
+    rllib_episode_id = Column(String, index=True, unique=True, nullable=False) # Stores the RLlib-generated episode ID
     start_time = Column(DateTime, default=datetime.datetime.utcnow)
     end_time = Column(DateTime)
     initial_portfolio_value = Column(Float)
     final_portfolio_value = Column(Float)
+    status = Column(String, default="started")  # Add status field
     pnl = Column(Float)  # Profit and Loss
     sharpe_ratio = Column(Float)
     max_drawdown = Column(Float)

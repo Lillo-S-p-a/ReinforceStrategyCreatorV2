@@ -37,3 +37,12 @@
     *   **Action:** Implemented core `learn` method logic: sampling batch, predicting Q-values for next/current states, calculating Bellman target, constructing target Q-array, calling `model.fit`.
     *   **Testing:** Implemented `test_init_gamma` and `test_learn_q_value_target_calculation_and_fit` in `tests/test_rl_agent.py`. Used extensive mocking (`unittest.mock`) for `model.predict` and `model.fit`. Verified correct arguments passed to mocks, handling shuffled batch order. Verified Bellman target calculation. Updated `test_learn_integration_no_runtime_error`. (**Targeted Testing Strategy**: Core Logic + Contextual Integration).
     *   **Status:** Completed. All relevant tests passing.
+
+## 2025-05-13
+
+*   **Task:** Debug Database Logging for RLlib Callbacks
+    *   **Initial Context:** Investigating why episode data (final portfolio value, PnL, etc.) was not being saved correctly to the database via `reinforcestrategycreator/callbacks.py`. Initial attempts focused on `on_episode_end` not being called or data access issues within the callback.
+    *   **Critical Update:** User revealed that the project recently migrated from **TensorFlow to PyTorch**. This significantly changes the context, as RLlib's API and internal object structures (like the `episode` object passed to callbacks) can differ.
+    *   **Decision:** The issue is likely broader than a simple callback fix and requires a more comprehensive refactor of the RLlib integration, especially concerning how callbacks interact with the PyTorch backend and RLlib's new API stack.
+    *   **Action:** Will create an MDTM task to delegate this refactoring work to `dev-solver`.
+    *   **Status:** Investigation pivoted; new refactoring task to be created.

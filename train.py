@@ -119,6 +119,14 @@ def main():
         "normalization_window_size": ENV_NORMALIZATION_WINDOW_SIZE,
         # Add any other parameters TradingEnv expects
     }
+    
+    # --- Database Logging Setup (run_id needs to be defined before config) ---
+    run_id = f"RLlibRUN-{TICKER}-{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    logger.info(f"Generated Run ID: {run_id}")
+    
+    # Create the callback config using the run_id
+    callback_config = {"run_id": run_id}
+    logger.info(f"Created callback_config with run_id: {run_id}")
 
     config = (
         DQNConfig()
@@ -152,17 +160,13 @@ def main():
         .resources(
             num_gpus=1 if ray.is_initialized() and ray.cluster_resources().get("GPU", 0) > 0 else 0
         )
-        .callbacks(DatabaseLoggingCallbacks) # Add the custom callback
+        # Initialize DatabaseLoggingCallbacks with a dictionary containing run_id
+        .callbacks(lambda: DatabaseLoggingCallbacks(callback_config)) # Use callback_config here
         .reporting(min_time_s_per_iteration=10) # Report metrics at least every 10s
     )
     
     # For debugging the config
     # logger.info(f"RLlib Config: {pretty_print(config.to_dict())}")
-
-
-    # --- Database Logging Setup ---
-    run_id = f"RLlibRUN-{TICKER}-{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
-    logger.info(f"Generated Run ID: {run_id}")
 
     run_params = {
         "ticker": TICKER, "start_date": START_DATE, "end_date": END_DATE,
@@ -205,12 +209,10 @@ def main():
             ray.shutdown()
             return
     
-    # Pass run_id to callbacks via callbacks_config
-    # This dictionary will be passed to the DatabaseLoggingCallbacks constructor
-    config.callbacks_config = {"run_id": run_id}
-    
-    # Store run_id for updating status later
-    training_run_db_id = run_id
+    # Both set callbacks_config (for algorithm config) and directly pass run_id to the callback via lambda
+    config.callbacks_config = callback_config
+    # Directly set the config value to ensure it's available
+    logger.info(f"Set config.callbacks_config to: {config.callbacks_config}")
     
     # Explicitly disable new API stack warnings
     config.api_stack(

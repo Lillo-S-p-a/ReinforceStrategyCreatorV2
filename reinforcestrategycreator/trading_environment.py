@@ -92,6 +92,7 @@ class TradingEnv(gym.Env):
         # Portfolio value history for Sharpe ratio calculation
         self._portfolio_value_history = deque(maxlen=self.sharpe_window_size) # Corrected
         self._portfolio_returns = deque(maxlen=self.sharpe_window_size)  # Corrected: Store returns for Sharpe ratio
+        self.episode_max_drawdown = 0.0 # Initialize episode max drawdown
         
         # Current position state: 0 = Flat, 1 = Long, -1 = Short
         self.current_position = 0
@@ -153,6 +154,7 @@ class TradingEnv(gym.Env):
         self._completed_trades.clear()
         self._portfolio_value_history.clear()
         self._portfolio_returns.clear()
+        self.episode_max_drawdown = 0.0 # Reset for new episode
         
         if len(self.df) == 0:
             error_msg = "DataFrame is empty. Cannot reset environment."
@@ -310,6 +312,26 @@ class TradingEnv(gym.Env):
 
         terminated = done
         truncated = False
+
+        if terminated:
+            info['initial_balance'] = self.initial_balance
+            info['completed_trades'] = list(self._completed_trades) # Make a copy
+            
+            if self._completed_trades:
+                winning_trades = sum(1 for trade in self._completed_trades if trade.get('pnl', 0) > 0)
+                info['win_rate'] = winning_trades / len(self._completed_trades) if len(self._completed_trades) > 0 else 0.0
+            else:
+                info['win_rate'] = 0.0
+            
+            info['max_drawdown'] = self.episode_max_drawdown
+            # portfolio_value is already in info
+            
+            logger.info(
+                f"Episode ended. Final info populated: initial_balance={info.get('initial_balance')}, "
+                f"completed_trades_count={len(info.get('completed_trades', []))}, "
+                f"win_rate={info.get('win_rate')}, max_drawdown={info.get('max_drawdown')}, "
+                f"portfolio_value={info.get('portfolio_value')}"
+            )
 
         logger.debug(f"Step {self.current_step}: action={action}, reward={reward:.4f}, done={done}, SL={sl_triggered}, TP={tp_triggered}")
         return observation, reward, terminated, truncated, info
@@ -693,6 +715,7 @@ class TradingEnv(gym.Env):
         # Calculate current drawdown as percentage from peak
         if self.max_portfolio_value > 0:
             current_drawdown = max(0, (self.max_portfolio_value - self.portfolio_value) / self.max_portfolio_value)
+            self.episode_max_drawdown = max(self.episode_max_drawdown, current_drawdown) # Track max drawdown for episode
             drawdown_penalty = self.drawdown_penalty * current_drawdown
         else:
             drawdown_penalty = 0

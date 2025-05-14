@@ -15,7 +15,7 @@ pandas-ta = "^0.3.14b0"
 ta = "^0.11.0"
 numpy = "^1.26.0"
 gymnasium = "^1.0.0"
-tensorflow = "^2.16.1" # Or appropriate version
+# tensorflow = "^2.16.1" # Or appropriate version - REMOVED as it's not actively used and may cause GPU conflicts
 matplotlib = "^3.8.4" # Added for plotting results
 streamlit = "^1.34.0" # Added for dashboard
 sqlalchemy = "^2.0.30" # Added for PostgreSQL interaction
@@ -29,6 +29,7 @@ torch = "^2.3.0" # Or a version compatible with Ray 2.46.0
 torchvision = "^0.18.0"
 torchaudio = "^2.3.0"
 ray = {extras = ["rllib"], version = "^2.46.0"} # Adjusted for gymnasium 1.0.0 compatibility
+protobuf = "~3.20.0" # Pinned to resolve AttributeError
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"
