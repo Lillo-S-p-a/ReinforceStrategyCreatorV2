@@ -10,4 +10,4 @@ export RLLIB_DISABLE_API_STACK_WARNING=1
 export RAY_LOGGING_LEVEL=ERROR
 
 # Run the training script using poetry
-poetry run python3 train.py
+poetry run python3 train.py --n_step_returns 1

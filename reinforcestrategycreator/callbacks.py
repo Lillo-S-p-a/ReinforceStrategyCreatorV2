@@ -18,7 +18,13 @@ from typing import Dict, Optional, Any # Keep Any for now, or use Union[Episode,
 # from ray.rllib.env.env_runner import EnvRunner
 
 from reinforcestrategycreator.db_utils import get_db_session
-from reinforcestrategycreator.db_models import Episode as DbEpisode, Trade as DbTrade, TrainingRun
+from reinforcestrategycreator.db_models import (
+    Episode as DbEpisode,
+    Trade as DbTrade,
+    TrainingRun,
+    Step as DbStep, # Added
+    TradingOperation as DbTradingOperation, # Added
+    OperationType) # Added
 
 # Set up a specific logger for this module
 logger = logging.getLogger('callbacks') # Use a specific name
@@ -339,294 +345,260 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
             except Exception as e:
                 logger.error(f"Error in _log_episode_start_data for RLlib episode {getattr(episode, 'id_', 'unknown_rllib_id')}: {e}", exc_info=True)
                 # Do not re-raise, allow the main callback to continue if possible
+
     def _log_episode_end_data(
         self,
         *,
         episode: Any,
-        worker: Optional[EnvRunnerGroup] = None, # Keep for signature consistency if called from on_episode_end
-        base_env: Optional[BaseEnv] = None,    # Keep for signature consistency
-        policies: Optional[Dict[str, Policy]] = None, # Keep for signature consistency
-        env_index: Optional[int] = None,       # Keep for signature consistency
+        worker: Optional[EnvRunnerGroup] = None, 
+        base_env: Optional[BaseEnv] = None,    
+        policies: Optional[Dict[str, Policy]] = None, 
+        env_index: Optional[int] = None,       
         **kwargs,
     ) -> None:
         """Helper method to log episode end data. Can be called from on_episode_end or on_sample_end."""
         try:
-            logger.info(f"--- _log_episode_end_data ENTERED for RLlib episode_id: {getattr(episode, 'id_', 'UNKNOWN_RLIB_EPISODE_ID')} ---")
-            # Log available arguments for debugging, especially if called from different contexts
-            logger.info(f"Args for _log_episode_end_data: Worker: {worker}, BaseEnv: {base_env}, EnvIndex: {env_index}, Policies: {policies is not None}, Kwargs: {kwargs.keys()}")
+            rllib_episode_id_str = getattr(episode, 'id_', getattr(episode, 'episode_id', 'UNKNOWN_RLIB_EPISODE_ID'))
+            logger.info(f"--- _log_episode_end_data ENTERED for RLlib episode_id: {rllib_episode_id_str} ---")
+            logger.info(f"Args for _log_episode_end_data: Worker type: {type(worker)}, BaseEnv type: {type(base_env)}, EnvIndex: {env_index}, Policies: {policies is not None}, Kwarg keys: {list(kwargs.keys())}")
             logger.info(f"Episode object type: {type(episode)}")
-            # logger.info(f"Episode available attributes: {dir(episode)}") # Can be very verbose
 
-            # Ensure run_id is set (it should be from __init__ or on_episode_start)
             if not self.run_id:
-                # Attempt to get run_id if it's somehow not set (should be rare here)
-                if worker:
-                    self.run_id = self.get_run_id_from_algorithm(worker)
-                if not self.run_id and "callbacks_config" in kwargs:
-                     callbacks_cfg = kwargs["callbacks_config"]
-                     if callbacks_cfg and "run_id" in callbacks_cfg:
-                         self.run_id = callbacks_cfg["run_id"]
-                
+                if worker: self.run_id = self.get_run_id_from_algorithm(worker)
+                if not self.run_id and "callbacks_config" in kwargs and kwargs["callbacks_config"] and "run_id" in kwargs["callbacks_config"]:
+                    self.run_id = kwargs["callbacks_config"]["run_id"]
                 if not self.run_id:
-                    logger.error(f"CRITICAL: self.run_id is NOT SET in _log_episode_end_data for RLlib episode_id {getattr(episode, 'id_', 'unknown_rllib_id')}. Aborting DB log.")
+                    logger.error(f"CRITICAL: self.run_id is NOT SET in _log_episode_end_data for RLlib episode_id {rllib_episode_id_str}. Aborting DB log.")
                     return
 
             db_episode_id = episode.custom_data.get("db_episode_id")
-            
-            # Check if this episode's end has already been logged by this callback instance
             if episode.custom_data.get("_db_logged_end", False):
-                logger.info(f"Episode {getattr(episode, 'id_', 'unknown_rllib_id')} (DB ID: {db_episode_id}) end already processed by this callback. Skipping _log_episode_end_data.")
+                logger.info(f"Episode {rllib_episode_id_str} (DB ID: {db_episode_id}) end already processed by this callback. Skipping.")
                 return
 
             if not db_episode_id:
-                logger.warning(f"db_episode_id not found in episode.custom_data for RLlib episode_id {getattr(episode, 'id_', 'unknown_rllib_id')} in _log_episode_end_data. This episode may have already been processed or started incorrectly.")
-                # Attempt to find an open episode as a fallback, though this is less reliable if called from on_sample_end for multiple episodes
+                logger.warning(f"db_episode_id not found in episode.custom_data for RLlib episode_id {rllib_episode_id_str}. Attempting fallback.")
                 try:
-                    with get_db_session() as db:
-                        open_episode_q = db.query(DbEpisode).filter(
+                    with get_db_session() as db_fallback:
+                        open_episode_q = db_fallback.query(DbEpisode).filter(
                             DbEpisode.run_id == self.run_id,
-                            DbEpisode.end_time.is_(None),
-                            # Heuristic: try to match based on some episode property if available, e.g. start time if stored in custom_data
-                            # For now, just take the latest open one, but this is risky.
+                            DbEpisode.rllib_episode_id == rllib_episode_id_str,
+                            DbEpisode.end_time.is_(None)
                         ).order_by(DbEpisode.start_time.desc()).first()
-                        
                         if open_episode_q:
                             db_episode_id = open_episode_q.episode_id
-                            logger.info(f"Fallback: Found open DB episode with ID {db_episode_id}")
+                            logger.info(f"Fallback: Found open DB episode with ID {db_episode_id} by matching rllib_episode_id.")
+                            episode.custom_data["db_episode_id"] = db_episode_id
                         else:
-                            logger.error(f"Fallback: Could not find an open DB episode for run_id {self.run_id}. Cannot log episode end for RLlib ID {getattr(episode, 'id_', 'unknown_rllib_id')}.")
+                            logger.error(f"Fallback: Could not find an open DB episode for run_id {self.run_id} and rllib_episode_id {rllib_episode_id_str}. Cannot log episode end.")
                             return
                 except Exception as e_find_ep:
                     logger.error(f"Fallback: Error finding open DB episode: {e_find_ep}", exc_info=True)
                     return
-
-            # Check if this db_episode_id has already been processed (i.e., has an end_time in DB)
-            # This check is still useful as a safeguard against race conditions or multiple callback instances
+            
             try:
                 with get_db_session() as db_check:
                     existing_db_ep = db_check.query(DbEpisode).filter(DbEpisode.episode_id == db_episode_id).first()
-                    if existing_db_ep and existing_db_ep.end_time is not None:
-                        logger.warning(f"DB Episode {db_episode_id} (RLlib ID: {getattr(episode, 'id_', 'unknown_rllib_id')}) already has an end_time in DB. Skipping update from _log_episode_end_data.")
-                        episode.custom_data["_db_logged_end"] = True # Mark as processed by callback even if DB said so
+                    if existing_db_ep and existing_db_ep.end_time is not None and existing_db_ep.status == "completed":
+                        logger.warning(f"DB Episode {db_episode_id} (RLlib ID: {rllib_episode_id_str}) already has an end_time and status 'completed' in DB. Skipping update.")
+                        episode.custom_data["_db_logged_end"] = True 
                         return
             except Exception as e_check:
                 logger.error(f"Error checking existing DB episode {db_episode_id}: {e_check}", exc_info=True)
-                # Proceed with caution or return, depending on desired robustness
 
-            final_portfolio_value = None
             initial_portfolio_value = None
-            actual_env_for_value = None
-            total_reward_val = None
-            episode_length_val = None
-            custom_metrics_val = {}
+            final_portfolio_value = None
+            pnl_val = None
             sharpe_ratio_val = None
             max_drawdown_val = None
+            total_reward_val = None
+            total_steps_val = None
             win_rate_val = None
             completed_trades = []
-
-            # Determine the actual environment instance for metrics
-            if hasattr(episode, 'env') and episode.env is not None:
-                 actual_env_for_value = episode.env
-                 logger.info("Using episode.env as actual_env_for_value for metrics in _log_episode_end_data.")
-            elif 'env' in kwargs and kwargs['env'] is not None:
-                actual_env_for_value = kwargs['env']
-                logger.info("Using env from kwargs as actual_env_for_value for metrics in _log_episode_end_data.")
-            elif 'env_runner' in kwargs and hasattr(kwargs['env_runner'], 'env') and kwargs['env_runner'].env is not None:
-                actual_env_for_value = kwargs['env_runner'].env
-                logger.info("Using env_runner.env from kwargs as actual_env_for_value for metrics in _log_episode_end_data.")
-            elif base_env and env_index is not None:
+            last_info_dict = {}
+            
+            actual_env_for_value = None
+            if hasattr(episode, 'env') and episode.env is not None: actual_env_for_value = episode.env
+            elif 'env' in kwargs and kwargs['env'] is not None: actual_env_for_value = kwargs['env']
+            elif base_env and env_index is not None and hasattr(base_env, "get_sub_environments") and callable(base_env.get_sub_environments):
                 try:
-                    actual_env_for_value = base_env.get_sub_environments()[env_index]
-                    logger.info(f"Using sub_environment at index {env_index} from base_env for metrics in _log_episode_end_data.")
-                except Exception as e:
-                    logger.warning(f"Error getting sub_environment from base_env at index {env_index} for metrics in _log_episode_end_data: {e}")
-            else:
-                logger.warning("Could not determine specific environment instance for metrics in _log_episode_end_data.")
+                    sub_envs = base_env.get_sub_environments()
+                    if sub_envs and env_index < len(sub_envs): actual_env_for_value = sub_envs[env_index]
+                except Exception as e: logger.warning(f"Error getting sub_environment: {e}")
+            if actual_env_for_value: logger.info(f"Resolved actual_env_for_value: {type(actual_env_for_value)}")
+            else: logger.warning("Could not resolve actual_env_for_value for direct metric access.")
 
             if isinstance(episode, SingleAgentEpisode):
-                logger.info("Processing metrics for SingleAgentEpisode.")
                 if callable(getattr(episode, 'get_infos', None)) and episode.get_infos():
-                    last_info = episode.get_infos()[-1] # Get the info dict from the last step
-                    if isinstance(last_info, dict):
-                        final_portfolio_value = last_info.get('portfolio_value')
-                        initial_portfolio_value = last_info.get('initial_balance') # Assuming env puts it in last info
-                        sharpe_ratio_val = last_info.get("sharpe_ratio")
-                        max_drawdown_val = last_info.get("max_drawdown")
-                        win_rate_val = last_info.get("win_rate")
-                        completed_trades = last_info.get("completed_trades", [])
-                        logger.info(f"From last_info: pf={final_portfolio_value}, ib={initial_portfolio_value}, sr={sharpe_ratio_val}, mdd={max_drawdown_val}, wr={win_rate_val}, trades={len(completed_trades)}")
-                    else:
-                        logger.warning(f"Last info from episode.get_infos() is not a dict: {last_info}")
-                else:
-                    logger.warning("SingleAgentEpisode does not have get_infos() or it's empty.")
+                    temp_info = episode.get_infos()[-1]
+                    if isinstance(temp_info, dict): last_info_dict = temp_info
+                    else: logger.warning(f"SingleAgentEpisode.get_infos()[-1] not a dict: {temp_info}")
+                else: logger.warning("SingleAgentEpisode: get_infos() not callable or empty.")
+            elif hasattr(episode, 'last_info_for') and callable(getattr(episode, 'last_info_for')):
+                agent_ids_to_try = [None, Policy.DEFAULT_POLICY_ID]
+                if hasattr(episode, 'agent_ids') and episode.agent_ids: agent_ids_to_try.extend(list(episode.agent_ids))
+                for agent_id in agent_ids_to_try:
+                    try:
+                        temp_info = episode.last_info_for(agent_id=agent_id) if agent_id is not None else episode.last_info_for()
+                        if temp_info and isinstance(temp_info, dict):
+                            last_info_dict = temp_info
+                            logger.info(f"Retrieved last_info_dict from episode.last_info_for(agent_id={agent_id})")
+                            break
+                    except Exception: pass
+                if not last_info_dict: logger.warning("Could not retrieve dict from episode.last_info_for().")
+            else:
+                logger.warning("Episode has neither get_infos() nor last_info_for() to get info dict.")
 
-                if callable(getattr(episode, 'get_rewards', None)):
-                    total_reward_val = sum(episode.get_rewards())
-                    logger.info(f"Calculated total_reward_val: {total_reward_val} from episode.get_rewards()")
-                else:
-                    logger.warning("SingleAgentEpisode does not have get_rewards().")
+            if last_info_dict:
+                logger.info(f"Processing last_info_dict with keys: {list(last_info_dict.keys())}")
+                initial_portfolio_value = last_info_dict.get('initial_portfolio_value', last_info_dict.get('initial_balance'))
+                final_portfolio_value = last_info_dict.get('final_portfolio_value', last_info_dict.get('portfolio_value'))
+                pnl_val = last_info_dict.get('pnl')
+                sharpe_ratio_val = last_info_dict.get('sharpe_ratio')
+                max_drawdown_val = last_info_dict.get('max_drawdown')
+                win_rate_val = last_info_dict.get('win_rate')
+                if 'total_reward' in last_info_dict: total_reward_val = last_info_dict.get('total_reward')
+                if 'total_steps' in last_info_dict: total_steps_val = last_info_dict.get('total_steps')
+                elif 'episode_length' in last_info_dict: total_steps_val = last_info_dict.get('episode_length')
                 
-                episode_length_val = len(episode) # Use len(episode) for SingleAgentEpisode
-                logger.info(f"Episode length: {episode_length_val}")
+                temp_trades = last_info_dict.get("completed_trades", [])
+                if isinstance(temp_trades, list): completed_trades = temp_trades
+                else: logger.warning(f"completed_trades in last_info_dict is not a list: {temp_trades}")
+            else:
+                logger.warning("last_info_dict is empty. Metrics will rely on other sources.")
 
-            else: # Fallback for older Episode types or other structures
-                logger.info("Processing metrics for non-SingleAgentEpisode (old API or custom).")
-                # 1. Try episode.last_info_for() - Old API
-                try:
-                    if hasattr(episode, 'last_info_for') and callable(getattr(episode, 'last_info_for')):
-                        agent_ids_to_try = [None, Policy.DEFAULT_POLICY_ID]
-                        if hasattr(episode, 'agent_ids') and episode.agent_ids:
-                            agent_ids_to_try.extend(list(episode.agent_ids))
-                        
-                        for agent_id in agent_ids_to_try:
-                            try:
-                                last_info = episode.last_info_for(agent_id=agent_id) if agent_id is not None else episode.last_info_for()
-                                if last_info and isinstance(last_info, dict):
-                                    if 'portfolio_value' in last_info: final_portfolio_value = last_info['portfolio_value']
-                                    if initial_portfolio_value is None and 'initial_balance' in last_info: initial_portfolio_value = last_info['initial_balance']
-                                    if final_portfolio_value is not None: break
-                            except Exception: pass # Ignore if agent_id fails
-                        if final_portfolio_value is None: logger.warning("portfolio_value not in last_info_for().")
-                    else:
-                        logger.warning("episode does not have last_info_for attribute.")
-                except Exception as e:
-                    logger.error(f"Error with last_info_for: {e}")
+            if total_reward_val is None:
+                if isinstance(episode, SingleAgentEpisode) and callable(getattr(episode, 'get_rewards', None)):
+                    total_reward_val = sum(episode.get_rewards())
+                    logger.info(f"Retrieved total_reward: {total_reward_val} from episode.get_rewards()")
+                elif hasattr(episode, 'total_reward'):
+                    total_reward_val = episode.total_reward
+                    logger.info(f"Retrieved total_reward: {total_reward_val} from episode.total_reward (attribute)")
+                else: logger.warning("total_reward_val remains None after checking episode attributes/methods.")
 
-                total_reward_val = getattr(episode, 'total_reward', None) # Old API direct attribute
-                episode_length_val = getattr(episode, 'length', None) # Old API direct attribute
-                custom_metrics_val = getattr(episode, 'custom_metrics', {}) # Old API direct attribute
-                sharpe_ratio_val = custom_metrics_val.get("sharpe_ratio")
-                max_drawdown_val = custom_metrics_val.get("max_drawdown")
-                win_rate_val = custom_metrics_val.get("win_rate")
+            if total_steps_val is None:
+                if isinstance(episode, SingleAgentEpisode):
+                    total_steps_val = len(episode)
+                    logger.info(f"Retrieved total_steps: {total_steps_val} from len(episode)")
+                elif hasattr(episode, 'length'):
+                    total_steps_val = episode.length
+                    logger.info(f"Retrieved total_steps: {total_steps_val} from episode.length (attribute)")
+                else: logger.warning("total_steps_val remains None after checking episode attributes/methods.")
 
-            # Fallback for initial_portfolio_value if not found in info from SingleAgentEpisode.get_infos()[-1]
             if initial_portfolio_value is None:
-                logger.info(f"initial_portfolio_value is None after checking last_info. Attempting DB fallback for DB episode {db_episode_id}.")
+                logger.info(f"initial_portfolio_value is None. Attempting DB/env fallback for DB episode {db_episode_id}.")
                 try:
-                    with get_db_session() as db:
-                        db_ep_for_initial = db.query(DbEpisode).filter(DbEpisode.episode_id == db_episode_id).first()
+                    with get_db_session() as db_session_initial:
+                        db_ep_for_initial = db_session_initial.query(DbEpisode).filter(DbEpisode.episode_id == db_episode_id).first()
                         if db_ep_for_initial and db_ep_for_initial.initial_portfolio_value is not None:
                             initial_portfolio_value = db_ep_for_initial.initial_portfolio_value
-                            logger.info(f"Got initial_balance {initial_portfolio_value} from DB for episode {db_episode_id}.")
-                        else:
-                            logger.warning(f"initial_portfolio_value not found or is None in DB for episode {db_episode_id}. Will try actual_env_for_value.")
-                except Exception as e_db_initial:
-                     logger.warning(f"Error fetching initial_portfolio_value from DB for episode {db_episode_id}: {e_db_initial}")
-
-            if initial_portfolio_value is None: # Try actual_env_for_value as a further fallback
-                if actual_env_for_value:
-                    initial_portfolio_value = getattr(actual_env_for_value, 'initial_balance', None)
-                    if initial_portfolio_value is not None:
-                        logger.info(f"Got initial_balance {initial_portfolio_value} from actual_env_for_value (e.g., env instance passed in kwargs).")
-                    else:
-                        logger.warning(f"initial_balance not found in actual_env_for_value for episode {db_episode_id}.")
-                else:
-                    logger.warning(f"actual_env_for_value is None, cannot attempt to get initial_balance from it for episode {db_episode_id}.")
-
-            if initial_portfolio_value is None: # Final default if all other sources fail
-                initial_portfolio_value = 10000.0
-                logger.warning(f"Using default initial_balance {initial_portfolio_value} for episode {db_episode_id} after all fallbacks failed.")
+                            logger.info(f"Retrieved initial_portfolio_value: {initial_portfolio_value} from DB.")
+                        elif actual_env_for_value and hasattr(actual_env_for_value, 'initial_balance'):
+                            initial_portfolio_value = getattr(actual_env_for_value, 'initial_balance')
+                            logger.info(f"Retrieved initial_portfolio_value: {initial_portfolio_value} from actual_env_for_value.initial_balance.")
+                        else: logger.error(f"CRITICAL: initial_portfolio_value not found for episode {db_episode_id}. It will be NULL.")
+                except Exception as e_db_initial: logger.warning(f"Error fetching initial_portfolio_value from DB/env: {e_db_initial}")
             
-            # Fallback for final_portfolio_value if still None
-            if final_portfolio_value is None and actual_env_for_value:
-                final_portfolio_value = getattr(actual_env_for_value, 'portfolio_value', None)
-                if final_portfolio_value is not None: logger.info(f"Got final_portfolio_value {final_portfolio_value} from actual_env_for_value.")
-                else: logger.warning("portfolio_value not found in actual_env_for_value.")
+            if pnl_val is None and final_portfolio_value is not None and initial_portfolio_value is not None:
+                pnl_val = final_portfolio_value - initial_portfolio_value
+                logger.info(f"Calculated PnL: {pnl_val}")
+            elif pnl_val is None: logger.warning(f"PnL could not be determined/calculated. final_pf: {final_portfolio_value}, initial_pf: {initial_portfolio_value}.")
 
-            if final_portfolio_value is None and total_reward_val is not None and initial_portfolio_value is not None:
-                # If total_reward is absolute (like final balance), use it. If it's relative PnL, add to initial.
-                # Assuming total_reward_val might be PnL if portfolio_value is missing.
-                # This part is heuristic and depends on env's reward structure.
-                # For now, if final_pf is None but total_reward_val is available, we might assume total_reward_val is the PnL.
-                # Or, if the environment's reward is the change in portfolio value, then final_pf = initial_pf + total_reward
-                # Let's assume for now if final_pf is None, we can't reliably set it from total_reward without more info.
-                logger.warning(f"final_portfolio_value is None. total_reward_val is {total_reward_val}. Cannot reliably set final_pf from total_reward without knowing reward structure.")
+            custom_metrics_ep = getattr(episode, 'custom_metrics', {})
+            if custom_metrics_ep: logger.info(f"Found episode.custom_metrics: {custom_metrics_ep}")
+            if sharpe_ratio_val is None: sharpe_ratio_val = custom_metrics_ep.get("sharpe_ratio")
+            if max_drawdown_val is None: max_drawdown_val = custom_metrics_ep.get("max_drawdown")
+            if win_rate_val is None: win_rate_val = custom_metrics_ep.get("win_rate")
 
-
-            pnl = None
-            if final_portfolio_value is not None and initial_portfolio_value is not None:
-                pnl = final_portfolio_value - initial_portfolio_value
-            else:
-                logger.warning(f"Cannot calculate PnL. final_pf: {final_portfolio_value}, initial_pf: {initial_portfolio_value}")
-
-            # Fallback for custom metrics if not in last_info (for SingleAgentEpisode) or episode.custom_metrics (old)
             if actual_env_for_value:
                 if sharpe_ratio_val is None and hasattr(actual_env_for_value, 'sharpe_ratio'): sharpe_ratio_val = getattr(actual_env_for_value, 'sharpe_ratio', None)
                 if max_drawdown_val is None and hasattr(actual_env_for_value, 'max_drawdown'): max_drawdown_val = getattr(actual_env_for_value, 'max_drawdown', None)
                 if win_rate_val is None and hasattr(actual_env_for_value, 'win_rate'): win_rate_val = getattr(actual_env_for_value, 'win_rate', None)
-
-            # Fallback for completed_trades if not in last_info (for SingleAgentEpisode)
-            if not completed_trades: # if it's still an empty list from episode.get_infos()
-                # Try getting from the environment instance directly using its public method
-                if actual_env_for_value and callable(getattr(actual_env_for_value, 'get_completed_trades', None)):
+                if not completed_trades and callable(getattr(actual_env_for_value, 'get_completed_trades', None)):
                     try:
-                        completed_trades = actual_env_for_value.get_completed_trades()
-                        logger.info(f"Found {len(completed_trades)} trades via actual_env_for_value.get_completed_trades().")
-                    except Exception as e_get_trades:
-                        logger.warning(f"Error calling actual_env_for_value.get_completed_trades(): {e_get_trades}")
-                elif actual_env_for_value and hasattr(actual_env_for_value, '_completed_trades'): # Less ideal direct access
-                    completed_trades = actual_env_for_value._completed_trades
-                    logger.info(f"Found {len(completed_trades)} trades in actual_env_for_value._completed_trades (direct access fallback).")
-                elif hasattr(episode, 'user_data') and "completed_trades" in episode.user_data: # Old API style
-                    completed_trades = episode.user_data.get("completed_trades", [])
-                    logger.info(f"Found {len(completed_trades)} trades in episode.user_data (old API fallback).")
+                        temp_trades_env = actual_env_for_value.get_completed_trades()
+                        if isinstance(temp_trades_env, list): completed_trades = temp_trades_env
+                        logger.info(f"Retrieved {len(completed_trades)} trades via actual_env_for_value.get_completed_trades().")
+                    except Exception as e_get_trades: logger.warning(f"Error calling actual_env_for_value.get_completed_trades(): {e_get_trades}")
             
-            if not completed_trades:
-                 logger.info("No completed_trades found via any method. This may be normal if no trades occurred in the episode.")
-            else:
-                 logger.info(f"Found {len(completed_trades)} completed_trades.")
+            if not completed_trades and hasattr(episode, 'user_data') and "completed_trades" in episode.user_data:
+                temp_trades_ud = episode.user_data.get("completed_trades", [])
+                if isinstance(temp_trades_ud, list): completed_trades = temp_trades_ud
+                logger.info(f"Retrieved {len(completed_trades)} trades from episode.user_data (final fallback).")
 
-            logger.info(f"Metrics to log for DB episode {db_episode_id} in _log_episode_end_data: final_pf={final_portfolio_value}, pnl={pnl}, total_reward={total_reward_val}, length={episode_length_val}, sharpe={sharpe_ratio_val}, drawdown={max_drawdown_val}, win_rate={win_rate_val}, trades_count={len(completed_trades)}")
+            current_end_time = datetime.datetime.now(datetime.timezone.utc)
+            
+            logger.info(f"FINAL METRICS for DB episode {db_episode_id} (RLlib ID: {rllib_episode_id_str}): "
+                        f"run_id='{self.run_id}', end_time='{current_end_time}', "
+                        f"initial_portfolio_value={initial_portfolio_value}, final_portfolio_value={final_portfolio_value}, "
+                        f"pnl={pnl_val}, sharpe_ratio={sharpe_ratio_val}, max_drawdown={max_drawdown_val}, "
+                        f"total_reward={total_reward_val}, total_steps={total_steps_val}, win_rate={win_rate_val}, "
+                        f"status='completed', trades_count={len(completed_trades)}")
 
             with get_db_session() as db:
                 db_ep_to_update = db.query(DbEpisode).filter(DbEpisode.episode_id == db_episode_id).first()
                 if db_ep_to_update:
-                    if db_ep_to_update.end_time is not None:
-                        logger.warning(f"DB Episode {db_episode_id} (RLlib ID: {getattr(episode, 'id_', 'unknown_rllib_id')}) end_time already set. Re-logging attempt from _log_episode_end_data. This might indicate multiple calls.")
+                    logger.info(f"DB Episode {db_episode_id} BEFORE update: status='{db_ep_to_update.status}', end_time='{db_ep_to_update.end_time}', final_value='{db_ep_to_update.final_portfolio_value}', pnl='{db_ep_to_update.pnl}', total_reward='{db_ep_to_update.total_reward}'")
                     
-                    db_ep_to_update.end_time = datetime.datetime.now(datetime.timezone.utc)
-                    db_ep_to_update.final_portfolio_value = final_portfolio_value
-                    db_ep_to_update.pnl = pnl
-                    db_ep_to_update.total_reward = total_reward_val
-                    db_ep_to_update.total_steps = episode_length_val
-                    db_ep_to_update.sharpe_ratio = sharpe_ratio_val
-                    db_ep_to_update.max_drawdown = max_drawdown_val
-                    db_ep_to_update.win_rate = win_rate_val
-
-                    logger.info(f"Attempting to update DB episode {db_episode_id} with collected metrics in _log_episode_end_data.")
+                    # Convert numpy types to standard Python types before assignment
+                    db_ep_to_update.end_time = current_end_time
+                    if initial_portfolio_value is not None:
+                        db_ep_to_update.initial_portfolio_value = float(initial_portfolio_value)
+                    if final_portfolio_value is not None:
+                        db_ep_to_update.final_portfolio_value = float(final_portfolio_value)
+                    if pnl_val is not None:
+                        db_ep_to_update.pnl = float(pnl_val)
+                    if total_reward_val is not None:
+                        db_ep_to_update.total_reward = float(total_reward_val)
+                    if total_steps_val is not None:
+                        db_ep_to_update.total_steps = int(total_steps_val) # total_steps should be an integer
+                    if sharpe_ratio_val is not None:
+                        db_ep_to_update.sharpe_ratio = float(sharpe_ratio_val)
+                    if max_drawdown_val is not None:
+                        db_ep_to_update.max_drawdown = float(max_drawdown_val)
+                    if win_rate_val is not None:
+                        db_ep_to_update.win_rate = float(win_rate_val)
+                    
+                    db_ep_to_update.status = "completed"
+ 
+                    logger.info(f"DB Episode {db_episode_id} AFTER assignments (before commit): status='{db_ep_to_update.status}', end_time='{db_ep_to_update.end_time}', final_value='{db_ep_to_update.final_portfolio_value}', pnl='{db_ep_to_update.pnl}', total_reward='{db_ep_to_update.total_reward}', total_steps='{db_ep_to_update.total_steps}', sharpe='{db_ep_to_update.sharpe_ratio}', max_drawdown='{db_ep_to_update.max_drawdown}', win_rate='{db_ep_to_update.win_rate}'")
                                         
-                    for trade_info in completed_trades: # Iterate over the already determined completed_trades list
-                        if not isinstance(trade_info, dict):
-                            logger.warning(f"Skipping non-dict trade_info: {trade_info} in _log_episode_end_data")
-                            continue
-                        db_trade = DbTrade(
-                            episode_id=db_episode_id,
-                            entry_time=trade_info.get("entry_time"),
-                            exit_time=trade_info.get("exit_time"),
-                            entry_price=trade_info.get("entry_price"),
-                            exit_price=trade_info.get("exit_price"),
-                            quantity=trade_info.get("quantity"),
-                            direction=trade_info.get("direction"),
-                            pnl=trade_info.get("pnl"),
-                            costs=trade_info.get("costs", 0.0)
-                        )
-                        db.add(db_trade)
+                    if completed_trades:
+                        logger.info(f"Processing {len(completed_trades)} trades for episode {db_episode_id}.")
+                        for trade_info in completed_trades: 
+                            if not isinstance(trade_info, dict):
+                                logger.warning(f"Skipping non-dict trade_info: {trade_info}")
+                                continue
+                            required_trade_fields = ["entry_time", "exit_time", "entry_price", "exit_price", "quantity", "direction"]
+                            if any(trade_info.get(field) is None for field in required_trade_fields):
+                                logger.warning(f"Skipping trade due to missing required fields: {trade_info}")
+                                continue
+                            db_trade = DbTrade(
+                                episode_id=db_episode_id,
+                                entry_time=trade_info.get("entry_time"), exit_time=trade_info.get("exit_time"),
+                                entry_price=trade_info.get("entry_price"), exit_price=trade_info.get("exit_price"),
+                                quantity=trade_info.get("quantity"), direction=trade_info.get("direction"),
+                                pnl=trade_info.get("pnl"), costs=trade_info.get("costs", 0.0)
+                            )
+                            db.add(db_trade)
+                    else:
+                        logger.info(f"No trades to log for episode {db_episode_id}.")
                     
-                    if actual_env_for_value and hasattr(actual_env_for_value, '_clear_episode_trades'):
+                    if actual_env_for_value and callable(getattr(actual_env_for_value, '_clear_episode_trades', None)):
                         try:
                             actual_env_for_value._clear_episode_trades()
-                            logger.info("Cleared trades from actual_env_for_value in _log_episode_end_data.")
-                        except Exception as e_clear:
-                            logger.warning(f"Error clearing trades from actual_env_for_value in _log_episode_end_data: {e_clear}")
+                            logger.info("Called _clear_episode_trades() on actual_env_for_value.")
+                        except Exception as e_clear: logger.warning(f"Error calling _clear_episode_trades(): {e_clear}")
                     
+                    logger.info(f"Attempting db.commit() for DB Episode {db_episode_id} (RLlib ID: {rllib_episode_id_str})")
                     db.commit()
-                    episode.custom_data["_db_logged_end"] = True # Mark as successfully processed
-                    logger.info(f"Successfully updated DB episode {db_episode_id} for RLlib episode_id {getattr(episode, 'id_', 'unknown_rllib_id')} with {len(completed_trades)} trades in _log_episode_end_data.")
+                    episode.custom_data["_db_logged_end"] = True 
+                    logger.info(f"Successfully committed updates for DB episode {db_episode_id} (RLlib ID: {rllib_episode_id_str}).")
                 else:
-                    logger.warning(f"Could not find DB episode with ID {db_episode_id} to update in _log_episode_end_data.")
+                    logger.error(f"CRITICAL: Could not find DB episode with ID {db_episode_id} to update. Metrics for RLlib episode {rllib_episode_id_str} will be lost.")
         
         except Exception as e_outer:
-            logger.critical(f"CRITICAL UNCAUGHT EXCEPTION in _log_episode_end_data: {e_outer}", exc_info=True)
+            logger.critical(f"CRITICAL UNCAUGHT EXCEPTION in _log_episode_end_data for RLlib episode {getattr(episode, 'id_', 'unknown_rllib_id')}: {e_outer}", exc_info=True)
 
     def on_episode_end(
         self,
@@ -642,18 +614,27 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
             logger.info(f"on_episode_end kwargs received: {list(kwargs.keys())}")
 
             # Extract known optional params from kwargs if they exist, otherwise pass None
-            worker = kwargs.get("worker")
-            base_env = kwargs.get("base_env")
-            policies = kwargs.get("policies")
-            env_index = kwargs.get("env_index")
+            # These will be passed explicitly.
+            extracted_worker = kwargs.get("worker")
+            extracted_base_env = kwargs.get("base_env")
+            extracted_policies = kwargs.get("policies")
+            extracted_env_index = kwargs.get("env_index")
+
+            # Prepare a new kwargs dict for spreading, excluding the ones we pass explicitly.
+            remaining_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k not in ['worker', 'base_env', 'policies', 'env_index', 'episode'] # 'episode' is also explicit
+            }
+            logger.info(f"Explicitly passing to _log_episode_end_data: worker={type(extracted_worker)}, base_env={type(extracted_base_env)}, policies={'set' if extracted_policies else 'None'}, env_index={extracted_env_index}")
+            logger.info(f"Spreading remaining_kwargs to _log_episode_end_data: {list(remaining_kwargs.keys())}")
 
             self._log_episode_end_data(
                 episode=episode,
-                worker=worker, # Pass extracted or None
-                base_env=base_env, # Pass extracted or None
-                policies=policies, # Pass extracted or None
-                env_index=env_index, # Pass extracted or None
-                **kwargs # Pass along all original kwargs for flexibility in _log_episode_end_data
+                worker=extracted_worker,
+                base_env=extracted_base_env,
+                policies=extracted_policies,
+                env_index=extracted_env_index,
+                **remaining_kwargs # Pass only the remaining, unhandled kwargs
             )
         except Exception as e_outer: # Catch-all for the entire method
             logger.critical(f"CRITICAL UNCAUGHT EXCEPTION in on_episode_end: {e_outer}", exc_info=True)
@@ -663,78 +644,299 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
         *,
         worker: Optional[RolloutWorker] = None, # Changed to keyword-only with default, RolloutWorker type
         samples: Optional["SampleBatch"] = None, # Changed to keyword-only with default
-        **kwargs
+        **kwargs,
     ) -> None:
         """Processes completed episodes from a sample batch."""
         try:
-            logger.info(f"on_sample_end called. kwargs received: {list(kwargs.keys())}")
-            
-            worker_to_use = kwargs.get("env_runner") # Prioritize env_runner from kwargs for new API stack
-            if worker_to_use is not None:
-                logger.info(f"Using 'env_runner' from kwargs (type: {type(worker_to_use)}) as worker_to_use.")
-            elif worker is not None: # Fallback to direct worker argument if env_runner not in kwargs
-                worker_to_use = worker
-                logger.info(f"Using 'worker' argument (type: {type(worker_to_use)}) as worker_to_use.")
-            else: # Only log warning if neither is available
-                logger.error("on_sample_end: 'env_runner' not in kwargs and 'worker' argument is None. Cannot process samples.")
-                return
-            
-            if samples is None:
-                logger.error("on_sample_end called but 'samples' is None. Cannot process.")
+            logger.info(f"--- on_sample_end CALLED --- (Worker type: {type(worker)}, Samples type: {type(samples)})")
+
+            # Enhanced logging for samples object
+            logger.info(f"on_sample_end: Received samples of type: {type(samples)}")
+            if isinstance(samples, list):
+                logger.info(f"on_sample_end: samples is a list with length {len(samples)}")
+            if hasattr(samples, "count"): # SampleBatch has a 'count' attribute
+                logger.info(f"on_sample_end: samples has a count attribute: {samples.count}")
+
+            if not samples:
+                logger.warning("on_sample_end called with no samples. Nothing to process.")
                 return
 
-            logger.info(f"on_sample_end using worker_to_use type: {type(worker_to_use)}, samples type: {type(samples)}")
+            # Ensure run_id is available
+            if not self.run_id and worker:
+                self.run_id = self.get_run_id_from_algorithm(worker)
+            if not self.run_id and "callbacks_config" in kwargs:
+                 callbacks_cfg = kwargs["callbacks_config"]
+                 if callbacks_cfg and "run_id" in callbacks_cfg:
+                     self.run_id = callbacks_cfg["run_id"]
+            
+            if not self.run_id:
+                logger.error("CRITICAL: self.run_id could not be determined in on_sample_end. Cannot process episodes from batch.")
+                return
 
-            logger.info("on_sample_end: Episode processing logic is currently commented out for testing on_episode_end reliability.")
-            # episodes_to_process = []
-            # if isinstance(samples, SampleBatch):
-            #     logger.info(f"Samples is a SampleBatch. Processing {len(samples.get_terminated_episodes())} terminated episodes.")
-            #     episodes_to_process.extend(samples.get_terminated_episodes())
-            # elif isinstance(samples, list):
-            #     logger.info(f"Samples is a list of length {len(samples)}. Iterating through items.")
-            #     for i, item in enumerate(samples):
-            #         # Assuming items in the list are individual episode objects if not SampleBatch
-            #         if hasattr(item, 'episode_id') or hasattr(item, 'id_'): # Heuristic for episode-like objects
-            #             logger.info(f"Item {i} (type: {type(item)}) appears to be an episode. Adding to process list.")
-            #             episodes_to_process.append(item)
-            #         elif isinstance(item, SampleBatch): # Should not happen if outer samples is a list of episodes, but good check
-            #             num_terminated = len(item.get_terminated_episodes())
-            #             logger.info(f"Item {i} is a SampleBatch, found {num_terminated} terminated episodes.")
-            #             episodes_to_process.extend(item.get_terminated_episodes())
-            #         else:
-            #             logger.warning(f"Item {i} in samples list is neither an identifiable episode nor a SampleBatch (type: {type(item)}). Skipping.")
-            # else:
-            #     logger.error(f"Samples object is of unexpected type: {type(samples)}. Cannot extract episodes.")
-            #     return
+            # Iterate over episodes in the batch
+            # The structure of `samples` can vary. For `SampleBatch.TYPE_EPISODES`, it's a list of Episode objects.
+            # For `SampleBatch.TYPE_TRAJECTORIES`, we need to reconstruct or identify episodes.
+            # RLlib's default behavior is to provide `SingleAgentEpisode` objects when `batch_mode="complete_episodes"`.
+            
+            # Check if samples is a SampleBatch and contains episode objects directly
+            # This is common with `batch_mode="complete_episodes"`
+            if isinstance(samples, SampleBatch) and samples.is_single_trajectory(): # A single trajectory might be a full episode
+                # This case is less common for 'complete_episodes' but good to check
+                # We need to check if this trajectory represents a completed episode
+                if samples.terminateds[-1] or samples.truncateds[-1]:
+                    # This is tricky because SampleBatch itself isn't an 'Episode' object in the same way.
+                    # We might need to rely on episode IDs if they are present in the batch.
+                    # For now, this path is less robust for direct episode metric logging.
+                    # The `split_by_episode` method is more reliable.
+                    logger.info("on_sample_end: Received a single trajectory SampleBatch. Attempting to process if it's a completed episode.")
+                    # This requires more complex logic to map SampleBatch to an Episode-like structure for _log_episode_end_data
+                    # For now, we'll rely on split_by_episode for more robust handling.
+                    pass # Placeholder for potential future handling if needed
 
-            # if not episodes_to_process:
-            #     logger.info("No episodes found to process in on_sample_end.")
-            #     return
+            # More robust: Use split_by_episode if available on the samples object
+            # This method is designed to yield individual Episode objects from a batch.
+            if hasattr(samples, "split_by_episode") and callable(samples.split_by_episode):
+                num_episodes_in_batch = 0
+                processed_episode_ids_in_batch = set()
 
-            # for episode_obj in episodes_to_process: # Renamed to avoid conflict with outer scope 'episode' if any
-            #     episode_id_str = getattr(episode_obj, 'id_', getattr(episode_obj, 'episode_id', 'unknown_rllib_id'))
-            #     if getattr(episode_obj, 'is_done', False):
-            #         logger.info(f"Processing episode {episode_id_str} (marked as is_done=True) from on_sample_end.")
-            #         # actual_env determination is handled within _log_episode_end_data from kwargs
-            #         self._log_episode_end_data(
-            #             episode=episode_obj,
-            #             worker=worker_to_use, # Pass the worker/env_runner context
-            #             base_env=None,        # Let _log_episode_end_data determine from kwargs
-            #             policies=None,
-            #             env_index=None,       # Let _log_episode_end_data determine from kwargs
-            #             **kwargs
-            #         )
-            #     else:
-            #         logger.info(f"Skipping episode {episode_id_str} from on_sample_end as it is not marked as is_done=True (is_done: {getattr(episode_obj, 'is_done', 'N/A')}).")
-        except Exception as e_outer:
-            logger.critical(f"CRITICAL UNCAUGHT EXCEPTION in on_sample_end: {e_outer}", exc_info=True)
+                for episode_batch in samples.split_by_episode(batch_size=None): # Process one episode at a time
+                    num_episodes_in_batch += 1
+                    # `episode_batch` here should be an Episode-like object (e.g., SingleAgentEpisode)
+                    # or a SampleBatch representing a single episode.
+                    # We need to ensure we pass an Episode-like object to _log_episode_end_data.
+
+                    # If episode_batch is a SampleBatch representing one episode, we might need to adapt it
+                    # or rely on the fact that on_episode_end would have been called for it.
+                    # However, if on_episode_end is not reliably called, this is a fallback.
+
+                    # Let's assume episode_batch is an Episode-like object here.
+                    # We need to get its unique ID.
+                    current_rllib_episode_id = getattr(episode_batch, 'id_', getattr(episode_batch, 'episode_id', None))
+                    if not current_rllib_episode_id:
+                        logger.warning("on_sample_end: Could not get RLlib episode ID from episode_batch. Skipping.")
+                        continue
+                    
+                    if current_rllib_episode_id in processed_episode_ids_in_batch:
+                        logger.info(f"on_sample_end: RLlib episode {current_rllib_episode_id} already processed in this batch. Skipping.")
+                        continue
+
+                    # Check if the episode is actually terminated or truncated
+                    # For SingleAgentEpisode, check `is_terminated` and `is_truncated`
+                    is_done = False
+                    if isinstance(episode_batch, SingleAgentEpisode):
+                        is_done = episode_batch.is_terminated or episode_batch.is_truncated
+                        logger.info(f"on_sample_end: Processing SingleAgentEpisode {current_rllib_episode_id}. is_terminated={episode_batch.is_terminated}, is_truncated={episode_batch.is_truncated}")
+                    elif isinstance(episode_batch, SampleBatch): # If it's a SampleBatch for an episode
+                        if episode_batch.count > 0: # Ensure not empty
+                           is_done = episode_batch.terminateds[-1] or episode_batch.truncateds[-1]
+                           logger.info(f"on_sample_end: Processing SampleBatch for episode {current_rllib_episode_id}. terminateds[-1]={episode_batch.terminateds[-1]}, truncateds[-1]={episode_batch.truncateds[-1]}")
+                        else:
+                            logger.warning(f"on_sample_end: SampleBatch for episode {current_rllib_episode_id} is empty. Skipping.")
+                            continue
+                    else:
+                        logger.warning(f"on_sample_end: episode_batch is of unexpected type {type(episode_batch)}. Cannot determine if done. Skipping.")
+                        continue # Cannot determine if done
+
+                    if is_done:
+                        logger.info(f"on_sample_end: Episode {current_rllib_episode_id} is marked as done. Calling _log_episode_end_data.")
+                        # Pass relevant parts of the worker or kwargs if needed by _log_episode_end_data
+                        # The `worker` here is the RolloutWorker. `base_env` might be on worker.env.
+                        # `policies` might be on worker.policy_map.
+                        
+                        # Construct a minimal set of arguments for _log_episode_end_data
+                        # It primarily needs the 'episode' object.
+                        # Other arguments like base_env, policies, env_index might be harder to get reliably here
+                        # if they are not part of the episode_batch object itself.
+                        # _log_episode_end_data is designed to be robust to missing optional args.
+                        
+                        # Try to get base_env and policies from the worker if available
+                        current_base_env = getattr(worker, 'env', None) if worker else None
+                        current_policies = getattr(worker, 'policy_map', None) if worker else None
+                        # env_index is tricky here, might not be directly available per episode from a batch.
+                        # _log_episode_end_data should handle env_index=None.
+
+                        self._log_episode_end_data(
+                            episode=episode_batch, # This is the crucial part
+                            worker=worker, # Pass the RolloutWorker
+                            base_env=current_base_env,
+                            policies=current_policies,
+                            env_index=None, # env_index is harder to determine here
+                            **kwargs # Pass original kwargs
+                        )
+                        processed_episode_ids_in_batch.add(current_rllib_episode_id)
+                    else:
+                        logger.info(f"on_sample_end: Episode {current_rllib_episode_id} from batch is not done. Not logging end.")
+                
+                if num_episodes_in_batch == 0:
+                    logger.info("on_sample_end: samples.split_by_episode() yielded no episodes.")
+                else:
+                    logger.info(f"on_sample_end: Processed {len(processed_episode_ids_in_batch)} completed episodes from a batch of {num_episodes_in_batch} episode parts.")
+
+            else: # Fallback if split_by_episode is not available (older RLlib or different SampleBatch type)
+                logger.warning("on_sample_end: samples object does not have split_by_episode. Trying to iterate if it's a list of episodes (less common).")
+                logger.info(f"on_sample_end: samples type: {type(samples)}")
+                if isinstance(samples, list): # e.g. if samples was already a list of Episode objects
+                    if len(samples) > 0:
+                        logger.info(f"on_sample_end: samples[0] type: {type(samples[0])}")
+                        if isinstance(samples[0], dict):
+                            logger.info(f"on_sample_end: samples[0] keys: {list(samples[0].keys())}")
+                    processed_episode_ids_in_batch = set()
+                    for i, episode_obj in enumerate(samples):
+                        if not hasattr(episode_obj, 'is_terminated') or not hasattr(episode_obj, 'is_truncated'): # Basic check
+                            logger.warning(f"Item {i} in samples list is not an episode-like object with is_terminated/is_truncated. Type: {type(episode_obj)}. Skipping.")
+                            continue
+                        
+                        current_rllib_episode_id = getattr(episode_obj, 'id_', getattr(episode_obj, 'episode_id', None))
+                        if not current_rllib_episode_id:
+                             logger.warning(f"on_sample_end (list iteration): Could not get RLlib episode ID from episode object at index {i}. Skipping.")
+                             continue
+                        
+                        if current_rllib_episode_id in processed_episode_ids_in_batch:
+                            logger.info(f"on_sample_end (list iteration): RLlib episode {current_rllib_episode_id} already processed in this list. Skipping.")
+                            continue
+
+                        is_done = episode_obj.is_terminated or episode_obj.is_truncated
+                        if is_done:
+                            logger.info(f"on_sample_end (list iteration): Episode {current_rllib_episode_id} is done. Calling _log_episode_end_data.")
+                            current_base_env = getattr(worker, 'env', None) if worker else None
+                            current_policies = getattr(worker, 'policy_map', None) if worker else None
+                            self._log_episode_end_data(
+                                episode=episode_obj,
+                                worker=worker,
+                                base_env=current_base_env,
+                                policies=current_policies,
+                                env_index=None, # env_index is hard to determine here
+                                **kwargs
+                            )
+                            processed_episode_ids_in_batch.add(current_rllib_episode_id)
+                        else:
+                             logger.info(f"on_sample_end (list iteration): Episode {current_rllib_episode_id} from list is not done. Not logging end.")
+                    logger.info(f"on_sample_end (list iteration): Processed {len(processed_episode_ids_in_batch)} completed episodes from list.")
+                else:
+                    logger.warning("on_sample_end: samples object is not a list and does not have split_by_episode. Cannot process episodes from this SampleBatch for _log_episode_end_data.")
+
+        except Exception as e:
+            logger.critical(f"CRITICAL UNCAUGHT EXCEPTION in on_sample_end: {e}", exc_info=True)
 
 
-    # on_episode_step could be used for very granular logging if needed,
-    # but often on_episode_end is sufficient for aggregated metrics and trades.
-    # def on_episode_step(self, *, worker: "WorkerSet", base_env: BaseEnv, episode: Episode, env_index: Optional[int] = None, **kwargs) -> None:
-    #     # Example: log step-specific data if necessary
-    #     # db_episode_id = episode.user_data.get("db_episode_id")
-    #     # if db_episode_id:
-    #     #     # Log step data
-    #     pass
+    def on_episode_step(
+        self,
+        *,
+        episode: Any, # Make episode the primary required kwarg
+        **kwargs,    # Capture all other arguments
+    ) -> None:
+        """Called after each step within an episode."""
+        try:
+            rllib_episode_id_str = getattr(episode, 'id_', getattr(episode, 'episode_id', 'UNKNOWN_RLIB_EPISODE_ID'))
+            logger.debug(f"--- on_episode_step CALLED for RLlib episode_id: {rllib_episode_id_str}, Length: {len(episode) if hasattr(episode, '__len__') else 'N/A'} ---")
+
+            if not self.run_id:
+                worker = kwargs.get("worker") # Try to get worker from kwargs
+                if worker: self.run_id = self.get_run_id_from_algorithm(worker)
+                if not self.run_id and "callbacks_config" in kwargs and kwargs["callbacks_config"] and "run_id" in kwargs["callbacks_config"]:
+                     self.run_id = kwargs["callbacks_config"]["run_id"]
+
+                if not self.run_id:
+                    logger.error(f"CRITICAL: self.run_id is NOT SET in on_episode_step for RLlib episode {rllib_episode_id_str}. Cannot log step.")
+                    return
+
+            db_episode_id = episode.custom_data.get("db_episode_id")
+            if not db_episode_id:
+                # Try to find it if not set (e.g., if on_episode_start failed or was missed)
+                # This is a fallback and might be slow if called every step.
+                logger.warning(f"db_episode_id not in custom_data for RLlib episode {rllib_episode_id_str} during on_episode_step. Attempting DB lookup.")
+                try:
+                    with get_db_session() as db_find_ep:
+                        db_ep_obj = db_find_ep.query(DbEpisode.episode_id).filter(
+                            DbEpisode.run_id == self.run_id,
+                            DbEpisode.rllib_episode_id == str(rllib_episode_id_str)
+                        ).first()
+                        if db_ep_obj:
+                            db_episode_id = db_ep_obj.episode_id
+                            episode.custom_data["db_episode_id"] = db_episode_id # Cache it
+                            logger.info(f"Found and cached db_episode_id {db_episode_id} for RLlib_ep {rllib_episode_id_str} in on_episode_step.")
+                        else:
+                            logger.error(f"Could not find matching DB episode for RLlib_ep {rllib_episode_id_str} and run {self.run_id} in on_episode_step. Cannot log step.")
+                            return
+                except Exception as e_find:
+                    logger.error(f"Error looking up db_episode_id in on_episode_step: {e_find}", exc_info=True)
+                    return
+            
+            # Get the last observation, action, reward, and info
+            # For SingleAgentEpisode, these are typically accessed via methods
+            last_observation = None
+            last_action = None
+            last_reward = None
+            last_info_for_step = {} # Store info dict for this step
+
+            if isinstance(episode, SingleAgentEpisode):
+                if episode.get_observations(): last_observation = episode.get_observations()[-1]
+                if episode.get_actions(): last_action = episode.get_actions()[-1]
+                if episode.get_rewards(): last_reward = episode.get_rewards()[-1]
+                if episode.get_infos(): 
+                    temp_info = episode.get_infos()[-1]
+                    if isinstance(temp_info, dict): last_info_for_step = temp_info
+            else: # Older Episode API might have these as direct attributes or via agent_id methods
+                # This part is more complex for older multi-agent; focusing on single agent for now
+                # last_observation = episode.last_observation_for() # Needs agent_id for multi-agent
+                # last_action = episode.last_action_for()
+                # last_reward = episode.last_reward_for()
+                # last_info_for_step = episode.last_info_for()
+                logger.debug("Using direct attribute access for obs/act/reward/info for non-SingleAgentEpisode (may be limited).")
+                if hasattr(episode, '_agent_to_last_obs'): last_observation = episode._agent_to_last_obs.get(Policy.DEFAULT_POLICY_ID) # Example
+                if hasattr(episode, '_agent_to_last_action'): last_action = episode._agent_to_last_action.get(Policy.DEFAULT_POLICY_ID)
+                if hasattr(episode, '_agent_to_last_reward'): last_reward = episode._agent_to_last_reward.get(Policy.DEFAULT_POLICY_ID)
+                if hasattr(episode, '_agent_to_last_info'): 
+                    temp_info = episode._agent_to_last_info.get(Policy.DEFAULT_POLICY_ID, {})
+                    if isinstance(temp_info, dict): last_info_for_step = temp_info
+
+
+            current_step_number = len(episode) # RLlib episode length is 1-based for current step
+            
+            # Extract trading operation details if present in info
+            operation_type_str = last_info_for_step.get("operation_type")
+            operation_price = last_info_for_step.get("operation_price")
+            operation_quantity = last_info_for_step.get("operation_quantity")
+            operation_cost = last_info_for_step.get("operation_cost", 0.0) # Default to 0 if not present
+            current_balance_after_op = last_info_for_step.get("balance_after_operation")
+            current_position_after_op = last_info_for_step.get("position_after_operation")
+            
+            # Log step data
+            with get_db_session() as db:
+                db_step = DbStep(
+                    episode_id=db_episode_id,
+                    timestamp=datetime.datetime.now(datetime.timezone.utc),
+                    reward=float(last_reward) if last_reward is not None else None,
+                    # obs, action can be large; consider how/if to store them (e.g., hash, summary, or omit)
+                    # observation_data=str(last_observation)[:255] if last_observation is not None else None, # Example: truncate
+                    # action_data=str(last_action)[:255] if last_action is not None else None # Example: truncate
+                )
+                db.add(db_step)
+                
+                # Log trading operation if details are present
+                if operation_type_str and operation_price is not None and operation_quantity is not None:
+                    try:
+                        op_type_enum = OperationType[operation_type_str.upper()] # Convert string to Enum
+                        db_trading_op = DbTradingOperation(
+                            episode_id=db_episode_id,
+                            step_number=current_step_number,
+                            timestamp=datetime.datetime.now(datetime.timezone.utc), # Could also use env's current time if available
+                            operation_type=op_type_enum,
+                            price=operation_price,
+                            quantity=operation_quantity,
+                            cost=operation_cost,
+                            balance_after_operation=current_balance_after_op,
+                            position_after_operation=current_position_after_op
+                        )
+                        db.add(db_trading_op)
+                        logger.debug(f"Logged trading operation: {op_type_enum} at step {current_step_number}")
+                    except KeyError:
+                        logger.warning(f"Invalid operation_type string '{operation_type_str}' at step {current_step_number}. Cannot log operation.")
+                    except Exception as e_op_log:
+                        logger.error(f"Error logging trading operation at step {current_step_number}: {e_op_log}", exc_info=True)
+                
+                db.commit() # Commit step and any operation
+                logger.debug(f"Step {current_step_number} for episode {db_episode_id} logged. Reward: {last_reward}")
+
+        except Exception as e:
+            logger.error(f"Error in on_episode_step for RLlib episode {getattr(episode, 'id_', 'unknown_rllib_id')}: {e}", exc_info=True)

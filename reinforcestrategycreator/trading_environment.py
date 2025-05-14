@@ -13,6 +13,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from typing import Tuple, Dict, Any, Optional, Union, List
 from collections import deque
+from reinforcestrategycreator.db_models import OperationType # Added
 import ray # Added for RLlib integration
 
 # Configure logger
@@ -92,7 +93,10 @@ class TradingEnv(gym.Env):
         # Portfolio value history for Sharpe ratio calculation
         self._portfolio_value_history = deque(maxlen=self.sharpe_window_size) # Corrected
         self._portfolio_returns = deque(maxlen=self.sharpe_window_size)  # Corrected: Store returns for Sharpe ratio
+        self._episode_portfolio_returns = [] # For calculating episode-level Sharpe ratio
         self.episode_max_drawdown = 0.0 # Initialize episode max drawdown
+        self._episode_total_reward = 0.0 # Accumulator for episode total reward
+        self._episode_steps = 0 # Accumulator for episode steps
         
         # Current position state: 0 = Flat, 1 = Long, -1 = Short
         self.current_position = 0
@@ -113,7 +117,14 @@ class TradingEnv(gym.Env):
         )
         
         logger.info(f"TradingEnv initialized with {len(self.df)} data points (including indicators) and initial balance {self.initial_balance}") # Corrected
+
+        self.graceful_shutdown_signaled = False # Added for graceful shutdown
     
+    def signal_graceful_shutdown(self):
+        """Sets a flag to indicate that the environment should try to terminate the episode."""
+        logger.info(f"Graceful shutdown signaled for environment instance at step {self.current_step}.")
+        self.graceful_shutdown_signaled = True
+
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
         Reset the environment to an initial state.
@@ -154,7 +165,11 @@ class TradingEnv(gym.Env):
         self._completed_trades.clear()
         self._portfolio_value_history.clear()
         self._portfolio_returns.clear()
+        self._episode_portfolio_returns.clear() # Reset for new episode
         self.episode_max_drawdown = 0.0 # Reset for new episode
+        self._episode_total_reward = 0.0 # Reset episode total reward
+        self._episode_steps = 0 # Reset episode steps
+        self.graceful_shutdown_signaled = False # Reset flag on environment reset
         
         if len(self.df) == 0:
             error_msg = "DataFrame is empty. Cannot reset environment."
@@ -231,15 +246,32 @@ class TradingEnv(gym.Env):
         """
         # Save the last portfolio value for reward calculation
         self.last_portfolio_value = self.portfolio_value
+
+        # --- Graceful Shutdown Check ---
+        # If graceful shutdown is signaled, this step should be the last one.
+        force_terminate_due_to_shutdown = self.graceful_shutdown_signaled
+        
+        if force_terminate_due_to_shutdown:
+            logger.info(f"Step {self.current_step}: Graceful shutdown is active. Preparing to terminate episode after this step.")
+            # The episode will be marked as terminated later in this method.
+            # The agent's action for this step will still be processed.
         
         # Move to the next time step
         self.current_step += 1
         
-        # Check if episode is done (reached the end of data)
-        done = self.current_step >= len(self.df) - 1
+        # Determine if the episode is done
+        natural_end_of_data = self.current_step >= len(self.df) - 1
+        
+        # Episode is terminated if it's a natural end or if graceful shutdown was signaled for the *previous* state
+        # (meaning this current step is the one that processes the shutdown)
+        terminated = natural_end_of_data or force_terminate_due_to_shutdown
+        truncated = False # Assuming graceful shutdown is a termination.
+                          # If it should be truncation, set: truncated = force_terminate_due_to_shutdown and not natural_end_of_data
         
         # Get the current price from the dataframe
-        self.current_price = self.df.iloc[self.current_step]['close']
+        # Ensure current_step is within bounds if it's the very last step
+        actual_current_step_for_price = min(self.current_step, len(self.df) - 1)
+        self.current_price = self.df.iloc[actual_current_step_for_price]['close']
         
         # --- Risk Management Checks (SL/TP) ---
         original_action = action
@@ -281,8 +313,12 @@ class TradingEnv(gym.Env):
                         tp_triggered = True
                         logger.info(f"Step {self.current_step}: Take-Profit triggered for SHORT position at price {self.current_price:.2f} (Entry: {self._entry_price:.2f}, TP: {tp_price:.2f})")
 
-        # --- Execute Trade Action (potentially overridden by SL/TP) ---
-        self._execute_trade_action(action)
+        # --- Execute Trade Action (potentially overridden by SL/TP) and get operation details ---
+        # _execute_trade_action will now return details about the operation performed
+        operation_details_for_log = self._execute_trade_action(action)
+        # operation_details_for_log should be a dict like:
+        # {'operation_type_for_log': OperationType.ENTRY_LONG, 'shares_transacted_this_step': X, 'execution_price_this_step': Y}
+        # or {'operation_type_for_log': OperationType.HOLD, 'shares_transacted_this_step': 0, 'execution_price_this_step': self.current_price}
 
         # Calculate the current portfolio value
         self.portfolio_value = self.balance + self.shares_held * self.current_price
@@ -291,30 +327,41 @@ class TradingEnv(gym.Env):
         self._portfolio_value_history.append(self.portfolio_value)
 
         # Calculate reward
-        reward = self._calculate_reward()
+        step_reward = self._calculate_reward() # Renamed to step_reward for clarity
+        reward = step_reward # The reward returned by step() is this step_reward
 
+        # Accumulate episode total reward and increment steps
+        self._episode_total_reward += reward
+        self._episode_steps += 1
+ 
         # Get the new observation
         observation = self._get_observation()
-
+ 
         # Prepare info dictionary
         info = {
             'balance': self.balance,
             'shares_held': self.shares_held,
             'current_price': self.current_price,
-            'portfolio_value': self.portfolio_value,
+            'portfolio_value': self.portfolio_value, # This is the current (potentially final) portfolio value
             'current_position': self.current_position,
             'step': self.current_step,
             'action_taken': action, # Actual action taken (could be overridden)
             'original_action': original_action, # Agent's intended action
             'sl_triggered': sl_triggered,
-            'tp_triggered': tp_triggered
+            'tp_triggered': tp_triggered,
+            'step_reward': step_reward,
+            'operation_type_for_log': operation_details_for_log.get('operation_type_for_log', OperationType.HOLD),
+            'shares_transacted_this_step': operation_details_for_log.get('shares_transacted_this_step', 0),
+            'execution_price_this_step': operation_details_for_log.get('execution_price_this_step', self.current_price)
         }
-
-        terminated = done
-        truncated = False
-
+ 
+        # `terminated` and `truncated` flags are already set based on natural_end_of_data or force_terminate_due_to_shutdown
+ 
         if terminated:
-            info['initial_balance'] = self.initial_balance
+            # Add all required metrics to info dict upon episode termination
+            info['initial_portfolio_value'] = self.initial_balance # Use initial_balance from reset
+            info['final_portfolio_value'] = self.portfolio_value # Current portfolio_value is the final one
+            info['pnl'] = self.portfolio_value - self.initial_balance
             info['completed_trades'] = list(self._completed_trades) # Make a copy
             
             if self._completed_trades:
@@ -324,29 +371,53 @@ class TradingEnv(gym.Env):
                 info['win_rate'] = 0.0
             
             info['max_drawdown'] = self.episode_max_drawdown
-            # portfolio_value is already in info
+            
+            # Calculate episode Sharpe Ratio
+            if len(self._episode_portfolio_returns) >= 2:
+                episode_returns_array = np.array(self._episode_portfolio_returns)
+                episode_returns_mean = np.mean(episode_returns_array)
+                episode_returns_std = np.std(episode_returns_array)
+                if episode_returns_std > 1e-8: # Avoid division by zero or very small std
+                    # Non-annualized Sharpe based on episode returns
+                    info['sharpe_ratio'] = (episode_returns_mean - self.risk_free_rate) / episode_returns_std
+                else:
+                    info['sharpe_ratio'] = 0.0
+            else:
+                info['sharpe_ratio'] = 0.0
+            
+            info['total_reward'] = self._episode_total_reward # Accumulated total reward for the episode
+            info['total_steps'] = self._episode_steps # Accumulated total steps for the episode
             
             logger.info(
-                f"Episode ended. Final info populated: initial_balance={info.get('initial_balance')}, "
-                f"completed_trades_count={len(info.get('completed_trades', []))}, "
-                f"win_rate={info.get('win_rate')}, max_drawdown={info.get('max_drawdown')}, "
-                f"portfolio_value={info.get('portfolio_value')}"
+                f"Episode ended (Terminated: {terminated}, Truncated: {truncated}, NaturalEnd: {natural_end_of_data}, GracefulShutdown: {force_terminate_due_to_shutdown}). "
+                f"Final info: initial_pf={info.get('initial_portfolio_value')}, "
+                f"final_pf={info.get('final_portfolio_value')}, pnl={info.get('pnl')}, "
+                f"sharpe={info.get('sharpe_ratio')}, mdd={info.get('max_drawdown')}, "
+                f"total_reward={info.get('total_reward')}, total_steps={info.get('total_steps')}, "
+                f"win_rate={info.get('win_rate')}, trades_count={len(info.get('completed_trades', []))}"
             )
-
-        logger.debug(f"Step {self.current_step}: action={action}, reward={reward:.4f}, done={done}, SL={sl_triggered}, TP={tp_triggered}")
+ 
+        logger.debug(f"Step {self.current_step}: action={action}, reward={reward:.4f}, terminated={terminated}, truncated={truncated}, SL={sl_triggered}, TP={tp_triggered}")
         return observation, reward, terminated, truncated, info
 
-    def _execute_trade_action(self, action: int) -> None:
+    def _execute_trade_action(self, action: int) -> Dict[str, Any]:
         """
         Execute the specified trading action.
         
         Args:
             action (int): The action to take (0 = Flat, 1 = Long, 2 = Short).
+        
+        Returns:
+            Dict[str, Any]: Details of the operation performed for logging.
+                            Keys: 'operation_type_for_log', 'shares_transacted_this_step', 'execution_price_this_step'.
         """
         # Track if a trade occurs in this step
         trade_occurred = False
         # Get the current position before executing the action
         prev_position = self.current_position
+        
+        # Initialize operation details for logging
+        operation_log_details = {'operation_type_for_log': OperationType.HOLD, 'shares_transacted_this_step': 0, 'execution_price_this_step': self.current_price}
         
         if action == 0:  # Flat
             if prev_position == 1:  # Long -> Flat (Sell all shares)
@@ -389,6 +460,11 @@ class TradingEnv(gym.Env):
                     self._entry_step = 0   # Reset entry step
                     trade_occurred = True
                     self._trade_count += 1
+                    operation_log_details = {
+                        'operation_type_for_log': OperationType.EXIT_LONG,
+                        'shares_transacted_this_step': shares_sold, # Positive for sell to close long
+                        'execution_price_this_step': self.current_price
+                    }
             
             elif prev_position == -1:  # Short -> Flat (Cover short position)
                 if self.shares_held < 0:
@@ -432,6 +508,11 @@ class TradingEnv(gym.Env):
                         self._entry_step = 0   # Reset entry step
                         trade_occurred = True
                         self._trade_count += 1
+                        operation_log_details = {
+                            'operation_type_for_log': OperationType.EXIT_SHORT,
+                            'shares_transacted_this_step': shares_covered, # Positive for buy to close short
+                            'execution_price_this_step': self.current_price
+                        }
                     else:
                         logger.warning(f"Insufficient funds to cover short position. Required: {total_cost}, Available: {self.balance}")
         
@@ -468,14 +549,20 @@ class TradingEnv(gym.Env):
                     self._entry_step = self.current_step   # Record entry step
                     trade_occurred = True
                     self._trade_count += 1
-
+                    operation_log_details = {
+                        'operation_type_for_log': OperationType.ENTRY_LONG,
+                        'shares_transacted_this_step': shares_to_buy,
+                        'execution_price_this_step': self.current_price
+                    }
+ 
                     logger.debug(f"Flat -> Long: Bought {shares_to_buy} shares at {self.current_price:.2f} each, "
-                               f"total cost: {total_cost:.2f} (including fee: {transaction_fee:.2f})")
+                                f"total cost: {total_cost:.2f} (including fee: {transaction_fee:.2f})")
                 else:
                     logger.debug("Flat -> Long: Cannot buy shares (insufficient funds or zero shares calculated).")
 
             elif prev_position == -1:  # Short -> Long (Cover short and then buy)
                 # First, cover the short position
+                shares_covered_in_reversal = 0
                 if self.shares_held < 0:
                     # Calculate the cost to buy back shares including fees
                     cover_cost = abs(self.shares_held) * self.current_price
@@ -485,8 +572,8 @@ class TradingEnv(gym.Env):
                     # Check if we have enough balance to cover
                     if self.balance >= total_cover_cost:
                         # Calculate Profit/Loss for the closed short position
-                        shares_covered = abs(self.shares_held)
-                        pnl = (self._entry_price - self.current_price) * shares_covered - cover_fee
+                        shares_covered_in_reversal = abs(self.shares_held)
+                        pnl = (self._entry_price - self.current_price) * shares_covered_in_reversal - cover_fee
                         
                         # Record completed trade
                         entry_time = self.df.index[self._entry_step]
@@ -498,7 +585,7 @@ class TradingEnv(gym.Env):
                             'exit_time': exit_time,
                             'entry_price': self._entry_price,
                             'exit_price': self.current_price,
-                            'quantity': shares_covered,      # Use 'quantity'
+                            'quantity': shares_covered_in_reversal,      # Use 'quantity'
                             'direction': 'short',            # Use 'direction'
                             'pnl': pnl,                      # Use 'pnl'
                             'costs': cover_fee               # Use 'costs'
@@ -508,7 +595,7 @@ class TradingEnv(gym.Env):
                         # Update balance after covering
                         self.balance -= total_cover_cost
                         
-                        logger.debug(f"Short -> Long (Step 1): Covered {shares_covered} shares at {self.current_price} each, "
+                        logger.debug(f"Short -> Long (Step 1): Covered {shares_covered_in_reversal} shares at {self.current_price} each, "
                                    f"total cost: {total_cover_cost} (including fee: {cover_fee}), PnL: {pnl}")
                         
                         self.shares_held = 0
@@ -544,16 +631,28 @@ class TradingEnv(gym.Env):
                             self._entry_step = self.current_step   # Record entry step for new long position
                             trade_occurred = True
                             self._trade_count += 1
-
+                            # Log the entry part of the reversal
+                            operation_log_details = {
+                                'operation_type_for_log': OperationType.ENTRY_LONG,
+                                'shares_transacted_this_step': shares_to_buy,
+                                'execution_price_this_step': self.current_price
+                            }
+ 
                             logger.debug(f"Short -> Long (Step 2): Bought {shares_to_buy} shares at {self.current_price:.2f} each, "
                                        f"total cost: {total_buy_cost:.2f} (including fee: {buy_fee:.2f})")
                         else:
                             # If we can't buy any shares after covering, we're just flat
                             self.current_position = 0
                             logger.debug("Short -> Long: Covered short position but insufficient funds/shares to go long.")
+                            # Log the exit part of the reversal if entry didn't happen
+                            operation_log_details = {
+                                'operation_type_for_log': OperationType.EXIT_SHORT,
+                                'shares_transacted_this_step': shares_covered_in_reversal,
+                                'execution_price_this_step': self.current_price
+                            }
                     else:
                         logger.warning(f"Insufficient funds to cover short position. Required: {total_cover_cost:.2f}, Available: {self.balance:.2f}")
-
+        
         elif action == 2:  # Short
             if prev_position == 0:  # Flat -> Short (Sell short)
                 # --- Position Sizing ---
@@ -583,14 +682,20 @@ class TradingEnv(gym.Env):
                     self._entry_step = self.current_step   # Record entry step
                     trade_occurred = True
                     self._trade_count += 1
-
+                    operation_log_details = {
+                        'operation_type_for_log': OperationType.ENTRY_SHORT,
+                        'shares_transacted_this_step': -shares_to_short, # Negative for short entry
+                        'execution_price_this_step': self.current_price
+                    }
+ 
                     logger.debug(f"Flat -> Short: Sold short {shares_to_short} shares at {self.current_price:.2f} each, "
-                               f"total proceeds: {total_proceeds:.2f} (after fee: {transaction_fee:.2f})")
+                                f"total proceeds: {total_proceeds:.2f} (after fee: {transaction_fee:.2f})")
                 else:
                      logger.debug("Flat -> Short: Cannot short shares (zero shares calculated or zero balance).")
 
             elif prev_position == 1:  # Long -> Short (Sell all shares and then short)
                 # First, sell all long shares
+                shares_sold_in_reversal = 0
                 if self.shares_held > 0:
                     # Calculate the revenue including fees
                     revenue = self.shares_held * self.current_price
@@ -598,8 +703,8 @@ class TradingEnv(gym.Env):
                     total_revenue = revenue - sell_fee
                     
                     # Calculate Profit/Loss for the closed long position
-                    shares_sold = self.shares_held
-                    pnl = (self.current_price - self._entry_price) * shares_sold - sell_fee
+                    shares_sold_in_reversal = self.shares_held
+                    pnl = (self.current_price - self._entry_price) * shares_sold_in_reversal - sell_fee
                     
                     # Record completed trade
                     entry_time = self.df.index[self._entry_step]
@@ -611,7 +716,7 @@ class TradingEnv(gym.Env):
                         'exit_time': exit_time,           # Add exit timestamp
                         'entry_price': self._entry_price,
                         'exit_price': self.current_price,
-                        'quantity': shares_sold,         # Use 'quantity'
+                        'quantity': shares_sold_in_reversal,         # Use 'quantity'
                         'direction': 'long',             # Use 'direction'
                         'pnl': pnl,                      # Use 'pnl'
                         'costs': sell_fee                # Use 'costs'
@@ -621,8 +726,8 @@ class TradingEnv(gym.Env):
                     # Update balance after selling
                     self.balance += total_revenue
                     
-                    logger.debug(f"Long -> Short (Step 1): Sold {shares_sold} shares at {self.current_price} each, "
-                               f"total revenue: {total_revenue} (after fee: {sell_fee}), PnL: {pnl}")
+                    logger.debug(f"Long -> Short (Step 1): Sold {shares_sold_in_reversal} shares at {self.current_price} each, "
+                                f"total revenue: {total_revenue} (after fee: {sell_fee}), PnL: {pnl}")
                     
                     self.shares_held = 0
                     self._entry_price = 0.0 # Reset entry price/step after closing long
@@ -652,13 +757,27 @@ class TradingEnv(gym.Env):
                         self._entry_step = self.current_step   # Record entry step for new short position
                         trade_occurred = True # Mark trade occurred for short entry
                         self._trade_count += 1 # Increment trade count for short entry
-
+                        # Log the entry part of the reversal
+                        operation_log_details = {
+                            'operation_type_for_log': OperationType.ENTRY_SHORT,
+                            'shares_transacted_this_step': -shares_to_short, # Negative for short entry
+                            'execution_price_this_step': self.current_price
+                        }
+ 
                         logger.debug(f"Long -> Short (Step 2): Sold short {shares_to_short} shares at {self.current_price:.2f} each, "
-                                   f"total proceeds: {total_proceeds:.2f} (after fee: {short_fee:.2f})")
+                                    f"total proceeds: {total_proceeds:.2f} (after fee: {short_fee:.2f})")
                     else:
                         # If we can't short any shares after selling, we're just flat
                         self.current_position = 0
                         logger.debug("Long -> Short: Sold long position but couldn't establish short position (zero shares or balance).")
+                        # Log the exit part of the reversal if entry didn't happen
+                        operation_log_details = {
+                            'operation_type_for_log': OperationType.EXIT_LONG,
+                            'shares_transacted_this_step': shares_sold_in_reversal,
+                            'execution_price_this_step': self.current_price
+                        }
+        
+        return operation_log_details
 
     def _calculate_reward(self) -> float:
         """
@@ -685,6 +804,7 @@ class TradingEnv(gym.Env):
         
         # Add the return to history for Sharpe ratio calculation
         self._portfolio_returns.append(percentage_change)
+        self._episode_portfolio_returns.append(percentage_change) # Also add to episode-level returns
         
         # Component 1: Risk-adjusted return
         if self.use_sharpe_ratio and len(self._portfolio_returns) >= 2:
