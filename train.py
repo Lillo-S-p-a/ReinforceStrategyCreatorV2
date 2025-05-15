@@ -128,9 +128,12 @@ def main():
     run_id = f"RLlibRUN-{TICKER}-{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     logger.info(f"Generated Run ID: {run_id}")
     
-    # Create the callback config using the run_id
-    callback_config = {"run_id": run_id}
-    logger.info(f"Created callback_config with run_id: {run_id}")
+    # Create the callback config using the run_id and NUM_TRAINING_ITERATIONS
+    callback_config = {
+        "run_id": run_id,
+        "num_training_iterations": NUM_TRAINING_ITERATIONS
+    }
+    logger.info(f"Created callback_config with run_id: {run_id} and num_training_iterations: {NUM_TRAINING_ITERATIONS}")
 
     config = (
         DQNConfig()

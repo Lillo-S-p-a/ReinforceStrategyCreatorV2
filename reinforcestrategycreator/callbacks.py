@@ -967,6 +967,16 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
             if "done" in result and result["done"]:
                 is_final_iteration = True
                 
+            # For manual training loops (like in train.py), check if this is the last iteration
+            # by comparing current_iteration with NUM_TRAINING_ITERATIONS (if available)
+            if hasattr(algorithm, "config") and algorithm.config:
+                if "callbacks_config" in algorithm.config and algorithm.config["callbacks_config"]:
+                    if "num_training_iterations" in algorithm.config["callbacks_config"]:
+                        num_training_iterations = algorithm.config["callbacks_config"]["num_training_iterations"]
+                        if current_iteration >= num_training_iterations:
+                            is_final_iteration = True
+                            logger.info(f"Final iteration detected based on num_training_iterations={num_training_iterations}")
+            
             if is_final_iteration:
                 logger.info(f"Final iteration detected (iteration {current_iteration}). Finalizing incomplete episodes...")
                 self.finalize_incomplete_episodes()
