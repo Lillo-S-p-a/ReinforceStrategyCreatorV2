@@ -30,6 +30,8 @@ graph TD
 
     subgraph Training ["Training Loop"]
         TL["Training Scripts"]
+        VAL["Validation System"]
+        ES["Early Stopping"]
     end
     
     subgraph Optimization ["Hyperparameter Optimization"]
@@ -67,6 +69,9 @@ graph TD
     TE -->|Metrics| MC
     RA -->|Decision| TE
     CB -->|Episode Info| DB
+    TL -->|Evaluate| VAL
+    VAL -->|Metrics| ES
+    ES -->|Stop Signal| TL
     
     %% Hyperparameter optimization
     HPO -->|Configure| TL
@@ -208,6 +213,34 @@ The Trading Environment module is a Gymnasium-compatible environment that simula
 - Implementation of stop-loss and take-profit mechanisms
 - Transaction fees and slippage simulation
 - Support for different reward functions (P&L, Sharpe ratio)
+
+### Training System
+
+The Training System has been refactored to leverage RLlib, Ray, and PyTorch for parallel training capabilities, significantly improving training efficiency and scalability.
+
+**Key Responsibilities:**
+- Configure and initialize the RLlib training environment
+- Manage parallel training across multiple workers using Ray
+- Implement early stopping based on validation metrics
+- Track and log comprehensive training metrics
+- Evaluate model performance on validation data
+- Store training results in the database
+
+**Key Components:**
+- **Training Script (`train.py`)**: Orchestrates the entire training process
+- **RLlib Configuration**: Sets up the DQN algorithm with PyTorch backend
+- **Ray Workers**: Distribute training across multiple CPU cores
+- **Validation System**: Evaluates model on out-of-sample data during training
+- **Early Stopping**: Monitors validation metrics to prevent overfitting
+- **Database Logging Callbacks**: Record detailed training data
+
+**Core Features:**
+- Parallel execution across multiple CPU cores
+- Training/validation split for better generalization
+- Early stopping based on Sharpe ratio improvement
+- Comprehensive metrics tracking and visualization
+- Automatic checkpoint management
+- Database verification and integrity checks
 
 ### RL Agent (StrategyAgent)
 
@@ -401,8 +434,8 @@ The system uses an SQLAlchemy-based database model for storing training runs, ep
 - **Python 3.12**: Primary language for all components
 
 ### Machine Learning / RL Frameworks
-- **PyTorch**: Deep learning framework for neural network implementation
-- **Ray/RLlib**: Distributed reinforcement learning framework
+- **PyTorch**: Deep learning framework for neural network implementation and model training
+- **Ray/RLlib**: Distributed reinforcement learning framework for parallel training
 - **Gymnasium**: Environment interface for reinforcement learning
 
 ### Data Processing
@@ -571,6 +604,9 @@ flowchart TD
     TE <-->|State, Action, Reward| RA
     TE -->|Episode Metrics| CB
     CB -->|Training Data| DB
+    TL -->|Validation Data| VAL
+    VAL -->|Performance Metrics| ES
+    ES -->|Early Stop Signal| TL
     
     DB <-->|Query/Store| API
     API -->|Training Results| DASH
@@ -645,7 +681,7 @@ The system relies on the following key dependencies as defined in `pyproject.tom
 - **scikit-learn**: ^1.6.1 - Machine learning utilities
 - **plotly**: ^6.0.1 - Interactive visualization
 - **python-dotenv**: ^1.0.1 - Environment variable management
-- **torch**: ^2.3.0 - Deep learning framework
+- **torch**: ^2.3.0 - Deep learning framework (PyTorch)
 - **torchvision**: ^0.18.0 - PyTorch computer vision
 - **torchaudio**: ^2.3.0 - PyTorch audio processing
 - **ray**: ^2.46.0 (with rllib extras) - Distributed RL framework
