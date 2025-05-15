@@ -301,6 +301,214 @@ The backtesting process:
 4. **Transaction Costs**: All backtests include realistic transaction fees.
 5. **Position Sizing**: Realistic position sizing rules are applied.
 
+## Hyperparameter Optimization Framework
+
+To systematically improve model performance, the system now includes a comprehensive hyperparameter optimization framework that explores different configurations to find the optimal settings for trading.
+
+### Optimization Approach
+
+The hyperparameter optimization framework uses Ray Tune to perform a systematic search across the parameter space, evaluating each configuration based on key trading metrics:
+
+1. **Search Space**: The framework explores a wide range of parameters including:
+   - Environment parameters (transaction fees, window sizes, penalties, risk fractions)
+   - Model architecture (network sizes, activation functions)
+   - Training parameters (learning rates, batch sizes, discount factors)
+
+2. **Evaluation Metrics**: Each configuration is evaluated based on:
+   - Profit and Loss (PnL)
+   - Sharpe Ratio
+   - Maximum Drawdown
+   - Win Rate
+
+3. **Optimization Algorithm**: The framework uses the Asynchronous Successive Halving Algorithm (ASHA) to efficiently allocate resources to promising configurations.
+
+4. **Visualization**: Results are visualized to understand parameter importance and relationships between hyperparameters and performance metrics.
+
+### Implementation
+
+The hyperparameter optimization is implemented in `hyperparameter_optimization.py` with the following key components:
+
+```python
+def hyperparameter_search() -> None:
+    """Run hyperparameter search using Ray Tune."""
+    # Define search space
+    search_space = {
+        "env_config": {
+            "transaction_fee_percent": tune.uniform(0.0005, 0.002),
+            "window_size": tune.choice([5, 10, 20]),
+            # Additional environment parameters...
+        },
+        "model_config": {
+            "fcnet_hiddens": tune.choice([
+                [64, 64], [128, 128], [256, 256], [128, 64], [256, 128]
+            ]),
+            "fcnet_activation": tune.choice(["relu", "tanh", "sigmoid"])
+        },
+        "training_config": {
+            "gamma": tune.uniform(0.8, 0.99),
+            "lr": tune.loguniform(1e-5, 1e-3),
+            # Additional training parameters...
+        }
+    }
+    
+    # Define scheduler
+    scheduler = ASHAScheduler(
+        metric="sharpe_ratio",
+        mode="max",
+        max_t=NUM_TRAINING_ITERATIONS,
+        grace_period=10,
+        reduction_factor=2
+    )
+    
+    # Run hyperparameter search
+    analysis = tune.run(
+        train_evaluate,
+        config=search_space,
+        scheduler=scheduler,
+        num_samples=20,
+        resources_per_trial={"cpu": 4, "gpu": 0}
+    )
+```
+
+## Model Evaluation System
+
+A comprehensive model evaluation system has been implemented to assess model performance on test data and compare against benchmark strategies.
+
+### Evaluation Methodology
+
+The evaluation system:
+
+1. **Test Data**: Evaluates the model on recent market data not seen during training.
+
+2. **Multiple Episodes**: Runs multiple evaluation episodes to account for variability.
+
+3. **Benchmark Comparison**: Compares against standard trading strategies:
+   - Buy and Hold
+   - Moving Average Crossover
+
+4. **Detailed Metrics**: Calculates a comprehensive set of performance metrics:
+   - Episode rewards
+   - PnL distribution
+   - Trade count and frequency
+   - Action distribution
+   - Portfolio value over time
+
+5. **Visualization**: Creates visualizations to analyze model behavior and performance.
+
+### Implementation
+
+The evaluation system is implemented in `model_evaluation.py` with key functions:
+
+```python
+def evaluate_model(algo: DQN, test_data: pd.DataFrame, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate the model on test data."""
+    # Create evaluation environment
+    env = TradingEnv(env_config)
+    
+    # Run multiple evaluation episodes
+    for episode in range(num_episodes):
+        # Reset environment
+        obs, _ = env.reset()
+        done = False
+        
+        # Run episode
+        while not done:
+            # Get action from model
+            action = algo.compute_single_action(obs, explore=False)
+            
+            # Step environment
+            next_obs, reward, done, truncated, info = env.step(action)
+            
+            # Update metrics
+            # ...
+    
+    # Calculate aggregate metrics
+    metrics["mean_reward"] = np.mean(metrics["episode_rewards"])
+    metrics["mean_pnl"] = np.mean(metrics["episode_pnls"])
+    metrics["win_rate"] = np.mean([pnl > 0 for pnl in metrics["episode_pnls"]])
+    metrics["sharpe_ratio"] = np.mean(metrics["episode_pnls"]) / (np.std(metrics["episode_pnls"]) + 1e-6)
+    metrics["max_drawdown"] = np.mean(max_drawdowns)
+    
+    return metrics
+```
+
+## Paper Trading Integration
+
+The system now includes a complete pipeline for exporting trained models to paper trading environments, with specific support for Interactive Brokers.
+
+### Paper Trading Architecture
+
+The paper trading integration consists of:
+
+1. **Model Export**: Functionality to export trained models in a format suitable for inference:
+   - PyTorch model weights
+   - Model architecture configuration
+   - Environment configuration
+
+2. **Inference Module**: A standalone module for making predictions with the exported model:
+   - Observation preprocessing
+   - Model inference
+   - Action selection
+
+3. **Interactive Brokers Integration**: Components for connecting to Interactive Brokers:
+   - Account management
+   - Market data retrieval
+   - Order execution
+   - Position tracking
+
+4. **Trading Logic**: Implementation of trading rules based on model predictions:
+   - Position sizing
+   - Risk management
+   - Trading hours enforcement
+   - Performance logging
+
+### Implementation
+
+The paper trading system is implemented across several files:
+
+1. `export_for_paper_trading.py`: Exports models and creates the paper trading infrastructure.
+2. `paper_trading.py`: Main script for running the paper trading system.
+3. `ib_client.py`: Interactive Brokers client implementation.
+
+Key components include:
+
+```python
+class PaperTradingSystem:
+    def __init__(self, model_dir: str, config_file: str = "paper_trading_config.json"):
+        """Initialize the paper trading system."""
+        # Load model and configuration
+        self.model = TradingModelInference(model_dir)
+        self.ib_client = None
+        
+    def connect_to_ib(self) -> None:
+        """Connect to Interactive Brokers."""
+        ib_config = self.config["interactive_brokers"]
+        self.ib_client = connect_to_ib(
+            host=ib_config["host"],
+            port=ib_config["port"],
+            client_id=ib_config["client_id"]
+        )
+    
+    def run_trading_loop(self, interval_seconds: int = 300) -> None:
+        """Run the trading loop."""
+        while True:
+            # Check trading hours
+            # Get market data
+            df = self.get_market_data()
+            
+            # Prepare observation
+            observation = self.prepare_observation(df)
+            
+            # Get model prediction
+            action = self.model.predict(observation)
+            
+            # Execute trade
+            self.execute_trade(action)
+            
+            # Wait for next interval
+            time.sleep(interval_seconds)
+```
+
 ## Limitations and Future Work
 
 ### Known Limitations
@@ -314,6 +522,8 @@ The backtesting process:
 4. **Single Asset Focus**: The current implementation focuses on trading a single asset rather than managing a portfolio.
 
 5. **GPU Utilization**: The current implementation does not fully leverage GPU acceleration for large-scale training.
+
+6. **Paper Trading Limitations**: The current paper trading implementation has limited risk management capabilities and may require further refinement for live trading.
 
 ### Potential Improvements
 
@@ -331,6 +541,8 @@ The backtesting process:
 
 5. **Ensemble Methods**: Combine predictions from multiple agents trained with different hyperparameters or objectives.
 
+6. **Advanced Risk Management**: Implement more sophisticated risk management techniques in the paper trading system.
+
 ### Research Directions
 
 1. **Multi-Agent Systems**: Develop a system where multiple specialized agents collaborate on different aspects of trading (e.g., entry timing, exit timing, position sizing).
@@ -343,8 +555,12 @@ The backtesting process:
 
 5. **Hierarchical RL**: Implement hierarchical approaches where high-level agents make strategic decisions and low-level agents execute tactical trades.
 
+6. **Market Regime Detection**: Develop methods to automatically detect and adapt to different market regimes.
+
 ## Conclusion
 
 The machine learning model in ReinforceStrategyCreatorV2 implements a DQN-based reinforcement learning system designed specifically for trading strategy development. The combination of a sophisticated trading environment, strategic reward design, and stable learning algorithms provides a solid foundation for automated trading strategy creation.
+
+With the addition of the hyperparameter optimization framework, comprehensive model evaluation system, and paper trading integration, the system now offers a complete pipeline from model training to real-world deployment. This enables iterative improvement of trading strategies based on rigorous evaluation metrics before deploying to paper trading environments.
 
 While the current implementation has proven effective in certain market conditions, there remain significant opportunities for enhancement and extension. The modular architecture of the system facilitates ongoing improvements and adaptations to evolving financial markets.

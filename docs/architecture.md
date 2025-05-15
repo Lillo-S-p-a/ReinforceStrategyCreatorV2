@@ -10,6 +10,7 @@ The ReinforceStrategyCreatorV2 is a comprehensive reinforcement learning (RL) fr
 graph TD
     subgraph External ["External Systems"]
         YF["Yahoo Finance API"]
+        IB["Interactive Brokers API"]
     end
 
     subgraph Core ["Core Components"]
@@ -30,9 +31,29 @@ graph TD
     subgraph Training ["Training Loop"]
         TL["Training Scripts"]
     end
+    
+    subgraph Optimization ["Hyperparameter Optimization"]
+        HPO["Ray Tune"]
+        ASHA["ASHA Scheduler"]
+        VIS["Visualization"]
+    end
+    
+    subgraph Evaluation ["Model Evaluation"]
+        ME["Evaluation System"]
+        BM["Benchmark Strategies"]
+        EVAL_VIS["Performance Visualization"]
+    end
+    
+    subgraph PaperTrading ["Paper Trading"]
+        PT["Paper Trading System"]
+        IBC["IB Client"]
+        INF["Inference Module"]
+        EXP["Model Export"]
+    end
 
     %% External connections
     YF -->|OHLCV Data| DF
+    IB <-->|Market Data, Orders| IBC
 
     %% Data processing flow
     DF -->|Market Data| TA
@@ -46,6 +67,25 @@ graph TD
     TE -->|Metrics| MC
     RA -->|Decision| TE
     CB -->|Episode Info| DB
+    
+    %% Hyperparameter optimization
+    HPO -->|Configure| TL
+    HPO -->|Evaluate| ME
+    ASHA -->|Schedule| HPO
+    HPO -->|Results| VIS
+    
+    %% Model evaluation
+    RA -->|Trained Model| ME
+    ME -->|Compare| BM
+    ME -->|Results| EVAL_VIS
+    ME -->|Metrics| DB
+    
+    %% Paper trading
+    RA -->|Best Model| EXP
+    EXP -->|Exported Model| INF
+    INF -->|Predictions| PT
+    PT <-->|Orders, Data| IBC
+    PT -->|Performance| DB
 
     %% Infrastructure connections
     DB <-->|Query/Store| API
@@ -57,10 +97,16 @@ graph TD
     classDef core fill:#bbf,stroke:#333,stroke-width:1px;
     classDef infrastructure fill:#bfb,stroke:#333,stroke-width:1px;
     classDef training fill:#fbb,stroke:#333,stroke-width:1px;
+    classDef optimization fill:#fbf,stroke:#333,stroke-width:1px;
+    classDef evaluation fill:#bff,stroke:#333,stroke-width:1px;
+    classDef papertrading fill:#ffb,stroke:#333,stroke-width:1px;
     class External external;
     class Core core;
     class Infrastructure infrastructure;
     class Training training;
+    class Optimization optimization;
+    class Evaluation evaluation;
+    class PaperTrading papertrading;
 ```
 
 ### Architecture Description
@@ -72,12 +118,18 @@ ReinforceStrategyCreatorV2 follows a modular, service-oriented architecture desi
 3. **Storage Layer**: Database models and persistence capabilities.
 4. **API Layer**: RESTful API for retrieving training results and metrics.
 5. **Visualization Layer**: Dashboard for analyzing agent performance.
+6. **Optimization Framework**: Hyperparameter optimization for model improvement.
+7. **Evaluation System**: Comprehensive model evaluation and benchmark comparison.
+8. **Paper Trading Integration**: Export and deployment of models to paper trading environments.
 
 The architecture is designed to be both scalable and extensible, allowing for:
 - Addition of new data sources beyond Yahoo Finance
-- Integration of different ML/RL algorithms 
+- Integration of different ML/RL algorithms
 - Extension with new technical indicators
 - Deployment of successful strategies to production environments
+- Systematic improvement of model performance through hyperparameter optimization
+- Rigorous evaluation against benchmark strategies
+- Seamless transition from training to paper trading
 
 ## Components and Modules
 
@@ -200,6 +252,82 @@ sequenceDiagram
     end
 ```
 
+### Hyperparameter Optimization Framework
+
+The Hyperparameter Optimization Framework systematically explores different model configurations to find optimal settings for trading performance.
+
+**Key Responsibilities:**
+- Define search spaces for hyperparameters
+- Execute training runs with different configurations
+- Evaluate model performance using key metrics
+- Select the best configuration for further refinement
+- Visualize optimization results
+
+**Key Components:**
+- Ray Tune integration for distributed hyperparameter search
+- ASHA (Asynchronous Successive Halving Algorithm) scheduler
+- Search space definition for environment, model, and training parameters
+- Evaluation metrics calculation (PnL, Sharpe ratio, drawdown, win rate)
+- Visualization tools for analyzing results
+
+**Core Features:**
+- Efficient exploration of large hyperparameter spaces
+- Early stopping of underperforming configurations
+- Correlation analysis between parameters and performance
+- Parallel execution of training runs
+- Comprehensive logging and visualization
+
+### Model Evaluation System
+
+The Model Evaluation System provides a comprehensive framework for assessing model performance on test data and comparing against benchmark strategies.
+
+**Key Responsibilities:**
+- Evaluate trained models on unseen market data
+- Calculate comprehensive performance metrics
+- Compare against benchmark trading strategies
+- Visualize performance and trading behavior
+- Provide insights for model improvement
+
+**Key Components:**
+- Test data preparation and preprocessing
+- Multiple evaluation episodes execution
+- Benchmark strategy implementation (Buy and Hold, Moving Average Crossover)
+- Performance metrics calculation
+- Visualization tools for performance analysis
+
+**Core Features:**
+- Out-of-sample testing on recent market data
+- Benchmark comparison with traditional strategies
+- Detailed trade analysis
+- Portfolio value tracking
+- Performance visualization
+
+### Paper Trading Integration
+
+The Paper Trading Integration enables the deployment of trained models to paper trading environments, with specific support for Interactive Brokers.
+
+**Key Responsibilities:**
+- Export trained models in a format suitable for inference
+- Connect to Interactive Brokers API
+- Fetch real-time market data
+- Execute trades based on model predictions
+- Track and log trading performance
+
+**Key Components:**
+- Model export and serialization
+- Interactive Brokers client implementation
+- Trading logic and risk management
+- Market data processing
+- Performance monitoring and logging
+
+**Core Features:**
+- PyTorch model export and inference
+- Interactive Brokers API integration
+- Real-time market data processing
+- Trading hours and days enforcement
+- Position sizing and risk management
+- Performance tracking and reporting
+
 ### API Layer
 
 The API layer exposes training results and metrics through a RESTful interface.
@@ -208,6 +336,8 @@ The API layer exposes training results and metrics through a RESTful interface.
 - Provide access to training run data
 - Expose episode metrics and details
 - Enable querying and filtering of training results
+- Access to hyperparameter optimization results
+- Retrieve model evaluation metrics
 
 **Key Components:**
 - FastAPI framework for RESTful endpoints
@@ -221,6 +351,10 @@ The API layer exposes training results and metrics through a RESTful interface.
 - `/api/v1/episodes/{episode_id}/trades/`: Get trades for a specific episode
 - `/api/v1/episodes/{episode_id}/operations/`: Get trading operations for a specific episode
 - `/api/v1/episodes/{episode_id}/model/`: Get model parameters for a specific episode
+- `/api/v1/optimization/runs/`: Get hyperparameter optimization runs
+- `/api/v1/optimization/runs/{run_id}/results/`: Get results for a specific optimization run
+- `/api/v1/evaluation/runs/`: Get model evaluation runs
+- `/api/v1/evaluation/runs/{run_id}/metrics/`: Get metrics for a specific evaluation run
 
 ### Dashboard
 
@@ -382,6 +516,7 @@ flowchart TD
     subgraph DataAcquisition["Data Acquisition"]
         YF[Yahoo Finance API]
         DF[DataFetcher]
+        IB[Interactive Brokers API]
     end
     
     subgraph FeatureEngineering["Feature Engineering"]
@@ -397,12 +532,33 @@ flowchart TD
     
     subgraph Storage["Storage"]
         DB[(Database)]
+        MODEL_STORE[Model Storage]
     end
     
     subgraph Analysis["Analysis"]
         API[FastAPI]
         DASH[Dashboard]
         MC[Metrics Calculator]
+    end
+    
+    subgraph Optimization["Hyperparameter Optimization"]
+        HPO[Ray Tune]
+        ASHA[ASHA Scheduler]
+        SEARCH[Search Space]
+        OPT_VIS[Optimization Visualization]
+    end
+    
+    subgraph Evaluation["Model Evaluation"]
+        EVAL[Evaluation System]
+        BENCH[Benchmark Comparison]
+        PERF_VIS[Performance Visualization]
+    end
+    
+    subgraph PaperTrading["Paper Trading"]
+        PT_SYS[Paper Trading System]
+        IB_CLIENT[IB Client]
+        INFERENCE[Inference Module]
+        EXPORT[Model Export]
     end
     
     YF -->|OHLCV Data| DF
@@ -421,6 +577,30 @@ flowchart TD
     DASH -->|User Queries| API
     TE -->|Raw Metrics| MC
     MC -->|Calculated Metrics| CB
+    
+    %% Hyperparameter optimization flow
+    HPO -->|Configure| TL
+    SEARCH -->|Parameter Space| HPO
+    HPO -->|Results| DB
+    HPO -->|Best Config| MODEL_STORE
+    ASHA -->|Scheduling| HPO
+    DB -->|Optimization Results| OPT_VIS
+    
+    %% Evaluation flow
+    MODEL_STORE -->|Trained Model| EVAL
+    DF -->|Test Data| EVAL
+    BENCH -->|Benchmark Strategies| EVAL
+    EVAL -->|Evaluation Results| DB
+    EVAL -->|Performance Data| PERF_VIS
+    
+    %% Paper trading flow
+    MODEL_STORE -->|Best Model| EXPORT
+    EXPORT -->|Exported Model| INFERENCE
+    INFERENCE -->|Predictions| PT_SYS
+    IB -->|Market Data| PT_SYS
+    PT_SYS -->|Orders| IB_CLIENT
+    IB_CLIENT -->|Execution| IB
+    PT_SYS -->|Trading Results| DB
 ```
 
 ## External System Integrations
@@ -430,6 +610,18 @@ flowchart TD
 - **Integration Method**: Via the `yfinance` Python library
 - **Data Retrieved**: OHLCV (Open, High, Low, Close, Volume) data
 - **Interaction Pattern**: Pull-based, fetched at the beginning of each training run
+
+### Interactive Brokers API
+- **Purpose**: Execute paper trading operations and fetch real-time market data
+- **Integration Method**: Via the Interactive Brokers API (ibapi) Python client
+- **Data Retrieved**: Real-time market data, account information, positions, order status
+- **Data Sent**: Trading orders (market, limit, etc.)
+- **Interaction Pattern**: Bidirectional, event-driven communication
+- **Key Components**:
+  - **IBClient**: Custom wrapper around the EClient/EWrapper classes
+  - **Contract**: Representation of financial instruments
+  - **Order**: Definition of trading orders
+  - **Position Management**: Tracking and managing trading positions
 
 ## Dependencies
 
@@ -457,6 +649,9 @@ The system relies on the following key dependencies as defined in `pyproject.tom
 - **torchvision**: ^0.18.0 - PyTorch computer vision
 - **torchaudio**: ^2.3.0 - PyTorch audio processing
 - **ray**: ^2.46.0 (with rllib extras) - Distributed RL framework
+- **ray[tune]**: ^2.46.0 - Ray Tune for hyperparameter optimization
+- **seaborn**: ^0.13.0 - Statistical data visualization
+- **ibapi**: ^9.81.1 - Interactive Brokers API client
 - **protobuf**: ~3.20.0 - Protocol buffers
 
 ### Development Dependencies

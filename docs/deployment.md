@@ -16,6 +16,11 @@ The ReinforceStrategyCreatorV2 system follows a containerized deployment strateg
 - **Model Artifacts**:
   - Trained models stored in `models/` directory for development
   - Production-ready models stored in `production_models/` directory
+  - Exported models for paper trading stored in `paper_trading/models/` directory
+- **Paper Trading Components**:
+  - Interactive Brokers client (`ib_client.py`)
+  - Paper trading system (`paper_trading.py`)
+  - Model inference module (`inference.py`)
 
 The system uses environment variables for configuration across environments, allowing for consistent deployment across different setups.
 
@@ -161,6 +166,48 @@ The production environment prioritizes stability, security, and performance for 
    - Allocate appropriate CPU, memory, and storage resources
    - Consider dedicated hardware for databases
    - Configure swapping and memory limits for containers
+
+### Paper Trading Deployment
+
+The paper trading system allows for testing trained models in a simulated trading environment using Interactive Brokers.
+
+1. **Prerequisites**:
+   - Interactive Brokers account with paper trading enabled
+   - Interactive Brokers Trader Workstation (TWS) or IB Gateway installed
+   - API permissions enabled in TWS/Gateway settings
+
+2. **Model Export**:
+   ```bash
+   # Export a trained model for paper trading
+   poetry run python export_for_paper_trading.py
+   ```
+   
+   This script:
+   - Loads the best model from hyperparameter optimization
+   - Exports it in a format suitable for inference
+   - Creates the necessary configuration files
+   - Sets up the Interactive Brokers integration
+
+3. **Configuration**:
+   - Edit `paper_trading/paper_trading_config.json` to set:
+     - Interactive Brokers connection parameters
+     - Trading parameters (symbol, risk per trade, etc.)
+     - Trading hours and days
+     - Logging and monitoring settings
+
+4. **Running Paper Trading**:
+   ```bash
+   # Start Interactive Brokers TWS or Gateway first
+   
+   # Then run the paper trading system
+   poetry run python paper_trading/paper_trading.py --model-dir paper_trading/models/model_YYYYMMDDHHMMSS
+   ```
+
+5. **Monitoring**:
+   - Paper trading logs are stored in `paper_trading.log`
+   - Trade logs are stored in `trades.log`
+   - Performance metrics are stored in the database
+   - Use the dashboard to visualize paper trading performance
 
 ### Database Deployment
 
