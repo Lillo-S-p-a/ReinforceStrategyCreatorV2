@@ -6,7 +6,7 @@ Welcome! This dashboard helps you visualize and understand the performance of a 
 
 ## 🚀 Getting Started: Running the Dashboard
 
-Ready to explore? Here’s how to launch the dashboard:
+Ready to explore? Here's how to launch the dashboard:
 
 > **💡 Quick Tip:**
 > This dashboard uses Python and requires some setup the first time. If you haven't already, you might need to install the project's tools using [Poetry](https://python-poetry.org/) by running `poetry install` in your terminal within the project folder.
@@ -19,6 +19,41 @@ Ready to explore? Here’s how to launch the dashboard:
 3.  **That's it!** The dashboard should automatically open in your web browser.
 
 ---
+
+## 🤖 Training the RL Agent
+
+This project now supports parallel training using RLlib, Ray, and PyTorch for improved performance and scalability.
+
+### Running Training
+
+1. **Ensure all dependencies are installed:**
+   ```bash
+   poetry install
+   ```
+
+2. **Start a training run:**
+   ```bash
+   ./run_train.sh
+   ```
+   
+   Or for debugging purposes:
+   ```bash
+   ./run_debug_train.sh
+   ```
+
+3. **Training features:**
+   - Parallel training with multiple workers using Ray
+   - Early stopping based on validation metrics
+   - Comprehensive metrics tracking and reporting
+   - Automatic database logging of all training data
+
+### Database Utilities
+
+The project includes several utilities for database management:
+
+- **Reset database:** `python reset_db.py`
+- **Verify database integrity:** `python verify_database.py [RUN_ID]`
+- **Fix NULL initial portfolio values:** `python fix_null_initial_portfolio_values.py [RUN_ID]`
 
 ---
 
@@ -67,6 +102,7 @@ The `docker-compose.yml` file is configured to use these environment variables o
 *   **From the host machine (e.g., for `psql` or a DB GUI):**
     Use `localhost` as the host and port `5433` (as mapped in `docker-compose.yml`).
     Connection string example: `postgresql://user:password@localhost:5433/marketdata`
+
 ## 📈 What You Can See
 
 The dashboard provides several views to analyze the trading agent's behavior and results:
@@ -79,6 +115,26 @@ The dashboard provides several views to analyze the trading agent's behavior and
 *   **Action Analysis:** Understand the agent's trading patterns and decision-making tendencies.
 
 Explore the different sections using the sidebar navigation!
+
+---
+
+## 📚 Documentation
+
+For more detailed information, check out the documentation in the `docs/` directory:
+
+- [Introduction](docs/introduction.md) - Overview of the project
+- [Architecture](docs/architecture.md) - System architecture and components
+- [ML Model](docs/ml_model.md) - Details about the reinforcement learning model
+- [API](docs/api.md) - API documentation
+- [Operations](docs/operations.md) - Operational procedures
+- [Deployment](docs/deployment.md) - Deployment instructions
+- [Setup](docs/setup.md) - Setup instructions
+
+---
+
+## 📝 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
 
 ---
 
