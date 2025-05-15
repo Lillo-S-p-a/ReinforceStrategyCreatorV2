@@ -39,8 +39,8 @@ graph TD
     end
     
     subgraph "Infrastructure"
-        DB[(Database)] <-- CB["Callbacks"]
-        CB <-- TE
+        CB["Callbacks"] --> DB[(Database)]
+        TE --> CB
     end
     
     classDef core fill:#bbf,stroke:#333,stroke-width:1px;
