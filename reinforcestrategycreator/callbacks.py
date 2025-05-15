@@ -788,12 +788,10 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
             current_step_number = len(episode) # RLlib episode length is 1-based for current step
             
             # Extract trading operation details if present in info
-            operation_type_str = last_info_for_step.get("operation_type")
-            operation_price = last_info_for_step.get("operation_price")
-            operation_quantity = last_info_for_step.get("operation_quantity")
-            operation_cost = last_info_for_step.get("operation_cost", 0.0) # Default to 0 if not present
-            current_balance_after_op = last_info_for_step.get("balance_after_operation")
-            current_position_after_op = last_info_for_step.get("position_after_operation")
+            operation_type_str = last_info_for_step.get("operation_type_for_log") # Corrected key
+            operation_price = last_info_for_step.get("execution_price_this_step")    # Corrected key
+            operation_quantity = last_info_for_step.get("shares_transacted_this_step") # Corrected key
+            # operation_cost, current_balance_after_op, current_position_after_op are not part of DbTradingOperation model
             
             # Log step data
             with get_db_session() as db:
@@ -835,28 +833,37 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
                     # action_data=str(last_action)[:255] if last_action is not None else None # Example: truncate
                 )
                 db.add(db_step)
+                db.flush() # Ensure db_step.step_id is populated
                 
                 # Log trading operation if details are present
                 if operation_type_str and operation_price is not None and operation_quantity is not None:
-                    try:
-                        op_type_enum = OperationType[operation_type_str.upper()] # Convert string to Enum
-                        db_trading_op = DbTradingOperation(
-                            episode_id=db_episode_id,
-                            step_number=current_step_number,
-                            timestamp=datetime.datetime.now(datetime.timezone.utc), # Could also use env's current time if available
-                            operation_type=op_type_enum,
-                            price=operation_price,
-                            quantity=operation_quantity,
-                            cost=operation_cost,
-                            balance_after_operation=current_balance_after_op,
-                            position_after_operation=current_position_after_op
-                        )
-                        db.add(db_trading_op)
-                        logger.debug(f"Logged trading operation: {op_type_enum} at step {current_step_number}")
-                    except KeyError:
-                        logger.warning(f"Invalid operation_type string '{operation_type_str}' at step {current_step_number}. Cannot log operation.")
-                    except Exception as e_op_log:
-                        logger.error(f"Error logging trading operation at step {current_step_number}: {e_op_log}", exc_info=True)
+                    # Ensure operation_type_str is actually a string before .upper()
+                    if not isinstance(operation_type_str, str):
+                        # If it's an Enum member already, get its name
+                        if isinstance(operation_type_str, OperationType):
+                            operation_type_str = operation_type_str.name
+                        else:
+                            logger.warning(f"operation_type_str is not a string or OperationType enum: {type(operation_type_str)}. Value: {operation_type_str}. Skipping operation log.")
+                            operation_type_str = None # Prevent further processing
+
+                    if operation_type_str: # Proceed if we have a valid string
+                        try:
+                            op_type_enum = OperationType[operation_type_str.upper()] # Convert string to Enum
+                            db_trading_op = DbTradingOperation(
+                                episode_id=db_episode_id,
+                                step_id=db_step.step_id, # Correctly use the DbStep's ID
+                                timestamp=datetime.datetime.now(datetime.timezone.utc), # Could also use env's current time if available
+                                operation_type=op_type_enum,
+                                price=float(operation_price), # Ensure float
+                                size=float(operation_quantity) # Use 'size' and ensure float
+                                # Removed cost, balance_after_operation, position_after_operation
+                            )
+                            db.add(db_trading_op)
+                            logger.debug(f"Logged trading operation: {op_type_enum} at RLlib step {current_step_number}, db_step_id {db_step.step_id}")
+                        except KeyError:
+                            logger.warning(f"Invalid operation_type string '{operation_type_str}' at RLlib step {current_step_number}. Cannot log operation.")
+                        except Exception as e_op_log:
+                            logger.error(f"Error logging trading operation at RLlib step {current_step_number}: {e_op_log}", exc_info=True)
                 
                 db.commit() # Commit step and any operation
                 logger.debug(f"Step {current_step_number} for episode {db_episode_id} logged. Reward: {last_reward}")
