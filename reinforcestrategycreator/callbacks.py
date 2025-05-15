@@ -18,6 +18,7 @@ from typing import Dict, Optional, Any # Keep Any for now, or use Union[Episode,
 # from ray.rllib.core.rl_module.rl_module import RLModule
 # from ray.rllib.env.env_runner import EnvRunner
 
+from sqlalchemy import func
 from reinforcestrategycreator.db_utils import get_db_session
 from reinforcestrategycreator.db_models import (
     Episode as DbEpisode,
@@ -1052,7 +1053,7 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
                     db_episode.total_steps = total_steps
                     
                     # Calculate total reward (sum of rewards from all steps)
-                    total_reward = db.query(db.func.sum(DbStep.reward)).filter(
+                    total_reward = db.query(func.sum(DbStep.reward)).filter(
                         DbStep.episode_id == db_episode.episode_id,
                         DbStep.reward.isnot(None)
                     ).scalar() or 0.0
