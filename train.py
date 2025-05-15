@@ -101,12 +101,16 @@ def main():
         ray.shutdown()
         return
 
+    # Put the processed data into the Ray object store
+    data_ref = ray.put(data_with_indicators)
+    logger.info(f"Historical data DataFrame put into Ray object store with ref: {data_ref}")
+
     # --- Register Custom Environment ---
     register_rllib_env() # Call the registration function
 
     # --- RLlib Algorithm Configuration ---
     env_config_params = {
-        "df": data_with_indicators,
+        "df": data_ref,
         "initial_balance": ENV_INITIAL_BALANCE,
         "transaction_fee_percent": ENV_TRANSACTION_FEE_PERCENT,
         "window_size": ENV_WINDOW_SIZE,
@@ -142,11 +146,11 @@ def main():
             lr=AGENT_LEARNING_RATE,
             gamma=AGENT_GAMMA,
             train_batch_size=AGENT_TRAIN_BATCH_SIZE,
-            n_step=0,
+            n_step=1, # Changed from 0 to 1 for consistency with replay buffer
             replay_buffer_config={
                 "type": "EpisodeReplayBuffer",
                 "capacity": 50000,
-                "n_step": 0,
+                "n_step": 1, # Changed from 0 to 1 to fix empty reward list issue
                 "worker_side_prioritization": False,
                 # 'store_n_step_transitions' is intentionally removed/False
             },

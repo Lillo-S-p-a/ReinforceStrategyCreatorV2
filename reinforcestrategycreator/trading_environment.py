@@ -34,15 +34,16 @@ class TradingEnv(gym.Env):
         observation_space (gym.spaces.Space): The observation space of the environment.
     """
     
-    _system_wide_graceful_shutdown_active = False # Class-level flag
-    
+    # Class-level attribute for system-wide graceful shutdown signaling
+    _system_wide_graceful_shutdown_active = False
+        
     def __init__(self, env_config: dict):
         """
         Initialize the trading environment.
 
         Args:
             env_config (dict): Configuration dictionary for the environment. Expected keys:
-                df (pd.DataFrame): Historical market data.
+                df (ray.ObjectRef): Ray object reference to the historical market data DataFrame.
                 initial_balance (float): Initial account balance.
                 transaction_fee_percent (float): Fee percentage for each transaction.
                 window_size (int): Number of time steps for observation.
@@ -60,7 +61,11 @@ class TradingEnv(gym.Env):
         super(TradingEnv, self).__init__()
 
         # Extract parameters from env_config
-        self.df = env_config["df"]
+        # Retrieve the DataFrame from the Ray object store
+        data_ref = env_config["df"]
+        self.df = ray.get(data_ref)
+        logger.info(f"TradingEnv instance retrieved DataFrame from Ray object store.")
+
         self.initial_balance = env_config.get("initial_balance", 10000.0)
         self.transaction_fee_percent = env_config.get("transaction_fee_percent", 0.1)
         self.window_size = env_config.get("window_size", 5)
@@ -74,6 +79,8 @@ class TradingEnv(gym.Env):
         self.position_sizing_method = env_config.get("position_sizing_method", "fixed_fractional")
         self.risk_fraction = env_config.get("risk_fraction", 0.1)
         self.normalization_window_size = env_config.get("normalization_window_size", 20)
+
+
 
         # Placeholder for current step in the environment
         self.current_step = 0
@@ -119,8 +126,9 @@ class TradingEnv(gym.Env):
         )
         
         logger.info(f"TradingEnv initialized with {len(self.df)} data points (including indicators) and initial balance {self.initial_balance}") # Corrected
-
+ 
         self.graceful_shutdown_signaled = False # Added for graceful shutdown
+        self.cached_final_info_for_callback = None # Cache for the last info dict of a completed episode
     
     def signal_graceful_shutdown(self):
         """Sets a flag to indicate that the environment should try to terminate the episode."""
@@ -128,14 +136,6 @@ class TradingEnv(gym.Env):
         self.graceful_shutdown_signaled = True
         TradingEnv._system_wide_graceful_shutdown_active = True
 
-    @staticmethod
-    def clear_system_wide_graceful_shutdown():
-        """Clears the system-wide graceful shutdown flag."""
-        if TradingEnv._system_wide_graceful_shutdown_active:
-            logger.info("Clearing system-wide graceful shutdown flag.")
-            TradingEnv._system_wide_graceful_shutdown_active = False
-        else:
-            logger.info("System-wide graceful shutdown flag was already clear.")
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
@@ -161,7 +161,8 @@ class TradingEnv(gym.Env):
         # Set random seed if provided
         if seed is not None:
             np.random.seed(seed)
-            
+
+
         # Reset environment state
         self.balance = self.initial_balance
         self.shares_held = 0
@@ -182,7 +183,8 @@ class TradingEnv(gym.Env):
         self._episode_total_reward = 0.0 # Reset episode total reward
         self._episode_steps = 0 # Reset episode steps
         self.graceful_shutdown_signaled = False # Reset instance flag on environment reset
-
+        self.cached_final_info_for_callback = None # Clear cached info on reset
+ 
         # Check if system-wide shutdown is active and re-apply signal if needed
         if TradingEnv._system_wide_graceful_shutdown_active:
             self.graceful_shutdown_signaled = True
@@ -264,26 +266,15 @@ class TradingEnv(gym.Env):
         # Save the last portfolio value for reward calculation
         self.last_portfolio_value = self.portfolio_value
 
-        # --- Graceful Shutdown Check ---
-        # If graceful shutdown is signaled, this step should be the last one.
-        force_terminate_due_to_shutdown = self.graceful_shutdown_signaled
-        
-        if force_terminate_due_to_shutdown:
-            logger.info(f"Step {self.current_step}: Graceful shutdown is active. Preparing to terminate episode after this step.")
-            # The episode will be marked as terminated later in this method.
-            # The agent's action for this step will still be processed.
-        
         # Move to the next time step
         self.current_step += 1
-        
+
         # Determine if the episode is done
         natural_end_of_data = self.current_step >= len(self.df) - 1
-        
-        # Episode is terminated if it's a natural end or if graceful shutdown was signaled for the *previous* state
-        # (meaning this current step is the one that processes the shutdown)
-        terminated = natural_end_of_data or force_terminate_due_to_shutdown
-        truncated = False # Assuming graceful shutdown is a termination.
-                          # If it should be truncation, set: truncated = force_terminate_due_to_shutdown and not natural_end_of_data
+
+        # Episode is terminated if it's a natural end
+        terminated = natural_end_of_data
+        truncated = False
         
         # Get the current price from the dataframe
         # Ensure current_step is within bounds if it's the very last step
@@ -354,27 +345,33 @@ class TradingEnv(gym.Env):
         # Get the new observation
         observation = self._get_observation()
  
+        # Ensure numeric values that might be NaN are handled before putting into info
+        safe_current_price = np.nan_to_num(self.current_price, nan=0.0)
+        safe_portfolio_value = np.nan_to_num(self.portfolio_value, nan=0.0)
+        safe_step_reward = np.nan_to_num(reward, nan=0.0) # 'reward' is the final step reward variable here
+
         # Prepare info dictionary
         info = {
             'balance': self.balance,
             'shares_held': self.shares_held,
-            'current_price': self.current_price,
-            'portfolio_value': self.portfolio_value, # This is the current (potentially final) portfolio value
+            'current_price': safe_current_price,
+            'portfolio_value': safe_portfolio_value, # This is the current (potentially final) portfolio value
             'current_position': self.current_position,
             'step': self.current_step,
             'action_taken': action, # Actual action taken (could be overridden)
             'original_action': original_action, # Agent's intended action
             'sl_triggered': sl_triggered,
             'tp_triggered': tp_triggered,
-            'step_reward': step_reward,
+            'step_reward': safe_step_reward, # Use the safe version of the step's reward
             'operation_type_for_log': operation_details_for_log.get('operation_type_for_log', OperationType.HOLD),
             'shares_transacted_this_step': operation_details_for_log.get('shares_transacted_this_step', 0),
-            'execution_price_this_step': operation_details_for_log.get('execution_price_this_step', self.current_price)
+            'execution_price_this_step': operation_details_for_log.get('execution_price_this_step', safe_current_price) # Use safe_current_price here too
         }
  
         # `terminated` and `truncated` flags are already set based on natural_end_of_data or force_terminate_due_to_shutdown
+        
  
-        if terminated:
+        if terminated: # This now includes the check above
             # Add all required metrics to info dict upon episode termination
             info['initial_portfolio_value'] = self.initial_balance # Use initial_balance from reset
             info['final_portfolio_value'] = self.portfolio_value # Current portfolio_value is the final one
@@ -406,17 +403,19 @@ class TradingEnv(gym.Env):
             info['total_steps'] = self._episode_steps # Accumulated total steps for the episode
             
             logger.info(
-                f"Episode ended (Terminated: {terminated}, Truncated: {truncated}, NaturalEnd: {natural_end_of_data}, GracefulShutdown: {force_terminate_due_to_shutdown}). "
+                f"Episode ended (Terminated: {terminated}, Truncated: {truncated}, NaturalEnd: {natural_end_of_data}, GracefulShutdown: {self.graceful_shutdown_signaled}). "
                 f"Final info: initial_pf={info.get('initial_portfolio_value')}, "
                 f"final_pf={info.get('final_portfolio_value')}, pnl={info.get('pnl')}, "
                 f"sharpe={info.get('sharpe_ratio')}, mdd={info.get('max_drawdown')}, "
                 f"total_reward={info.get('total_reward')}, total_steps={info.get('total_steps')}, "
                 f"win_rate={info.get('win_rate')}, trades_count={len(info.get('completed_trades', []))}"
             )
+            # Cache the final info dictionary for the callback
+            self.cached_final_info_for_callback = info.copy()
  
         logger.debug(f"Step {self.current_step}: action={action}, reward={reward:.4f}, terminated={terminated}, truncated={truncated}, SL={sl_triggered}, TP={tp_triggered}")
         return observation, reward, terminated, truncated, info
-
+    
     def _execute_trade_action(self, action: int) -> Dict[str, Any]:
         """
         Execute the specified trading action.

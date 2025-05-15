@@ -32,6 +32,7 @@ NUM_TRAINING_ITERATIONS = 1  # REDUCED TO 1 FOR DEBUGGING
 INITIAL_TRAINING_EPISODES_FOR_DATA_EST = 5 # Used for estimating data length if needed
 GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS = 1 # Number of extra train() calls for draining
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 30 # Timeout for the draining phase
+MAX_EPISODES_ALLOWED = 11 # Hard cap on total episodes (10 target + 1 margin) - use to catch overruns
  
 # Environment parameters (to be passed in env_config)
 ENV_INITIAL_BALANCE = 10000.0
@@ -69,6 +70,7 @@ logger = logging.getLogger(__name__) # Use a named logger
 def main():
     # Clear any lingering system-wide shutdown flag from previous runs
     TradingEnv.clear_system_wide_graceful_shutdown()
+    TradingEnv.reset_run_episode_counter() # Reset global episode counter for the run
     logger.info(f"Starting RLlib debug training run for {TICKER} from {START_DATE} to {END_DATE}")
     
     # Monkey patch removed as direct modification to RLlib source is used.
@@ -128,6 +130,7 @@ def main():
         "risk_fraction": ENV_RISK_FRACTION,
         "stop_loss_pct": ENV_STOP_LOSS_PCT,
         "normalization_window_size": ENV_NORMALIZATION_WINDOW_SIZE,
+        "max_total_episodes_for_run": 10, # Will be set dynamically later, placeholder for now
         # Add any other parameters TradingEnv expects
     }
     
@@ -146,7 +149,7 @@ def main():
         .framework("torch") # Switch to PyTorch
         .env_runners(
             num_env_runners=NUM_ROLLOUT_WORKERS,
-            rollout_fragment_length=50, # Explicitly set rollout_fragment_length
+            rollout_fragment_length=5, # Further reduced for more granular control
             exploration_config={} # Use empty dict for default exploration with new API
         )
         .training(
@@ -154,12 +157,14 @@ def main():
             gamma=AGENT_GAMMA,
             train_batch_size=AGENT_TRAIN_BATCH_SIZE,
             n_step=1,  # IMPORTANT: Set to 1 for debugging, as this is what causes the issue
+            # Using EpisodeReplayBuffer with the new API stack for proper episode handling
             replay_buffer_config={
-                "type": "EpisodeReplayBuffer",  # We use the monkey-patched version
-                "capacity": 50000,
+                "type": "EpisodeReplayBuffer",
+                "capacity": 50000, # Using AGENT_BUFFER_SIZE would be 10000, but let's keep 50000
                 "worker_side_prioritization": False,
             },
-            target_network_update_freq=AGENT_TARGET_NETWORK_UPDATE_FREQ_TIMESTEPS
+            target_network_update_freq=AGENT_TARGET_NETWORK_UPDATE_FREQ_TIMESTEPS,
+            training_intensity=1.0  # Add this line
         )
         .rl_module(
             model_config={
@@ -171,7 +176,9 @@ def main():
             num_gpus=0  # Don't use GPU for debugging
         )
         .callbacks(lambda: DatabaseLoggingCallbacks(callback_config))
-        .reporting(min_time_s_per_iteration=10)
+        .reporting(min_time_s_per_iteration=0)  # Set to 0 for more granular control
+        # Using the new RLlib API stack (default) to avoid ABCMeta TypeError
+        # Removed disabling of API stack and validation
     )
     config.log_level = "ERROR"
     
@@ -248,22 +255,145 @@ def main():
 
         # Training loop - stop after 10 episodes
         episodes_completed_count = 0
-        max_episodes_to_run = 10
+        max_episodes_to_run = 10 # This is the target
+        env_config_params["max_total_episodes_for_run"] = max_episodes_to_run # Update env_config
         max_iterations = 100 # Safety break for the loop
-        logger.info(f"Starting training loop, will stop after {max_episodes_to_run} episodes or {max_iterations} iterations.")
+        logger.info(f"Starting training loop, will stop after {max_episodes_to_run} episodes or {max_iterations} iterations (hard cap: {MAX_EPISODES_ALLOWED}).")
+        
+        # Track if we've reached the episode limit to prevent additional episodes during graceful shutdown
+        episode_limit_reached = False
+        _training_should_stop_flag = [False] # Flag to signal stopping from the wrapper
+        
+        # Modify the config to limit training time and batch size to give more control
+        
+        # Add a custom stop condition function that will be checked by RLlib during training
+        logger.info("Setting up custom episode limit stop condition")
+        
+        # Install custom evaluator to strictly enforce episode limits
+        # This provides a direct hook into RLlib's training loop
+        orig_training_step = algo.training_step
+        
+        def limited_train_one_step(*args, **kwargs):
+            """Wrapper around RLlib's training_step that enforces episode limits using TradingEnv counter."""
+            current_env_episode_count = TradingEnv.get_current_run_episodes_completed()
 
+            # algo and i are available in the outer scope of main()
+            # max_episodes_to_run and MAX_EPISODES_ALLOWED are also in outer scope
+
+            logger.info(
+                f"LIMITED_TRAIN_WRAPPER: Env episodes: {current_env_episode_count}, "
+                f"Target: {max_episodes_to_run}, Hard Cap: {MAX_EPISODES_ALLOWED}"
+            )
+
+            # The counter increments at the start of an episode in TradingEnv.reset().
+            # So, if max_episodes_to_run is 10, we want to stop *before* starting the 11th episode.
+            # This means if current_env_episode_count is already 11 (meaning 10 have conceptually finished
+            # and the 11th is about to start or has just started), we stop.
+            # Or, more simply, if current_env_episode_count > max_episodes_to_run.
+            # Let's use current_env_episode_count > max_episodes_to_run to be consistent with how the env terminates.
+            # The MAX_EPISODES_ALLOWED is a hard stop.
+            if current_env_episode_count > max_episodes_to_run or \
+               current_env_episode_count > MAX_EPISODES_ALLOWED: # MAX_EPISODES_ALLOWED is 11
+                logger.warning(
+                    f"LIMITED_TRAIN_WRAPPER: Stopping. Env episodes: {current_env_episode_count} "
+                    f"(Target: {max_episodes_to_run}, Hard Cap: {MAX_EPISODES_ALLOWED}). Setting stop flag."
+                )
+                _training_should_stop_flag[0] = True
+                # Raise StopIteration to forcefully break out of algo.train()'s internal loop
+                raise StopIteration("Episode limit reached by custom wrapper.")
+            
+            # Otherwise proceed with original training step
+            # The original training_step (for new API stack) should also return None
+            return orig_training_step(*args, **kwargs) # This should return None if orig_training_step adheres
+        
+        # Install our wrapper
+        algo.training_step = limited_train_one_step
+        
+        # Keep track of episodes from previous iterations
+        previous_episodes_completed = 0
+        
         for i in range(max_iterations):
-            result = algo.train()
-            logger.info(f"Training iteration {i+1} complete.")
-            # logger.info(pretty_print(result)) # Can be verbose
+            # Pre-check to avoid even starting an iteration
+            if previous_episodes_completed >= max_episodes_to_run:
+                logger.info(f"Already reached {previous_episodes_completed} episodes before iteration {i+1}. Stopping.")
+                episode_limit_reached = True
+                break
+            
+            # Calculate remaining episodes target
+            remaining_episodes = max_episodes_to_run - previous_episodes_completed
+            # Use extremely small rollout fragment length when we're close to target
+            if remaining_episodes <= 2:
+                suggested_rollout_length = 1  # Collect single steps for maximum control near limit
+            else:
+                suggested_rollout_length = min(5, max(1, remaining_episodes * 2))
+            
+            # Dynamically adjust the rollout fragment length across all runners
+            logger.info(f"Setting rollout_fragment_length to {suggested_rollout_length} (remaining episodes: {remaining_episodes})")
+            try:
+                # With new API stack, try two potential methods to adjust rollout_fragment_length
+                try:
+                    # First try the method that works with new API
+                    algo.workers.foreach_env_runner(
+                        lambda runner: setattr(runner, "rollout_fragment_length", suggested_rollout_length)
+                        if hasattr(runner, "rollout_fragment_length") else None
+                    )
+                except AttributeError:
+                    # Fallback for different API structure
+                    logger.info("Trying alternate method to set rollout_fragment_length")
+                    try:
+                        if hasattr(algo, "workers") and hasattr(algo.workers, "foreach_worker"):
+                            algo.workers.foreach_worker(
+                                lambda w: setattr(w.sample_collector, "rollout_fragment_length", suggested_rollout_length)
+                                if hasattr(w, "sample_collector") and hasattr(w.sample_collector, "rollout_fragment_length") else None
+                            )
+                    except Exception as e2:
+                        logger.warning(f"Could not adjust rollout_fragment_length with alternate method: {e2}")
+            except Exception as e:
+                logger.warning(f"Could not adjust rollout_fragment_length: {e}")
+            
+            # Execute a small training step
+            try:
+                result = algo.train()
 
+                # This flag check is a fallback if StopIteration wasn't raised but flag was set by wrapper.
+                # This might happen if algo.train() completed its iteration *just as* the flag was set,
+                # but before StopIteration was raised in a subsequent internal call to the wrapper.
+                if _training_should_stop_flag[0]:
+                    logger.info("Training stop flag detected by main loop (after algo.train completed). Setting episode_limit_reached and breaking.")
+                    episode_limit_reached = True
+                    # If result exists, use its episode count, otherwise assume max_episodes_to_run for safety
+                    episodes_completed_count = result.get("episodes_total", max_episodes_to_run) if result else max_episodes_to_run
+                    previous_episodes_completed = episodes_completed_count
+                    break
+            
+            except StopIteration as e:
+                logger.info(f"StopIteration caught: {e}. Breaking training loop.")
+                episode_limit_reached = True
+                # 'result' is not assigned in this path.
+                # We need to ensure 'episodes_completed_count' and 'previous_episodes_completed'
+                # reflect that the target was met for subsequent logic (like drain skipping).
+                # The wrapper already logged the env_episode_count.
+                # Let's set episodes_completed_count to max_episodes_to_run to ensure drain is skipped.
+                episodes_completed_count = max_episodes_to_run
+                previous_episodes_completed = episodes_completed_count
+                result = {} # Ensure result is a dict for downstream checks, even if empty
+                break
+            
+            logger.info(f"Training iteration {i+1} complete.")
+            
+            # Get updated episode counts
             episodes_this_iter = result.get("episodes_this_iteration", 0)
             episodes_completed_count = result.get("episodes_total", 0)
             
             logger.info(f"Episodes this iteration: {episodes_this_iter}, Total episodes completed: {episodes_completed_count}")
-
+            
+            # Store the current count for the next iteration
+            previous_episodes_completed = episodes_completed_count
+            
+            # Check if we've reached or exceeded our target
             if episodes_completed_count >= max_episodes_to_run:
                 logger.info(f"Reached {episodes_completed_count} episodes (target {max_episodes_to_run}). Stopping training loop.")
+                episode_limit_reached = True
                 break
             if i == max_iterations - 1:
                 logger.warning(f"Reached max_iterations ({max_iterations}) before completing {max_episodes_to_run} episodes. Stopping.")
@@ -331,16 +461,63 @@ def main():
             except Exception as e_remote_signal:
                 logger.error(f"Error signaling remote workers via foreach_env: {e_remote_signal}", exc_info=True)
 
-        logger.info(f"Performing {GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS} drain iterations...")
-        drain_start_time = datetime.datetime.now()
-        for i in range(GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS): # Should be 1 iteration
-            logger.info(f"Drain iteration {i+1}/{GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS}...")
-            # Perform a training step to allow episodes to complete and be logged
-            algo.train()
-            if (datetime.datetime.now() - drain_start_time).total_seconds() > GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
-                logger.warning(f"Graceful shutdown drain timeout ({GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS}s) reached during drain train() call.")
-                break
-        logger.info("Graceful shutdown drain phase complete.")
+        # Only perform drain iterations if we haven't hit the episode limit
+        # This prevents generating additional episodes during graceful shutdown
+        if not episode_limit_reached:
+            logger.info(f"Performing {GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS} drain iterations...")
+            drain_start_time = datetime.datetime.now()
+            
+            # Set an extremely small rollout fragment length for draining iterations
+            # This minimizes the chance of additional episodes being generated
+            try:
+                logger.info("Setting rollout_fragment_length to 1 for drain iterations")
+                # With new API stack, try two potential methods to adjust rollout_fragment_length
+                try:
+                    # First try the method that works with new API
+                    algo.workers.foreach_env_runner(
+                        lambda runner: setattr(runner, "rollout_fragment_length", 1)
+                        if hasattr(runner, "rollout_fragment_length") else None
+                    )
+                except AttributeError:
+                    # Fallback for different API structure
+                    logger.info("Trying alternate method to set rollout_fragment_length for drain")
+                    try:
+                        if hasattr(algo, "workers") and hasattr(algo.workers, "foreach_worker"):
+                            algo.workers.foreach_worker(
+                                lambda w: setattr(w.sample_collector, "rollout_fragment_length", 1)
+                                if hasattr(w, "sample_collector") and hasattr(w.sample_collector, "rollout_fragment_length") else None
+                            )
+                    except Exception as e2:
+                        logger.warning(f"Could not adjust rollout_fragment_length for drain with alternate method: {e2}")
+            except Exception as e:
+                logger.warning(f"Could not adjust rollout_fragment_length for draining: {e}")
+            
+            # Install an episode counter to detect if any new episodes are started
+            # Use the previous_episodes_completed which is updated from train() result
+            orig_episode_counter = previous_episodes_completed
+            for i in range(GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS): # Should be 1 iteration
+                logger.info(f"Drain iteration {i+1}/{GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS}...")
+                # Perform a very small training step to allow episodes to complete and be logged
+                drain_result = algo.train()
+                # Log how many episodes were completed during drain iteration
+                drain_episodes = drain_result.get("episodes_this_iteration", 0)
+                total_episodes = drain_result.get("episodes_total", 0)
+                logger.info(f"Drain iteration generated {drain_episodes} episodes. Total episodes now: {total_episodes}")
+                
+                # Check if we're generating new episodes during drain
+                if total_episodes > orig_episode_counter:
+                    logger.warning(f"Drain iteration generated {total_episodes - orig_episode_counter} new episodes! This is unexpected.")
+                    # If we exceeded our target during drain, stop immediately
+                    if total_episodes > max_episodes_to_run:
+                        logger.warning(f"Episode limit exceeded during drain. Current: {total_episodes}, Target: {max_episodes_to_run}")
+                        break
+                
+                if (datetime.datetime.now() - drain_start_time).total_seconds() > GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS:
+                    logger.warning(f"Graceful shutdown drain timeout ({GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS}s) reached during drain train() call.")
+                    break
+            logger.info("Graceful shutdown drain phase complete.")
+        else:
+            logger.info("Skipping drain iterations as episode limit was already reached.")
   
     except Exception as e:
         logger.error(f"Error during RLlib training or graceful shutdown: {e}", exc_info=True)
