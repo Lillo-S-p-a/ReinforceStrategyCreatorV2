@@ -96,12 +96,11 @@ Where:
 
 The neural network is trained to minimize the loss function:
 
-$$L(\theta) = \mathbb{E}_{(s,a,r,s',done) \sim \mathcal{D}} \left[ (r + \gamma \max_{a'} Q(s', a'; \theta^-) (1 - done) - Q(s, a; \theta))^2 \right]$$
+$$L(\theta) = \mathbb{E}[(r + \gamma \max Q(s', a'; \theta^-) \cdot (1 - done) - Q(s, a; \theta))^2]$$
 
 Where:
 - $\theta$ represents the parameters of the main network
 - $\theta^-$ represents the parameters of the target network
-- $\mathcal{D}$ is the replay buffer
 - $\gamma$ is the discount factor
 - $done$ is a binary flag indicating if the episode terminated
 
