@@ -43,12 +43,13 @@ graph TD
         TE --> CB
     end
     
-    classDef core fill:#bbf,stroke:#333,stroke-width:1px;
-    classDef infrastructure fill:#bfb,stroke:#333,stroke-width:1px;
-    classDef training fill:#fbb,stroke:#333,stroke-width:1px;
-    class "RL Core" core;
-    class Infrastructure infrastructure;
-    class "Training Loop" training;
+    classDef coreStyle fill:#bbf,stroke:#333,stroke-width:1px;
+    classDef infrastructureStyle fill:#bfb,stroke:#333,stroke-width:1px;
+    classDef trainingStyle fill:#fbb,stroke:#333,stroke-width:1px;
+    
+    class TA,TE,RA coreStyle;
+    class DB,CB infrastructureStyle;
+    class TL trainingStyle;
 ```
 
 ### Key Components
@@ -85,7 +86,7 @@ The system implements a **Deep Q-Network (DQN)** algorithm, which combines Q-lea
 
 The DQN algorithm aims to approximate the optimal action-value function:
 
-$$Q^*(s, a) = \max_{\pi} \mathbb{E}\left[R_t | s_t = s, a_t = a, \pi\right]$$
+$$Q^*(s, a) = \max_{\pi} \mathbb{E}\left[R_t \mid s_t = s, a_t = a, \pi\right]$$
 
 Where:
 - $Q^*(s, a)$ is the expected return when taking action $a$ in state $s$ and following the optimal policy thereafter
@@ -93,9 +94,9 @@ Where:
 - $\mathbb{E}$ denotes the expected value
 - $R_t$ is the total discounted reward from time step $t$
 
-The neural network is trained to minimize the loss:
+The neural network is trained to minimize the loss function:
 
-$$L(\theta) = \mathbb{E}_{(s,a,r,s',done) \sim \mathcal{D}} \left[ \left( r + \gamma \cdot \max_{a'} Q(s', a'; \theta^-) \cdot (1 - done) - Q(s, a; \theta) \right)^2 \right]$$
+$$L(\theta) = \mathbb{E}_{(s,a,r,s',done) \sim \mathcal{D}} \left[ (r + \gamma \max_{a'} Q(s', a'; \theta^-) (1 - done) - Q(s, a; \theta))^2 \right]$$
 
 Where:
 - $\theta$ represents the parameters of the main network
