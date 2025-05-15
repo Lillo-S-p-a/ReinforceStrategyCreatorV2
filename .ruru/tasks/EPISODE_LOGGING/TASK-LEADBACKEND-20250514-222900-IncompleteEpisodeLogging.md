@@ -1,12 +1,12 @@
 +++
 id = "TASK-LEADBACKEND-20250514-222900"
 title = "Ensure Complete Episode Metric Logging for All Episodes"
-status = "🟡 To Do"
+status = "🟣 Review"
 type = "🌟 Feature"
 assigned_to = "lead-backend"
 coordinator = "RooCommander-Session-20250514-222900" # Using a session-based ID for RooCommander
 created_date = "2025-05-14"
-updated_date = "2025-05-14"
+updated_date = "2025-05-14" # Updated by lead-backend
 priority = "High"
 complexity = "Medium"
 tags = ["database", "logging", "rllib", "callbacks", "episode-lifecycle"]
@@ -48,11 +48,11 @@ This task is to investigate and implement a robust solution to ensure comprehens
 -   [✅] **Environment Interaction**: Assess if the `TradingEnv` needs to be queried directly (if accessible from a suitable callback at shutdown) for final states of unterminated episodes. (Finding: Not feasible *from a shutdown callback*. However, interaction with workers/environments *before* `algo.stop()` as part of a graceful shutdown in the main script is the way forward.)
 -   [✅] **Design Solution**: Propose a preferred approach (e.g., modifying existing callbacks, adding logic to the main training script around `algo.stop()`, or a combination).
 -   [✅] **Implement Solution**: Make necessary code changes in [`reinforcestrategycreator/callbacks.py`](reinforcestrategycreator/callbacks.py), [`train_debug.py`](train_debug.py)/[`train.py`](train.py), or other relevant files.
--   [ ] **Testing**:
-    -   [ ] Conduct test runs with `train_debug.py` (e.g., `NUM_TRAINING_ITERATIONS = 1` but ensuring conditions where multiple episodes might be active).
-    -   [ ] Use `check_episode_details.py` to verify that all episodes from the test run are fully logged with non-NULL metrics.
-    -   [ ] Verify that `completed_trades` are also logged for these episodes.
--   [ ] **Documentation**: Briefly document the chosen solution, its rationale, and any important considerations or limitations in the task log or related project documentation.
+-   [x] **Testing**:
+    -   [x] Conduct test runs with `train_debug.py` (e.g., `NUM_TRAINING_ITERATIONS = 1` but ensuring conditions where multiple episodes might be active).
+    -   [x] Use `check_episode_details.py` to verify that all episodes from the test run are fully logged with non-NULL metrics.
+    -   [x] Verify that `completed_trades` are also logged for these episodes.
+-   [x] **Documentation**: Briefly document the chosen solution, its rationale, and any important considerations or limitations in the task log or related project documentation.
 
 # Notes & Logs
 (Specialist to add logs and notes here during task execution)
@@ -98,19 +98,20 @@ This task is to investigate and implement a robust solution to ensure comprehens
             *   Include a timeout mechanism for this draining phase to prevent indefinite hanging.
     3.  **Call `algo.stop()`**: After the draining loop/timeout, proceed with the original `algo.stop()` call.
     4.  **Configuration**: Add configuration options (e.g., `GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS`, `GRACEFUL_SHUTDOWN_TIMEOUT`) to control the behavior.
-*   **Implementation Summary:**
-    *   Modified `reinforcestrategycreator/trading_environment.py`:
-        *   Added `graceful_shutdown_signaled` flag (initialized to `False`, reset in `reset()`).
-        *   Added `signal_graceful_shutdown(self)` method to set the flag.
-        *   Updated `step()` method:
-            *   Checks `graceful_shutdown_signaled`. If true, sets `terminated=True` for the current step.
-            *   Adjusted price fetching for the very last step to avoid index out of bounds.
-            *   Updated logging in `step()` to reflect graceful shutdown status.
-    *   Modified `train_debug.py`:
-        *   Added `GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS` and `GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS` constants.
-        *   Before `algo.stop()`:
-            *   Logs initiation of graceful shutdown.
-            *   Calls `algo.workers.foreach_env(lambda env: env.signal_graceful_shutdown())` (with a check for local worker if `num_remote_workers == 0`).
-            *   Loops `GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS` times, calling `algo.train()` in each iteration to process episodes.
-            *   Includes a timeout for this draining phase.
-            *   Updated logging in the `finally` block.
+*   **Implementation Summary (Iterative Refinement):**
+    *   **Initial `TradingEnv` and `train_debug.py` modifications:** Implemented instance-level `graceful_shutdown_signaled` flag, `signal_graceful_shutdown` method, and updated `step()` logic. Added a drain loop in `train_debug.py` using `algo.train()`.
+    *   **Problem:** Episodes started *during* the drain loop were not signaled.
+    *   **Refinement 1 (`TradingEnv`):** Introduced a class-level `_system_wide_graceful_shutdown_active` flag.
+        *   `signal_graceful_shutdown()` now also sets this system-wide flag.
+        *   `reset()` now checks this system-wide flag and re-applies `self.graceful_shutdown_signaled = True` to new episodes if the system is shutting down.
+        *   Added `clear_system_wide_graceful_shutdown()` static method.
+    *   **Refinement 2 (`train_debug.py`):**
+        *   Called `TradingEnv.clear_system_wide_graceful_shutdown()` at the start and in `finally` block.
+        *   Corrected signaling for `NUM_ROLLOUT_WORKERS == 0`:
+            *   Initial attempts to access `local_worker()` or `get_sub_environments()` directly on `algo.env_runner` (a `SingleAgentEnvRunner`) failed or didn't reach the true `TradingEnv`.
+            *   Final successful approach: `algo.env_runner.env.unwrapped.call('signal_graceful_shutdown')`. This accesses the `SyncVectorEnv` (which `algo.env_runner.env.unwrapped` is) and uses its `call` method to invoke `signal_graceful_shutdown` on its sub-environments (our `TradingEnv` instances).
+        *   The drain loop was temporarily removed, then reinstated for 1 iteration with a timeout. This ensures that after signaling, `algo.train()` is called once to process the final steps of signaled episodes and trigger their `on_episode_end` callbacks.
+    *   **Final Configuration for Testing:** `GRACEFUL_SHUTDOWN_DRAIN_ITERATIONS = 1`, `GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 30`.
+*   **Testing Outcome (Run ID `RLlibDBG-SPY-20250514212331-c2b15c4b`):**
+    *   `check_episode_details.py` reported all 1001 episodes as fully populated.
+    *   The combination of instance signaling, system-wide signaling for new episodes during drain, correct local worker signaling, and a single drain `algo.train()` call appears to have resolved the issue.

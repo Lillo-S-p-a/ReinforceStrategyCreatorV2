@@ -34,6 +34,8 @@ class TradingEnv(gym.Env):
         observation_space (gym.spaces.Space): The observation space of the environment.
     """
     
+    _system_wide_graceful_shutdown_active = False # Class-level flag
+    
     def __init__(self, env_config: dict):
         """
         Initialize the trading environment.
@@ -122,8 +124,18 @@ class TradingEnv(gym.Env):
     
     def signal_graceful_shutdown(self):
         """Sets a flag to indicate that the environment should try to terminate the episode."""
-        logger.info(f"Graceful shutdown signaled for environment instance at step {self.current_step}.")
+        logger.info(f"Graceful shutdown signaled for environment instance at step {self.current_step}. Activating system-wide flag.")
         self.graceful_shutdown_signaled = True
+        TradingEnv._system_wide_graceful_shutdown_active = True
+
+    @staticmethod
+    def clear_system_wide_graceful_shutdown():
+        """Clears the system-wide graceful shutdown flag."""
+        if TradingEnv._system_wide_graceful_shutdown_active:
+            logger.info("Clearing system-wide graceful shutdown flag.")
+            TradingEnv._system_wide_graceful_shutdown_active = False
+        else:
+            logger.info("System-wide graceful shutdown flag was already clear.")
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
@@ -169,7 +181,12 @@ class TradingEnv(gym.Env):
         self.episode_max_drawdown = 0.0 # Reset for new episode
         self._episode_total_reward = 0.0 # Reset episode total reward
         self._episode_steps = 0 # Reset episode steps
-        self.graceful_shutdown_signaled = False # Reset flag on environment reset
+        self.graceful_shutdown_signaled = False # Reset instance flag on environment reset
+
+        # Check if system-wide shutdown is active and re-apply signal if needed
+        if TradingEnv._system_wide_graceful_shutdown_active:
+            self.graceful_shutdown_signaled = True
+            logger.info(f"Environment reset: System-wide graceful shutdown is active. Re-signaling this new episode instance (current_step: {self.current_step}).")
         
         if len(self.df) == 0:
             error_msg = "DataFrame is empty. Cannot reset environment."
