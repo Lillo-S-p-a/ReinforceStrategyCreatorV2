@@ -55,6 +55,13 @@ if not logger.handlers: # Avoid adding multiple handlers if script is reloaded
 logger.info("Callbacks logger initialized and configured to write to callbacks_debug.log")
 
 class DatabaseLoggingCallbacks(DefaultCallbacks):
+    """
+    Callback class for logging training data to the database.
+    
+    This class handles logging of episodes, steps, and trading operations to the database.
+    It also includes functionality to gracefully finalize incomplete episodes when a training
+    run is terminated.
+    """
     def __init__(self, legacy_callbacks_dict: Dict = None): # Re-added legacy_callbacks_dict
         super().__init__()
         self.run_id = None # Initialize self.run_id
@@ -870,3 +877,182 @@ class DatabaseLoggingCallbacks(DefaultCallbacks):
 
         except Exception as e:
             logger.error(f"Error in on_episode_step for RLlib episode {getattr(episode, 'id_', 'unknown_rllib_id')}: {e}", exc_info=True)
+            
+    def on_algorithm_shutdown(self, *, algorithm, **kwargs) -> None:
+        """
+        Called when the algorithm is shut down.
+        
+        This method ensures that all in-progress episodes are properly finalized
+        when the algorithm is shut down, either normally or due to an exception.
+        
+        Args:
+            algorithm: The training algorithm instance.
+            **kwargs: Additional keyword arguments.
+        """
+        try:
+            logger.info("on_algorithm_shutdown called. Finalizing any incomplete episodes...")
+            
+            # Ensure run_id is set
+            if not self.run_id and hasattr(algorithm, "config") and algorithm.config:
+                if "callbacks_config" in algorithm.config and algorithm.config["callbacks_config"]:
+                    if "run_id" in algorithm.config["callbacks_config"]:
+                        self.run_id = algorithm.config["callbacks_config"]["run_id"]
+                        logger.info(f"Set run_id to {self.run_id} from algorithm.config in on_algorithm_shutdown")
+            
+            if not self.run_id:
+                logger.error("run_id not set in on_algorithm_shutdown. Cannot finalize incomplete episodes.")
+                return
+                
+            # Finalize all incomplete episodes
+            self.finalize_incomplete_episodes()
+            
+        except Exception as e:
+            logger.critical(f"Error in on_algorithm_shutdown: {e}", exc_info=True)
+            
+    def on_train_result(self, *, algorithm, result, **kwargs) -> None:
+        """
+        Called at the end of each training iteration.
+        
+        This method checks if the training run is about to be terminated and calls
+        finalize_incomplete_episodes if necessary.
+        
+        Args:
+            algorithm: The training algorithm instance.
+            result: The training result dictionary.
+            **kwargs: Additional keyword arguments.
+        """
+        try:
+            logger.info(f"on_train_result called with result keys: {list(result.keys())}")
+            
+            # Ensure run_id is set
+            if not self.run_id and hasattr(algorithm, "config") and algorithm.config:
+                if "callbacks_config" in algorithm.config and algorithm.config["callbacks_config"]:
+                    if "run_id" in algorithm.config["callbacks_config"]:
+                        self.run_id = algorithm.config["callbacks_config"]["run_id"]
+                        logger.info(f"Set run_id to {self.run_id} from algorithm.config in on_train_result")
+            
+            if not self.run_id:
+                logger.error("run_id not set in on_train_result. Cannot check for training completion.")
+                return
+                
+            # Check if this is the final iteration
+            current_iteration = result.get("training_iteration", 0)
+            iterations_since_restore = result.get("iterations_since_restore", 0)
+            
+            # Try to get the total number of iterations from the algorithm config
+            max_iterations = None
+            if hasattr(algorithm, "config") and algorithm.config:
+                # Different RLlib algorithms might store this differently
+                # Try common patterns
+                if hasattr(algorithm, "_num_iterations") and algorithm._num_iterations is not None:
+                    max_iterations = algorithm._num_iterations
+                elif hasattr(algorithm.config, "num_iterations") and algorithm.config.num_iterations is not None:
+                    max_iterations = algorithm.config.num_iterations
+                elif hasattr(algorithm.config, "training") and hasattr(algorithm.config.training, "num_iterations"):
+                    max_iterations = algorithm.config.training.num_iterations
+            
+            # If we couldn't find max_iterations in the config, try to get it from the result
+            if max_iterations is None and "num_training_iterations" in result:
+                max_iterations = result["num_training_iterations"]
+                
+            # Log what we found
+            logger.info(f"Current iteration: {current_iteration}, Iterations since restore: {iterations_since_restore}, Max iterations: {max_iterations}")
+            
+            # Check if this is the final iteration
+            is_final_iteration = False
+            if max_iterations is not None:
+                is_final_iteration = current_iteration >= max_iterations or iterations_since_restore >= max_iterations
+                
+            # Also check the 'done' flag in the result
+            if "done" in result and result["done"]:
+                is_final_iteration = True
+                
+            if is_final_iteration:
+                logger.info(f"Final iteration detected (iteration {current_iteration}). Finalizing incomplete episodes...")
+                self.finalize_incomplete_episodes()
+            else:
+                logger.info(f"Not the final iteration (iteration {current_iteration}). Continuing training...")
+                
+        except Exception as e:
+            logger.critical(f"Error in on_train_result: {e}", exc_info=True)
+            
+    def finalize_incomplete_episodes(self) -> None:
+        """
+        Finalize all incomplete episodes for the current run_id.
+        
+        This method is called when the training run is terminated to ensure that all
+        in-progress episodes are properly finalized in the database. It updates the
+        status of all episodes with a status of "started" to "completed" and fills in
+        default values for the missing metrics.
+        """
+        if not self.run_id:
+            logger.error("Cannot finalize incomplete episodes: run_id is not set.")
+            return
+            
+        try:
+            with get_db_session() as db:
+                # Query for all episodes with status "started" for the current run_id
+                incomplete_episodes = db.query(DbEpisode).filter(
+                    DbEpisode.run_id == self.run_id,
+                    DbEpisode.status == "started"
+                ).all()
+                
+                if not incomplete_episodes:
+                    logger.info(f"No incomplete episodes found for run_id {self.run_id}.")
+                    return
+                    
+                logger.info(f"Found {len(incomplete_episodes)} incomplete episodes for run_id {self.run_id}. Finalizing...")
+                
+                # Update each incomplete episode
+                for db_episode in incomplete_episodes:
+                    # Set end time to current time
+                    db_episode.end_time = datetime.datetime.now(datetime.timezone.utc)
+                    
+                    # Update status to "completed"
+                    db_episode.status = "completed"
+                    
+                    # If initial_portfolio_value is not set, use a default value
+                    if db_episode.initial_portfolio_value is None:
+                        db_episode.initial_portfolio_value = 10000.0  # Default initial balance
+                        
+                    # Calculate final_portfolio_value based on the last step's portfolio_value
+                    # or use initial_portfolio_value if no steps are found
+                    last_step = db.query(DbStep).filter(
+                        DbStep.episode_id == db_episode.episode_id
+                    ).order_by(DbStep.timestamp.desc()).first()
+                    
+                    if last_step and last_step.portfolio_value is not None:
+                        db_episode.final_portfolio_value = last_step.portfolio_value
+                    else:
+                        # If no steps with portfolio_value, use initial_portfolio_value
+                        db_episode.final_portfolio_value = db_episode.initial_portfolio_value
+                        
+                    # Calculate PnL
+                    db_episode.pnl = db_episode.final_portfolio_value - db_episode.initial_portfolio_value
+                    
+                    # Set default values for other metrics
+                    db_episode.sharpe_ratio = 0.0
+                    db_episode.max_drawdown = 0.0
+                    db_episode.win_rate = 0.0
+                    
+                    # Count total steps
+                    total_steps = db.query(DbStep).filter(
+                        DbStep.episode_id == db_episode.episode_id
+                    ).count()
+                    db_episode.total_steps = total_steps
+                    
+                    # Calculate total reward (sum of rewards from all steps)
+                    total_reward = db.query(db.func.sum(DbStep.reward)).filter(
+                        DbStep.episode_id == db_episode.episode_id,
+                        DbStep.reward.isnot(None)
+                    ).scalar() or 0.0
+                    db_episode.total_reward = total_reward
+                    
+                    logger.info(f"Finalized episode {db_episode.episode_id}: final_pf={db_episode.final_portfolio_value}, pnl={db_episode.pnl}, total_steps={db_episode.total_steps}, total_reward={db_episode.total_reward}")
+                
+                # Commit all changes
+                db.commit()
+                logger.info(f"Successfully finalized {len(incomplete_episodes)} incomplete episodes for run_id {self.run_id}.")
+                
+        except Exception as e:
+            logger.critical(f"Error finalizing incomplete episodes for run_id {self.run_id}: {e}", exc_info=True)
