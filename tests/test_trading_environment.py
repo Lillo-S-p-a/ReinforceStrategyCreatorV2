@@ -477,8 +477,269 @@ def test_window_size_parameter():
     assert env2.observation_space.shape[0] == (3 * num_market_features) + num_portfolio_features
     assert env3.observation_space.shape[0] == (4 * num_market_features) + num_portfolio_features
 
+# --- New Test for Normalization ---
+
+@pytest.fixture
+def simple_df_for_norm():
+    """DataFrame for testing normalization."""
+    return pd.DataFrame({'close': [10.0, 11.0, 12.0, 11.5, 12.5, 13.0]})
+
+@pytest.fixture
+def env_for_norm(simple_df_for_norm):
+    """Environment specifically for testing normalization."""
+    # Add dummy indicator columns expected by the env structure
+    df = simple_df_for_norm.copy()
+    df['RSI_14'] = 50.0 # Dummy value
+    df['MACD_12_26_9'] = 0.1 # Dummy value
+    return TradingEnv(df, window_size=2, normalization_window_size=3)
+
+def test_observation_normalization(env_for_norm):
+    """Test the rolling z-score normalization in _get_observation."""
+    df = env_for_norm.df.select_dtypes(include=np.number) # Use numeric part
+    obs_window = env_for_norm.window_size
+    norm_window = env_for_norm.normalization_window_size
+    num_market_features = len(df.columns)
+    num_portfolio_features = 2
+
+    env_for_norm.reset()
+
+    # --- Step 0 ---
+    env_for_norm.current_step = 0
+    env_for_norm.current_price = df.iloc[0]['close']
+    obs0 = env_for_norm._get_observation()
+    market_obs0 = obs0[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 0 (expanding window size 1)
+    mean0 = df.iloc[[0]].mean()
+    std0 = df.iloc[[0]].std().fillna(1e-8) + 1e-8 # Std of 1 element is NaN
+    # Expected normalized data for step 0 (using stats from step 0)
+    expected_norm0_at_0 = (df.iloc[0] - mean0) / std0
+    # Observation window at step 0 includes padding (normalized earliest) + step 0 data
+    # Padding uses earliest stats, step 0 uses current stats. Here they are the same.
+    assert pytest.approx(market_obs0[0]) == expected_norm0_at_0.values # Padding
+    assert pytest.approx(market_obs0[1]) == expected_norm0_at_0.values # Step 0 data
+
+    # --- Step 1 ---
+    env_for_norm.current_step = 1
+    env_for_norm.current_price = df.iloc[1]['close']
+    obs1 = env_for_norm._get_observation()
+    market_obs1 = obs1[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 1 (expanding window size 2)
+    mean1 = df.iloc[:2].mean()
+    std1 = df.iloc[:2].std().fillna(1e-8) + 1e-8
+    # Expected normalized data for step 0 (using stats from step 1)
+    expected_norm0_at_1 = (df.iloc[0] - mean1) / std1
+    # Expected normalized data for step 1 (using stats from step 1)
+    expected_norm1_at_1 = (df.iloc[1] - mean1) / std1
+    # Observation window at step 1 includes step 0 and step 1 data, both normalized using stats@1
+    assert pytest.approx(market_obs1[0]) == expected_norm0_at_1.values
+    assert pytest.approx(market_obs1[1]) == expected_norm1_at_1.values
+
+    # --- Step 2 ---
+    env_for_norm.current_step = 2
+    env_for_norm.current_price = df.iloc[2]['close']
+    obs2 = env_for_norm._get_observation()
+    market_obs2 = obs2[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 2 (rolling window size 3)
+    mean2 = df.iloc[:3].rolling(window=norm_window, min_periods=1).mean().iloc[-1]
+    std2 = df.iloc[:3].rolling(window=norm_window, min_periods=1).std().iloc[-1].fillna(1e-8) + 1e-8
+    # Expected normalized data for step 1 (using stats from step 2)
+    expected_norm1_at_2 = (df.iloc[1] - mean2) / std2
+    # Expected normalized data for step 2 (using stats from step 2)
+    expected_norm2_at_2 = (df.iloc[2] - mean2) / std2
+    # Observation window at step 2 includes step 1 and step 2 data, both normalized using stats@2
+    assert pytest.approx(market_obs2[0]) == expected_norm1_at_2.values
+    assert pytest.approx(market_obs2[1]) == expected_norm2_at_2.values
+
+    # --- Step 3 ---
+    env_for_norm.current_step = 3
+    env_for_norm.current_price = df.iloc[3]['close']
+    obs3 = env_for_norm._get_observation()
+    market_obs3 = obs3[:-num_portfolio_features].reshape(obs_window, num_market_features)
+
+    # Expected stats at step 3 (rolling window size 3)
+    mean3 = df.iloc[:4].rolling(window=norm_window, min_periods=1).mean().iloc[-1]
+    std3 = df.iloc[:4].rolling(window=norm_window, min_periods=1).std().iloc[-1].fillna(1e-8) + 1e-8
+    # Expected normalized data for step 2 (using stats from step 3)
+    expected_norm2_at_3 = (df.iloc[2] - mean3) / std3
+    # Expected normalized data for step 3 (using stats from step 3)
+    expected_norm3_at_3 = (df.iloc[3] - mean3) / std3
+    # Observation window at step 3 includes step 2 and step 3 data, both normalized using stats@3
+    assert pytest.approx(market_obs3[0]) == expected_norm2_at_3.values
+    assert pytest.approx(market_obs3[1]) == expected_norm3_at_3.values
 
 def test_close(env):
     """Test that close method runs without errors."""
     # This should not raise an exception
     env.close()
+# --- Tests for Risk Management Features ---
+
+@pytest.fixture
+def env_with_risk_mgmt(test_df, initial_balance):
+    """Create an environment with SL/TP and fixed fractional sizing enabled."""
+    return TradingEnv(
+        test_df,
+        initial_balance,
+        window_size=5,
+        stop_loss_pct=5.0,  # 5% Stop Loss
+        take_profit_pct=10.0, # 10% Take Profit
+        position_sizing_method="fixed_fractional",
+        risk_fraction=0.2 # Risk 20% of capital per trade
+    )
+
+def test_stop_loss_trigger_long(env_with_risk_mgmt, test_df):
+    """Test that stop-loss triggers correctly for a long position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go long at step 0 (price 102.0)
+    env.step(1)
+    assert env.current_position == 1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    sl_price = entry_price * (1 - env.stop_loss_pct / 100) # 103 * 0.95 = 97.85
+
+    # Modify the DataFrame to force a price drop below SL
+    # Find the index corresponding to the next step
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 97.0 # Price drops below SL (97.85)
+
+    # Take a step (agent tries to stay long, action=1)
+    _, _, _, _, info = env.step(1)
+
+    # Assert that SL triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is True
+    assert info['tp_triggered'] is False
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_take_profit_trigger_long(env_with_risk_mgmt, test_df):
+    """Test that take-profit triggers correctly for a long position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go long at step 0 (price 102.0)
+    env.step(1)
+    assert env.current_position == 1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    tp_price = entry_price * (1 + env.take_profit_pct / 100) # 103 * 1.10 = 113.3
+
+    # Modify the DataFrame to force a price rise above TP
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 114.0 # Price rises above TP (113.3)
+
+    # Take a step (agent tries to stay long, action=1)
+    _, _, _, _, info = env.step(1)
+
+    # Assert that TP triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is False
+    assert info['tp_triggered'] is True
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_stop_loss_trigger_short(env_with_risk_mgmt, test_df):
+    """Test that stop-loss triggers correctly for a short position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go short at step 0 (price 102.0)
+    env.step(2)
+    assert env.current_position == -1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    sl_price = entry_price * (1 + env.stop_loss_pct / 100) # 103 * 1.05 = 108.15
+
+    # Modify the DataFrame to force a price rise above SL
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 109.0 # Price rises above SL (108.15)
+
+    # Take a step (agent tries to stay short, action=2)
+    _, _, _, _, info = env.step(2)
+
+    # Assert that SL triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is True
+    assert info['tp_triggered'] is False
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_take_profit_trigger_short(env_with_risk_mgmt, test_df):
+    """Test that take-profit triggers correctly for a short position."""
+    env = env_with_risk_mgmt
+    env.reset()
+
+    # Go short at step 0 (price 102.0)
+    env.step(2)
+    assert env.current_position == -1
+    entry_price = env._entry_price
+    assert entry_price == 103.0 # Entry happens at step 1 price
+    tp_price = entry_price * (1 - env.take_profit_pct / 100) # 103 * 0.90 = 92.7
+
+    # Modify the DataFrame to force a price drop below TP
+    next_step_index = env.df.index[env.current_step + 1] # Index for step 2
+    env.df.loc[next_step_index, 'close'] = 92.0 # Price drops below TP (92.7)
+
+    # Take a step (agent tries to stay short, action=2)
+    _, _, _, _, info = env.step(2)
+
+    # Assert that TP triggered, forcing a Flat action (0)
+    assert info['sl_triggered'] is False
+    assert info['tp_triggered'] is True
+    assert info['action_taken'] == 0 # Action forced to Flat
+    assert env.current_position == 0 # Position should be closed
+    assert env.shares_held == 0
+
+def test_fixed_fractional_position_sizing_long(env_with_risk_mgmt):
+    """Test fixed fractional position sizing for a long entry."""
+    env = env_with_risk_mgmt
+    env.reset()
+    initial_balance = env.initial_balance # 10000
+    risk_fraction = env.risk_fraction     # 0.2
+    # Price at step 0 is 102.0, but trade executes at step 1 price
+    execution_price = env.df.iloc[1]['close'] # 103.0
+
+    # Expected calculation based on execution price
+    target_value = initial_balance * risk_fraction # 10000 * 0.2 = 2000
+    expected_shares = int(target_value / execution_price) # int(2000 / 103.0) = 19
+
+    # Take long action
+    env.step(1) # Executes trade at price 103.0
+
+    assert env.current_position == 1
+    assert env.shares_held == expected_shares # Should buy 19 shares
+
+    # Verify balance reduction (cost + fee) using execution_price
+    cost = expected_shares * execution_price
+    fee = cost * (env.transaction_fee_percent / 100)
+    expected_balance = initial_balance - (cost + fee) # 10000 - (19 * 103 + fee) = 8041.043
+    assert pytest.approx(env.balance) == expected_balance
+
+def test_fixed_fractional_position_sizing_short(env_with_risk_mgmt):
+    """Test fixed fractional position sizing for a short entry."""
+    env = env_with_risk_mgmt
+    env.reset()
+    initial_balance = env.initial_balance # 10000
+    risk_fraction = env.risk_fraction     # 0.2
+    # Price at step 0 is 102.0, but trade executes at step 1 price
+    execution_price = env.df.iloc[1]['close'] # 103.0
+
+    # Expected calculation (based on balance as capital base and execution price)
+    target_value = initial_balance * risk_fraction # 10000 * 0.2 = 2000
+    expected_shares = int(target_value / execution_price) # int(2000 / 103.0) = 19
+
+    # Take short action
+    env.step(2) # Executes trade at price 103.0
+
+    assert env.current_position == -1
+    assert env.shares_held == -expected_shares # Should short 19 shares
+
+    # Verify balance increase (proceeds - fee) using execution_price
+    proceeds = expected_shares * execution_price
+    fee = proceeds * (env.transaction_fee_percent / 100)
+    expected_balance = initial_balance + (proceeds - fee) # 10000 + (19 * 103 - fee) = 11955.043
+    assert pytest.approx(env.balance) == expected_balance

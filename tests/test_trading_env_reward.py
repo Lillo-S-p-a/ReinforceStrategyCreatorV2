@@ -51,20 +51,34 @@ def test_df():
 
 @pytest.fixture
 def env(test_df):
-    """Create a sample environment with default sharpe_window_size for testing."""
+    """Create a sample environment with default parameters for testing."""
     initial_balance = 10000.0
     transaction_fee_percent = 0.1
     sharpe_window_size = 20
-    return TradingEnv(test_df, initial_balance, transaction_fee_percent, sharpe_window_size=sharpe_window_size)
+    use_sharpe_ratio = True
+    trading_frequency_penalty = 0.01
+    drawdown_penalty = 0.1
+    risk_free_rate = 0.0
+    return TradingEnv(test_df, initial_balance, transaction_fee_percent,
+                      sharpe_window_size=sharpe_window_size, use_sharpe_ratio=use_sharpe_ratio,
+                      trading_frequency_penalty=trading_frequency_penalty, drawdown_penalty=drawdown_penalty,
+                      risk_free_rate=risk_free_rate)
 
 
 @pytest.fixture
 def env_small_window(test_df):
-    """Create a sample environment with small sharpe_window_size for testing."""
+    """Create a sample environment with small sharpe_window_size and default penalties for testing."""
     initial_balance = 10000.0
     transaction_fee_percent = 0.1
     sharpe_window_size = 5
-    return TradingEnv(test_df, initial_balance, transaction_fee_percent, sharpe_window_size=sharpe_window_size)
+    use_sharpe_ratio = True
+    trading_frequency_penalty = 0.01
+    drawdown_penalty = 0.1
+    risk_free_rate = 0.0
+    return TradingEnv(test_df, initial_balance, transaction_fee_percent,
+                      sharpe_window_size=sharpe_window_size, use_sharpe_ratio=use_sharpe_ratio,
+                      trading_frequency_penalty=trading_frequency_penalty, drawdown_penalty=drawdown_penalty,
+                      risk_free_rate=risk_free_rate)
 
 
 # CORE LOGIC TESTS
@@ -124,15 +138,10 @@ def test_portfolio_value_history_update_in_step(env):
 
 def test_calculate_reward_data_availability(env):
     """Test reward calculation behavior based on last_portfolio_value availability."""
-    # Reset the environment - last_portfolio_value should be None
+    # Reset the environment
     env.reset()
     # After reset, last_portfolio_value should be the initial balance
     assert pytest.approx(env.last_portfolio_value) == env.initial_balance
-
-    # Calculate reward when last_portfolio_value is None
-    reward = env._calculate_reward()
-    # Check that reward is 0.0
-    assert reward == 0.0
 
     # Manually set last_portfolio_value to 0
     env.last_portfolio_value = 0.0
@@ -147,7 +156,8 @@ def test_calculate_reward_data_availability(env):
     env.portfolio_value = 10100.0
     # Calculate reward with valid values
     reward = env._calculate_reward()
-    # Check that reward is calculated correctly (0.01 for 1% increase)
+    # Check that reward is calculated correctly (includes penalties)
+    # Expected: risk_adj_return (0.01) - trading_penalty (0) - drawdown_penalty (0) = 0.01
     assert pytest.approx(reward) == 0.01
 
 
@@ -155,15 +165,18 @@ def test_calculate_reward_numerical_stability(env):
     """Test reward calculation with very small non-zero last_portfolio_value."""
     # Reset the environment
     env.reset()
+    env.use_sharpe_ratio = False # Focus on percentage change for this test
 
     # Set very small last_portfolio_value and a slightly larger portfolio_value
     env.last_portfolio_value = 1e-9
     env.portfolio_value = 2e-9
+    # Manually reset max_portfolio_value for this specific test to avoid drawdown penalty
+    env.max_portfolio_value = env.last_portfolio_value
 
     # Calculate reward
     reward = env._calculate_reward()
 
-    # Calculate expected reward: (2e-9 - 1e-9) / 1e-9 = 1.0
+    # Calculate expected reward: risk_adj_return (1.0) - penalties (0) = 1.0
     expected_reward = 1.0
 
     # Check that reward is calculated correctly even with small numbers
@@ -172,16 +185,18 @@ def test_calculate_reward_numerical_stability(env):
     # Test with negative small numbers
     env.last_portfolio_value = -1e-9
     env.portfolio_value = -2e-9
+    env.max_portfolio_value = env.last_portfolio_value # Reset max value
     reward = env._calculate_reward()
-    # Expected: (-2e-9 - (-1e-9)) / -1e-9 = -1e-9 / -1e-9 = 1.0
+    # Expected: risk_adj_return (1.0) - penalties (0) = 1.0
     expected_reward = 1.0
     assert pytest.approx(reward) == expected_reward
 
     # Test with small positive change from small negative
     env.last_portfolio_value = -2e-9
     env.portfolio_value = -1e-9
+    env.max_portfolio_value = env.last_portfolio_value # Reset max value
     reward = env._calculate_reward()
-    # Expected: (-1e-9 - (-2e-9)) / -2e-9 = 1e-9 / -2e-9 = -0.5
+    # Expected: risk_adj_return (-0.5) - penalties (0) = -0.5
     expected_reward = -0.5
     assert pytest.approx(reward) == expected_reward
 
@@ -198,10 +213,10 @@ def test_calculate_reward_positive_change(env):
     # Calculate reward
     reward = env._calculate_reward()
 
-    # Calculate expected reward (percentage change)
-    expected_reward = (10100.0 - 10000.0) / 10000.0  # Should be 0.01
+    # Calculate expected reward (percentage change - penalties)
+    expected_reward = (10100.0 - 10000.0) / 10000.0  # Should be 0.01 (no penalties yet)
 
-    # Check that reward is positive and matches the expected percentage change
+    # Check that reward is positive and matches the expected value
     assert reward > 0.0
     assert pytest.approx(reward) == expected_reward
 
@@ -218,10 +233,13 @@ def test_calculate_reward_negative_change(env):
     # Calculate reward
     reward = env._calculate_reward()
 
-    # Calculate expected reward (percentage change)
-    expected_reward = (9800.0 - 10000.0) / 10000.0  # Should be -0.02
+    # Calculate expected reward (percentage change - penalties)
+    # Drawdown = (10000 - 9800) / 10000 = 0.02
+    # Drawdown penalty = 0.1 * 0.02 = 0.002
+    # Expected reward = -0.02 - 0.002 = -0.022
+    expected_reward = (9800.0 - 10000.0) / 10000.0 - env.drawdown_penalty * ((10000.0 - 9800.0) / 10000.0)
 
-    # Check that reward is negative and matches the expected percentage change
+    # Check that reward is negative and matches the expected value
     assert reward < 0.0
     assert pytest.approx(reward) == expected_reward
 
@@ -238,8 +256,8 @@ def test_calculate_reward_no_change(env):
     # Calculate reward
     reward = env._calculate_reward()
 
-    # Calculate expected reward (percentage change)
-    expected_reward = (10000.0 - 10000.0) / 10000.0  # Should be 0.0
+    # Calculate expected reward (percentage change - penalties)
+    expected_reward = (10000.0 - 10000.0) / 10000.0  # Should be 0.0 (no penalties)
 
     # Check that reward is zero
     assert pytest.approx(reward) == expected_reward
@@ -247,40 +265,75 @@ def test_calculate_reward_no_change(env):
 
 # CONTEXTUAL INTEGRATION TESTS
 
-def test_step_returns_percentage_change_reward(env):
-    """Test that the reward returned by step is the calculated percentage change."""
+def test_step_returns_calculated_reward(env):
+    """Test that the reward returned by step is the calculated reward including penalties."""
     # Reset the environment
-    obs1, info1 = env.reset()
+    env.reset()
+    env.use_sharpe_ratio = False # Simplify reward for this integration test
     initial_value = env.portfolio_value # Should be initial_balance
-    # After reset, last_portfolio_value should be the initial balance
     assert pytest.approx(env.last_portfolio_value) == env.initial_balance
 
-    # Take step 1 (e.g., flat action, portfolio value might change slightly due to time passing if fees applied differently, but assume no change for simplicity here)
-    # In a real scenario, price changes would affect value. We use flat action for minimal change.
+    # Take step 1 (Flat action)
     obs2, reward1, term1, trunc1, info2 = env.step(0)
     value_after_step1 = env.portfolio_value
     last_value_after_step1 = env.last_portfolio_value # Should be initial_value
 
-    # Reward for the first step should be 0.0 as last_portfolio_value was None initially
-    assert reward1 == 0.0
+    # Reward for the first step (no history for Sharpe, no trades, no drawdown)
+    # Expected: percentage_change (0) - trading_penalty (0) - drawdown_penalty (0) = 0.0
+    assert pytest.approx(reward1) == 0.0
     assert last_value_after_step1 == initial_value
 
-    # Take step 2
-    obs3, reward2, term2, trunc2, info3 = env.step(0)
+    # Take step 2 (Long action - triggers trade)
+    obs3, reward2, term2, trunc2, info3 = env.step(1)
     value_after_step2 = env.portfolio_value
     last_value_after_step2 = env.last_portfolio_value # Should be value_after_step1
 
-    # Reward for the second step should be the percentage change from initial_value to value_after_step1
-    expected_reward2 = 0.0
-    if initial_value != 0: # Avoid division by zero
-        expected_reward2 = (value_after_step1 - initial_value) / initial_value
+    # Reward for the second step
+    # Assume value_after_step1 = initial_value = 10000
+    # Assume value_after_step2 = 10050 (after buying shares and price moving)
+    # Percentage change = (10050 - 10000) / 10000 = 0.005
+    # Sharpe ratio not applicable yet (only 1 return)
+    # Trade count = 1, Trading penalty = 0.01 * 1 = 0.01
+    # Max value = 10000, Current value = 10050, Drawdown = 0, Drawdown penalty = 0
+    # Expected reward = 0.005 - 0.01 - 0 = -0.005
+    
+    # Manually calculate expected reward based on the state *after* step 2
+    # Use the actual values from the environment after the step
+    percentage_change_step2 = (value_after_step2 - last_value_after_step2) / last_value_after_step2 if last_value_after_step2 != 0 else 0.0
+    # Since use_sharpe_ratio is False, risk_adj_return is just percentage_change
+    risk_adj_return2 = percentage_change_step2
+    trading_penalty2 = env.trading_frequency_penalty * env._trade_count # trade_count is 1
+    # Need to update max_portfolio_value based on step 1's value before calculating drawdown
+    env.max_portfolio_value = max(env.max_portfolio_value, last_value_after_step2)
+    drawdown2 = max(0, (env.max_portfolio_value - value_after_step2) / env.max_portfolio_value) if env.max_portfolio_value > 0 else 0
+    drawdown_penalty2 = env.drawdown_penalty * drawdown2
+    expected_reward2 = risk_adj_return2 - trading_penalty2 - drawdown_penalty2
 
-    # Check that the reward is a float
     assert isinstance(reward2, float)
-
-    # Check that the reward matches the expected percentage change
     assert pytest.approx(reward2) == expected_reward2
     assert last_value_after_step2 == value_after_step1
+    assert env._trade_count == 1 # Check trade count updated
+
+    # Take step 3 (Flat action - triggers trade)
+    obs4, reward3, term3, trunc3, info4 = env.step(0)
+    value_after_step3 = env.portfolio_value
+    last_value_after_step3 = env.last_portfolio_value # Should be value_after_step2
+
+    # Manually calculate expected reward based on the state *after* step 3
+    percentage_change_step3 = (value_after_step3 - last_value_after_step3) / last_value_after_step3 if last_value_after_step3 != 0 else 0.0
+    # Since use_sharpe_ratio is False, risk_adj_return is just percentage_change
+    risk_adj_return3 = percentage_change_step3
+    trading_penalty3 = env.trading_frequency_penalty * env._trade_count # trade_count is 2
+    # Need to update max_portfolio_value based on step 2's value before calculating drawdown
+    env.max_portfolio_value = max(env.max_portfolio_value, last_value_after_step3)
+    drawdown3 = max(0, (env.max_portfolio_value - value_after_step3) / env.max_portfolio_value) if env.max_portfolio_value > 0 else 0
+    drawdown_penalty3 = env.drawdown_penalty * drawdown3
+    expected_reward3 = risk_adj_return3 - trading_penalty3 - drawdown_penalty3
+    
+    assert isinstance(reward3, float)
+    assert pytest.approx(reward3) == expected_reward3
+    assert last_value_after_step3 == value_after_step2
+    assert env._trade_count == 2 # Check trade count updated
 
 
 def test_basic_run_through_steps(env):
@@ -307,3 +360,140 @@ def test_basic_run_through_steps(env):
         # If the episode terminated, break the loop
         if terminated:
             break
+
+# --- New Tests for Enhanced Reward Components ---
+
+def test_sharpe_ratio_calculation(env_small_window):
+    """Test the Sharpe ratio calculation within the reward function."""
+    env = env_small_window
+    env.use_sharpe_ratio = True
+    env.risk_free_rate = 0.0
+    env.reset()
+
+    # Simulate some steps with varying returns by setting portfolio values
+    # _calculate_reward will handle appending returns
+    
+    # Step 1
+    env.last_portfolio_value = 10000
+    env.portfolio_value = 10100 # Return = 0.01
+    reward1 = env._calculate_reward() # Appends 0.01. Sharpe not used. Reward = 0.01
+    
+    # Step 2
+    env.last_portfolio_value = 10100
+    env.portfolio_value = 10050 # Return = -0.004950495...
+    reward2 = env._calculate_reward() # Appends -0.00495... Sharpe uses [0.01, -0.00495...]
+    
+    # Step 3
+    env.last_portfolio_value = 10050
+    env.portfolio_value = 10150 # Return = 0.009950248...
+    reward3 = env._calculate_reward() # Appends 0.00995... Sharpe uses [0.01, -0.00495..., 0.00995...]
+
+    # Step 4 - Calculate reward and check against manual Sharpe calculation
+    env.last_portfolio_value = 10150
+    env.portfolio_value = 10150 # Return = 0.0
+    reward4 = env._calculate_reward() # Appends 0.0. Sharpe uses [0.01, -0.00495..., 0.00995..., 0.0]
+
+    # Manually calculate expected Sharpe-based return for step 4
+    # Get the returns history as calculated by the environment
+    returns_hist = list(env._portfolio_returns)
+    assert len(returns_hist) == 4 # Should have 4 returns now
+    
+    returns_array = np.array(returns_hist)
+    returns_mean = np.mean(returns_array)
+    returns_std = np.std(returns_array)
+    
+    if returns_std == 0:
+        expected_risk_adj_return = returns_mean
+    else:
+        expected_sharpe = (returns_mean - env.risk_free_rate) / returns_std
+        expected_risk_adj_return = expected_sharpe * 0.01 # Apply scaling factor
+
+    # Calculate expected total reward for step 4 (assuming no penalties for simplicity)
+    env._trade_count = 0
+    env.max_portfolio_value = 10150 # Assume no drawdown
+    expected_reward4 = expected_risk_adj_return - 0 - 0
+    
+    assert pytest.approx(reward4) == expected_reward4
+
+
+def test_trading_frequency_penalty(env):
+    """Test the trading frequency penalty component."""
+    env.reset()
+    env.use_sharpe_ratio = False # Focus on penalties
+    env.trading_frequency_penalty = 0.05 # Use a distinct value
+
+    # Step 1: No trade yet
+    env.last_portfolio_value = 10000
+    env.portfolio_value = 10100
+    reward1 = env._calculate_reward()
+    expected_reward1 = 0.01 # Only percentage change
+    assert pytest.approx(reward1) == expected_reward1
+    assert env._trade_count == 0
+
+    # Step 2: Simulate a trade
+    env._trade_count = 1
+    env.last_portfolio_value = 10100
+    env.portfolio_value = 10200
+    reward2 = env._calculate_reward()
+    percentage_change2 = (10200 - 10100) / 10100 # ~0.0099
+    expected_penalty2 = 0.05 * 1 # Penalty for 1 trade
+    expected_reward2 = percentage_change2 - expected_penalty2
+    assert pytest.approx(reward2) == expected_reward2
+
+    # Step 3: Simulate another trade
+    env._trade_count = 2
+    env.last_portfolio_value = 10200
+    env.portfolio_value = 10300
+    reward3 = env._calculate_reward()
+    percentage_change3 = (10300 - 10200) / 10200 # ~0.0098
+    expected_penalty3 = 0.05 * 2 # Penalty for 2 trades
+    expected_reward3 = percentage_change3 - expected_penalty3
+    assert pytest.approx(reward3) == expected_reward3
+
+
+def test_drawdown_penalty(env):
+    """Test the drawdown penalty component."""
+    env.reset()
+    env.use_sharpe_ratio = False # Focus on penalties
+    env.drawdown_penalty = 0.2 # Use a distinct value
+
+    # Step 1: Increase value, no drawdown
+    env.last_portfolio_value = 10000
+    env.portfolio_value = 10500
+    env.max_portfolio_value = 10500 # Update max value
+    reward1 = env._calculate_reward()
+    expected_reward1 = 0.05 # Only percentage change
+    assert pytest.approx(reward1) == expected_reward1
+
+    # Step 2: Decrease value, trigger drawdown
+    env.last_portfolio_value = 10500
+    env.portfolio_value = 10200 # Value drops
+    # Max value is still 10500
+    reward2 = env._calculate_reward()
+    percentage_change2 = (10200 - 10500) / 10500 # ~ -0.02857
+    current_drawdown = (10500 - 10200) / 10500 # ~ 0.02857
+    expected_penalty2 = 0.2 * current_drawdown
+    expected_reward2 = percentage_change2 - expected_penalty2
+    assert pytest.approx(reward2) == expected_reward2
+
+    # Step 3: Value recovers slightly, but still in drawdown
+    env.last_portfolio_value = 10200
+    env.portfolio_value = 10300
+    # Max value is still 10500
+    reward3 = env._calculate_reward()
+    percentage_change3 = (10300 - 10200) / 10200 # ~ 0.0098
+    current_drawdown3 = (10500 - 10300) / 10500 # ~ 0.01905
+    expected_penalty3 = 0.2 * current_drawdown3
+    expected_reward3 = percentage_change3 - expected_penalty3
+    assert pytest.approx(reward3) == expected_reward3
+
+    # Step 4: Value reaches new peak, drawdown resets
+    env.last_portfolio_value = 10300
+    env.portfolio_value = 10600
+    env.max_portfolio_value = 10600 # New peak
+    reward4 = env._calculate_reward()
+    percentage_change4 = (10600 - 10300) / 10300 # ~ 0.0291
+    current_drawdown4 = 0 # No drawdown from new peak
+    expected_penalty4 = 0.2 * current_drawdown4
+    expected_reward4 = percentage_change4 - expected_penalty4
+    assert pytest.approx(reward4) == expected_reward4

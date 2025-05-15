@@ -8,10 +8,12 @@ This module provides functionality to calculate technical indicators on financia
 
 import logging
 import pandas as pd
+import pandas_ta as pta # Import pandas_ta
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from ta.volatility import BollingerBands
 from typing import Optional
+import numpy as np # For historical volatility calculation
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -19,45 +21,61 @@ logger = logging.getLogger(__name__)
 def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate technical indicators on the input DataFrame.
-    
-    Uses ta library to calculate:
+
+    Uses ta library for legacy indicators and pandas_ta for newer ones:
     - RSI(14)
     - MACD(12,26,9)
     - Bollinger Bands(20,2)
-    
+    - Historical Volatility (rolling std dev of returns, window=20)
+    - ADX(14)
+    - Aroon(14)
+    - ATR(14)
+
     Args:
         data (pd.DataFrame): DataFrame containing OHLCV data.
-                            Must have a 'close' column.
-        
+                             Must have 'high', 'low', 'close' columns (case-insensitive).
+
     Returns:
         pd.DataFrame: Original DataFrame with added indicator columns.
                      If calculation fails, returns the original DataFrame.
-                     
+
     Note:
         Added columns include:
         - RSI_14: Relative Strength Index with period 14
         - MACD_12_26_9: MACD line (12,26)
-        - MACD_Signal_12_26_9: MACD signal line (9)
-        - MACD_Hist_12_26_9: MACD histogram
+        - MACDs_12_26_9: MACD signal line (9) (Renamed from ta output)
+        - MACDh_12_26_9: MACD histogram (Renamed from ta output)
         - BBL_20_2.0: Bollinger Band Lower
         - BBM_20_2.0: Bollinger Band Middle
         - BBU_20_2.0: Bollinger Band Upper
+        - HIST_VOL_20: Historical Volatility (20-day rolling std dev of daily returns, annualized)
+        - ADX_14: Average Directional Index (14)
+        - DMP_14: Directional Movement Plus (from ADX calc)
+        - DMN_14: Directional Movement Minus (from ADX calc)
+        - AROOND_14: Aroon Down (14)
+        - AROONU_14: Aroon Up (14)
+        - AROONOSC_14: Aroon Oscillator (14)
+        - ATR_14: Average True Range (14)
     """
     # Create a copy of the input DataFrame to avoid modifying the original
     result_df = data.copy()
     
     try:
-        # Find the 'close' column case-insensitively
+        # Find the 'close', 'high', 'low' columns case-insensitively
         close_col = next((col for col in result_df.columns if col.lower() == 'close'), None)
-        
-        # Check if DataFrame is empty or doesn't have the 'close' column
-        if result_df.empty or close_col is None:
-            logger.warning("CalculationError: Input DataFrame is empty or missing 'close' column (case-insensitive)")
-            return data # Return original data if no close column
-            
+        high_col = next((col for col in result_df.columns if col.lower() == 'high'), None)
+        low_col = next((col for col in result_df.columns if col.lower() == 'low'), None)
+
+        # Check if DataFrame is empty or doesn't have the required columns
+        if result_df.empty or close_col is None or high_col is None or low_col is None:
+            logger.warning("CalculationError: Input DataFrame is empty or missing 'high', 'low', or 'close' columns (case-insensitive)")
+            return data # Return original data if missing required columns
+
         # Check if there's enough data for the calculations
-        if len(result_df) < 26:  # 26 is the largest window size needed (for MACD)
-            logger.warning("CalculationError: Insufficient data for indicator calculation (minimum 26 points required)")
+        # ADX(14) needs 2*14 - 1 = 27 points minimum. MACD needs 26. BB needs 20. Aroon needs 14. ATR needs 14. HistVol needs 21 (20 window + 1 for pct_change).
+        min_required_length = 27
+        if len(result_df) < min_required_length:
+            logger.warning(f"CalculationError: Insufficient data for indicator calculation (minimum {min_required_length} points required)")
             return data # Return original data if insufficient length
         
         # --- Calculate Indicators ---
@@ -103,8 +121,51 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
         except Exception as e:
             logger.warning(f"CalculationError: Failed to calculate Bollinger Bands: {str(e)}")
         
+        # --- Calculate New Indicators using pandas and pandas_ta ---
+
+        # Calculate Historical Volatility (e.g., 20-day rolling std dev of daily returns)
+        try:
+            # Calculate daily returns
+            result_df['daily_return'] = result_df[close_col].pct_change()
+            # Calculate rolling standard deviation of returns
+            hist_vol_window = 20
+            # Annualize by multiplying by sqrt(252) - assuming daily data
+            result_df[f'HIST_VOL_{hist_vol_window}'] = result_df['daily_return'].rolling(window=hist_vol_window).std() * np.sqrt(252)
+            result_df.drop(columns=['daily_return'], inplace=True) # Drop intermediate column
+        except Exception as e:
+            logger.warning(f"CalculationError: Failed to calculate Historical Volatility: {str(e)}")
+
+        # Calculate ADX, Aroon, ATR using pandas_ta
+        # Ensure columns match expected names (lowercase) for pandas_ta if necessary
+        # pandas_ta can often handle case-insensitivity or allows mapping.
+        try:
+            # Calculate ADX
+            # Note: pandas_ta might require lowercase column names depending on version/config.
+            # If issues arise, consider renaming columns temporarily:
+            # temp_df = result_df.rename(columns={high_col: 'high', low_col: 'low', close_col: 'close'})
+            # temp_df.ta.adx(length=14, append=True)
+            # result_df = result_df.join(temp_df[['ADX_14', 'DMP_14', 'DMN_14']]) # Join results back
+            result_df.ta.adx(high=result_df[high_col], low=result_df[low_col], close=result_df[close_col], length=14, append=True)
+            # Expected columns: ADX_14, DMP_14, DMN_14
+        except Exception as e:
+            logger.warning(f"CalculationError: Failed to calculate ADX: {str(e)}")
+
+        try:
+            # Calculate Aroon
+            result_df.ta.aroon(high=result_df[high_col], low=result_df[low_col], length=14, append=True)
+            # Expected columns: AROOND_14, AROONU_14, AROONOSC_14
+        except Exception as e:
+            logger.warning(f"CalculationError: Failed to calculate Aroon: {str(e)}")
+
+        try:
+            # Calculate ATR
+            result_df.ta.atr(high=result_df[high_col], low=result_df[low_col], close=result_df[close_col], length=14, append=True)
+            # Expected column: ATR_14
+        except Exception as e:
+            logger.warning(f"CalculationError: Failed to calculate ATR: {str(e)}")
+
         return result_df
-        
+
     except Exception as e:
         # Catch any unexpected errors
         logger.warning(f"CalculationError: Unexpected error in calculate_indicators: {str(e)}")

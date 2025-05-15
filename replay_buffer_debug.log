@@ -1,0 +1,15 @@
+2025-05-14 22:06:16,941 - INFO - Applied monkey patch to EpisodeReplayBuffer._sample_episodes
+2025-05-14 22:06:26,210 - INFO - PATCH: _sample_episodes called with num_items=32, kwargs={'batch_size_B': None, 'batch_length_T': 0, 'n_step': 1, 'beta': None, 'gamma': 0.9, 'include_infos': False, 'include_extra_model_outputs': False, 'to_numpy': False, 'lookback': 0, 'min_batch_length_T': 0}
+2025-05-14 22:06:26,210 - INFO - PATCH: Number of episodes in buffer: 2
+2025-05-14 22:06:26,210 - ERROR - PATCH: Exception in _sample_episodes: debug_sampling_process.<locals>.patched_sample_episodes.<locals>.instrumented_get_rewards() got an unexpected keyword argument 'neg_index_as_lookback'
+Traceback (most recent call last):
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/debug_replay_buffer.py", line 135, in patched_sample_episodes
+    return original_sample_episodes(self, num_items=num_items, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alessio/.cache/pypoetry/virtualenvs/reinforcestrategycreator-Qe3clns0-py3.12/lib/python3.12/site-packages/ray/rllib/utils/replay_buffers/episode_replay_buffer.py", line 1060, in _sample_episodes
+    sampled_episode = episode.slice(
+                      ^^^^^^^^^^^^^^
+  File "/home/alessio/.cache/pypoetry/virtualenvs/reinforcestrategycreator-Qe3clns0-py3.12/lib/python3.12/site-packages/ray/rllib/env/single_agent_episode.py", line 1538, in slice
+    data=self.get_rewards(
+         ^^^^^^^^^^^^^^^^^
+TypeError: debug_sampling_process.<locals>.patched_sample_episodes.<locals>.instrumented_get_rewards() got an unexpected keyword argument 'neg_index_as_lookback'

@@ -1,0 +1,52 @@
+
+
+version: '3.8'
+
+services:
+  # TimescaleDB container for market data with time-series extensions
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb_market_data
+    environment:
+      POSTGRES_USER: ${TIMESCALEDB_USER:-user}
+      POSTGRES_PASSWORD: ${TIMESCALEDB_PASSWORD:-password}
+      POSTGRES_DB: ${TIMESCALEDB_DB:-marketdata}
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TIMESCALEDB_USER:-user} -d ${TIMESCALEDB_DB:-marketdata}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      
+  # Regular PostgreSQL container for trading_db (without TimescaleDB extensions)
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres_trading_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mysecretpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-trading_db}
+    ports:
+      - "5434:5432" # Changed host port to 5434 to avoid conflict with native PostgreSQL
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-trading_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  timescaledb_data:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge
