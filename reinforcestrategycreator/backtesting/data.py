@@ -9,7 +9,7 @@ import logging
 import pandas as pd
 from typing import Tuple, Optional
 
-from reinforcestrategycreator.data_fetcher import DataFetcher
+from reinforcestrategycreator.data_fetcher import fetch_historical_data
 from reinforcestrategycreator.technical_analyzer import TechnicalAnalyzer
 
 # Configure logging
@@ -58,13 +58,11 @@ class DataManager:
         logger.info(f"Fetching data for {self.asset} from {self.start_date} to {self.end_date}")
         
         try:
-            # Use DataFetcher to get historical data
-            data_fetcher = DataFetcher()
-            data = data_fetcher.fetch_historical_data(
-                symbol=self.asset,
+            # Use fetch_historical_data function to get data
+            data = fetch_historical_data(
+                ticker=self.asset,
                 start_date=self.start_date,
-                end_date=self.end_date,
-                interval="1d"
+                end_date=self.end_date
             )
             
             # Add technical indicators

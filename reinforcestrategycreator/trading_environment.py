@@ -231,7 +231,29 @@ class TradingEnv(gym.Env):
             logger.info(f"Starting at step {valid_start_step} with less than window_size history")
         
         # Get the current price from the dataframe
-        self.current_price = self.df.iloc[self.current_step]['close']
+        # Find the 'close' column case-insensitively if it's a string, or by position if it's a tuple
+        if isinstance(self.df.columns, pd.MultiIndex):
+            # For MultiIndex columns, try to find a level with 'close'
+            close_col = None
+            for i, level_values in enumerate(zip(*self.df.columns.values)):
+                for j, val in enumerate(level_values):
+                    if isinstance(val, str) and val.lower() == 'close':
+                        close_col = self.df.columns[j]
+                        break
+                if close_col is not None:
+                    break
+        else:
+            # For regular Index columns
+            close_col = next((col for col in self.df.columns if isinstance(col, str) and col.lower() == 'close'), None)
+            
+        if close_col is None:
+            # If we can't find a 'close' column, try to use the 4th column (typical OHLCV order)
+            if len(self.df.columns) >= 4:
+                close_col = self.df.columns[3]  # Assuming OHLCV order (Open, High, Low, Close, Volume)
+            else:
+                raise ValueError("DataFrame does not have a 'close' column (case-insensitive) and doesn't have enough columns for OHLCV assumption")
+        
+        self.current_price = self.df.iloc[self.current_step][close_col]
         
         # Get the initial observation
         observation = self._get_observation()
@@ -279,7 +301,30 @@ class TradingEnv(gym.Env):
         # Get the current price from the dataframe
         # Ensure current_step is within bounds if it's the very last step
         actual_current_step_for_price = min(self.current_step, len(self.df) - 1)
-        self.current_price = self.df.iloc[actual_current_step_for_price]['close']
+        
+        # Find the 'close' column case-insensitively if it's a string, or by position if it's a tuple
+        if isinstance(self.df.columns, pd.MultiIndex):
+            # For MultiIndex columns, try to find a level with 'close'
+            close_col = None
+            for i, level_values in enumerate(zip(*self.df.columns.values)):
+                for j, val in enumerate(level_values):
+                    if isinstance(val, str) and val.lower() == 'close':
+                        close_col = self.df.columns[j]
+                        break
+                if close_col is not None:
+                    break
+        else:
+            # For regular Index columns
+            close_col = next((col for col in self.df.columns if isinstance(col, str) and col.lower() == 'close'), None)
+            
+        if close_col is None:
+            # If we can't find a 'close' column, try to use the 4th column (typical OHLCV order)
+            if len(self.df.columns) >= 4:
+                close_col = self.df.columns[3]  # Assuming OHLCV order (Open, High, Low, Close, Volume)
+            else:
+                raise ValueError("DataFrame does not have a 'close' column (case-insensitive) and doesn't have enough columns for OHLCV assumption")
+            
+        self.current_price = self.df.iloc[actual_current_step_for_price][close_col]
         
         # --- Risk Management Checks (SL/TP) ---
         original_action = action

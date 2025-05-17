@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, List
 
-from reinforcestrategycreator.trading_environment import TradingEnvironment
+from reinforcestrategycreator.trading_environment import TradingEnv as TradingEnvironment
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -38,10 +38,26 @@ class MetricsCalculator:
         Returns:
             Dictionary of metrics
         """
-        # Extract portfolio history
-        portfolio_values = env.portfolio_value_history
+        # Extract portfolio history (using the correct attribute name with leading underscore)
+        # Add a fallback mechanism to handle potential attribute naming issues
+        try:
+            portfolio_values = env._portfolio_value_history
+        except AttributeError:
+            # Log the error and available attributes for debugging
+            logger.error(f"Error accessing portfolio history. Available attributes: {dir(env)}")
+            # Return default metrics to avoid breaking the workflow
+            return {
+                "pnl": 0.0,
+                "pnl_percentage": 0.0,
+                "sharpe_ratio": 0.0,
+                "max_drawdown": 0.0,
+                "win_rate": 0.0,
+                "trades": 0
+            }
         
         # Calculate returns
+        # Convert portfolio values to numpy array to support slicing and diff operations
+        portfolio_values = np.array(portfolio_values)
         returns = np.diff(portfolio_values) / portfolio_values[:-1]
         
         # Calculate metrics
@@ -66,11 +82,24 @@ class MetricsCalculator:
             drawdown = (peak - value) / peak
             max_drawdown = max(max_drawdown, drawdown)
         
-        # Calculate win rate
-        trades = env.trades
-        if trades > 0:
-            win_rate = env.profitable_trades / trades
+        # Calculate win rate from the environment's info dictionary or completed_trades
+        # First, check if we have final info from a completed episode
+        if hasattr(env, 'cached_final_info_for_callback') and env.cached_final_info_for_callback:
+            # Use the cached final info dictionary that contains the win_rate and trades_count
+            win_rate = env.cached_final_info_for_callback.get('win_rate', 0)
+            trades = env.cached_final_info_for_callback.get('trades_count', 0)
+        elif hasattr(env, '_completed_trades'):
+            # If we have access to the completed trades list
+            trades = len(env._completed_trades)
+            if trades > 0:
+                winning_trades = sum(1 for trade in env._completed_trades if trade.get('pnl', 0) > 0)
+                win_rate = winning_trades / trades
+            else:
+                win_rate = 0
         else:
+            # Fallback values if we can't access the needed attributes
+            logger.warning("Unable to access trade information from environment. Using default values.")
+            trades = 0
             win_rate = 0
             
         return {

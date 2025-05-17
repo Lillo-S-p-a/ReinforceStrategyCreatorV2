@@ -18,6 +18,31 @@ import numpy as np # For historical volatility calculation
 # Configure logger
 logger = logging.getLogger(__name__)
 
+
+class TechnicalAnalyzer:
+    """
+    Backward-compatibility wrapper class for technical indicator calculations.
+    
+    This class provides a class-based interface to the function-based technical
+    indicator calculations for backward compatibility with existing code.
+    """
+    
+    def add_all_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate all technical indicators on the input DataFrame.
+        
+        This is a wrapper method that calls the calculate_indicators function.
+        
+        Args:
+            data (pd.DataFrame): DataFrame containing OHLCV data.
+                               Must have 'high', 'low', 'close' columns (case-insensitive).
+        
+        Returns:
+            pd.DataFrame: Original DataFrame with added indicator columns.
+        """
+        return calculate_indicators(data)
+
+
 def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate technical indicators on the input DataFrame.

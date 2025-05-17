@@ -9,6 +9,7 @@ import os
 import json
 import logging
 import datetime
+import torch
 from typing import Dict, Any, Optional
 
 from reinforcestrategycreator.rl_agent import StrategyAgent as RLAgent
@@ -70,17 +71,28 @@ class ModelExporter:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             model_id = f"model_ep{params.get('episodes', 100)}_run{asset}_{timestamp}"
             
-            # Export model weights
-            model_path = os.path.join(self.export_dir, f"{model_id}.h5")
-            model.save(model_path)
+            # Export model weights using PyTorch's saving mechanism
+            model_path = os.path.join(self.export_dir, f"{model_id}.pth")
             
-            # Export model metadata
+            # Check if model has the right attributes
+            if hasattr(model, 'model') and model.model is not None:
+                torch.save(model.model.state_dict(), model_path)
+                logger.info(f"Model state_dict saved to {model_path}")
+            else:
+                logger.error("Model doesn't have the expected structure for saving")
+                raise ValueError("Model doesn't have the required structure for saving")
+            
+            # Export model metadata with added model structure information
             metadata = {
                 "model_id": model_id,
                 "asset": asset,
                 "training_period": f"{start_date} to {end_date}",
                 "created_date": timestamp,
-                "parameters": params,
+                "parameters": {
+                    **params,  # Include all original parameters
+                    "state_size": model.state_size if hasattr(model, 'state_size') else None,
+                    "action_size": model.action_size if hasattr(model, 'action_size') else None,
+                },
                 "test_metrics": test_metrics
             }
             
@@ -146,14 +158,37 @@ class ModelExporter:
             Loaded RL agent or None if loading failed
         """
         try:
-            # Check if model exists
-            model_path = os.path.join(self.export_dir, f"{model_id}.h5")
+            # Check if model exists - now using .pth extension for PyTorch models
+            model_path = os.path.join(self.export_dir, f"{model_id}.pth")
             if not os.path.exists(model_path):
                 logger.error(f"Model file not found: {model_path}")
                 return None
+            
+            # Get metadata to determine model parameters
+            metadata_path = os.path.join(self.export_dir, f"{model_id}.json")
+            if not os.path.exists(metadata_path):
+                logger.error(f"Model metadata file not found: {metadata_path}")
+                return None
                 
-            # Load model
-            agent = RLAgent.load(model_path)  # Using RLAgent alias
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+                
+            # Create a new agent with parameters from metadata
+            params = metadata.get("parameters", {})
+            state_size = params.get("state_size", 10)  # Default if not found
+            action_size = params.get("action_size", 3)  # Default if not found
+            
+            # Create agent instance
+            agent = RLAgent(state_size=state_size, action_size=action_size)
+            
+            # Load model weights
+            try:
+                # Load the state_dict into the model
+                agent.model.load_state_dict(torch.load(model_path, map_location=agent.device))
+                agent.update_target_model()  # Update target model with loaded weights
+            except Exception as e:
+                logger.error(f"Error loading model weights: {e}")
+                return None
             
             logger.info(f"Model {model_id} loaded successfully")
             return agent

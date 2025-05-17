@@ -6,3 +6,4 @@ __pycache__/
 *.keras
 results_plots/
 callbacks_debug.log
+results/

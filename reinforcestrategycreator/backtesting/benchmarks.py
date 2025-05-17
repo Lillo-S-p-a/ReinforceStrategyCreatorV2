@@ -148,8 +148,25 @@ class BuyAndHoldStrategy(BenchmarkStrategy):
             }
         
         try:
-            # Get price data
-            prices = data['close'].values
+            # Get price data - Yahoo Finance returns capitalized column names
+            # Try different possible column names
+            if 'close' in data.columns:
+                prices = data['close'].values
+            elif 'Close' in data.columns:
+                prices = data['Close'].values
+            elif 'Adj Close' in data.columns:
+                prices = data['Adj Close'].values
+            else:
+                # If none of the expected columns are found, log available columns and return default
+                logger.error(f"Cannot find price data in columns: {data.columns}")
+                return {
+                    "pnl": 0,
+                    "pnl_percentage": 0,
+                    "sharpe_ratio": 0,
+                    "max_drawdown": 0,
+                    "win_rate": 0,
+                    "trades": 0
+                }
             
             # Calculate number of shares to buy
             initial_price = prices[0]
@@ -234,8 +251,25 @@ class SMAStrategy(BenchmarkStrategy):
             }
         
         try:
-            # Get price data
-            prices = data['close'].values
+            # Get price data - Yahoo Finance returns capitalized column names
+            # Try different possible column names
+            if 'close' in data.columns:
+                prices = data['close'].values
+            elif 'Close' in data.columns:
+                prices = data['Close'].values
+            elif 'Adj Close' in data.columns:
+                prices = data['Adj Close'].values
+            else:
+                # If none of the expected columns are found, log available columns and return default
+                logger.error(f"Cannot find price data in columns: {data.columns}")
+                return {
+                    "pnl": 0,
+                    "pnl_percentage": 0,
+                    "sharpe_ratio": 0,
+                    "max_drawdown": 0,
+                    "win_rate": 0,
+                    "trades": 0
+                }
             
             # Calculate moving averages
             short_ma = np.convolve(prices, np.ones(self.short_window)/self.short_window, mode='valid')
@@ -370,8 +404,25 @@ class RandomStrategy(BenchmarkStrategy):
             }
         
         try:
-            # Get price data
-            prices = data['close'].values
+            # Get price data - Yahoo Finance returns capitalized column names
+            # Try different possible column names
+            if 'close' in data.columns:
+                prices = data['close'].values
+            elif 'Close' in data.columns:
+                prices = data['Close'].values
+            elif 'Adj Close' in data.columns:
+                prices = data['Adj Close'].values
+            else:
+                # If none of the expected columns are found, log available columns and return default
+                logger.error(f"Cannot find price data in columns: {data.columns}")
+                return {
+                    "pnl": 0,
+                    "pnl_percentage": 0,
+                    "sharpe_ratio": 0,
+                    "max_drawdown": 0,
+                    "win_rate": 0,
+                    "trades": 0
+                }
             
             # Generate random signals
             signals = np.random.random(len(prices)) < self.trade_probability

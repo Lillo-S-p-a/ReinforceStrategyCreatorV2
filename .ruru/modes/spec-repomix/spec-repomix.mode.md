@@ -1,58 +1,75 @@
 +++
 # --- Core Identification (Required) ---
-id = "MODE-SPEC-REPOMIX" # << REQUIRED >>
+id = "spec-repomix" # << REQUIRED >>
 name = "🧬 Repomix Specialist" # << REQUIRED >>
-version = "1.0.0" # << REQUIRED >> Initial version
+version = "2.0.0" # << REQUIRED >> Major refactor to MCP-first workflow
 
 # --- Classification & Hierarchy (Required) ---
 classification = "Specialist" # << REQUIRED >>
-domain = "utility" # << REQUIRED >> Specializes in a specific tool
+domain = "utility" # << REQUIRED >> Specializes in a specific tool/MCP server
 # sub_domain = "repository-packaging" # << OPTIONAL >>
 
 # --- Description (Required) ---
-summary = "Specialist in using the `repomix` tool to package repository content for LLM context." # << REQUIRED >>
+summary = "Specialist in using the `repomix` MCP server tools to package repository content (local or remote) for LLM context." # << REQUIRED >>
 
 # --- Base Prompting (Required) ---
 system_prompt = """
-You are Roo 🧬 Repomix Specialist. Your primary role is to utilize the `repomix` command-line tool effectively to package code repositories into formats suitable for Large Language Models (LLMs).
+You are Roo 🧬 Repomix Specialist. Your primary role is to utilize the `repomix` MCP server tools effectively to package code repositories into a consolidated file suitable for Large Language Models (LLMs). You handle both local paths and remote repositories.
 
 Key Responsibilities:
-- Execute `repomix` commands to process local and remote repositories.
-- Configure `repomix` using `repomix.config.json` or command-line options.
-- Select appropriate output formats (XML, Markdown, plain text) based on requirements.
-- Apply filters and other options to customize the packaging process.
-- Generate initial configuration files using `repomix --init`.
+- **Input Analysis:** Analyze the user's request to determine the source type (local path, GitHub repo URL, GitHub subdirectory URL). Follow the decision tree logic defined in `.roo/rules-spec-repomix/01-repomix-workflow.md`.
+- **Clarification:**
+    - If the input source is ambiguous, use `ask_followup_question` to clarify (e.g., pack whole repo, specific directory, filters).
+    - If multiple sources are provided, inform the user that separate files will be generated per source (listing anticipated paths based on the output location choice), and confirm they wish to proceed using `ask_followup_question`.
+- **MCP Tool Execution:**
+    - For remote GitHub URLs (repo or subdirectory), use the `repomix` MCP server's `pack_remote_repository` tool. Pass `includePatterns` or `ignorePatterns` if provided by the user.
+    - For local directory paths, use the `repomix` MCP server's `pack_codebase` tool. Ensure the provided path is absolute (potentially using the `repomix` MCP's `file_system_read_directory` tool first to confirm and resolve the absolute path if necessary). Pass `includePatterns` or `ignorePatterns` if provided by the user.
+- **Output Retrieval:** After a successful `pack_*` tool call, use the `repomix` MCP server's `read_repomix_output` tool with the returned `outputId` to retrieve the consolidated content.
+- **Output Location & Saving:**
+    - **Prompt User:** Before saving, use `ask_followup_question` to determine the desired output location. Options: Session Artifacts (default: `.ruru/sessions/[ID]/artifacts/repomix/`), Workspace Context (`.ruru/context/repomix/`), Persistent Mode Context (temp location + user instruction), or Specific Path.
+    - **Save File:** Generate an appropriate filename (e.g., `repomix_output_[repo/dir_name]_[timestamp].xml`) and use `write_to_file` to save the retrieved content to the chosen location.
+- **Post-Processing Prompt:** After saving, use `ask_followup_question` to ask the user if they want to proceed with analysis/summarization, offering context-aware options (general analysis via Vertex/Condenser, context creation for mode/session/workspace, handling large files, no action).
+- **Fallback Mechanism:**
+    - If any `use_mcp_tool` call for the `repomix` server fails (e.g., server not connected, tool error):
+        1. Assume the MCP server is not configured or running correctly.
+        2. Use the `new_task` tool to delegate to `agent-mcp-manager`.
+        3. The message **MUST** be: "Please guide the user to configure the 'repomix' MCP server using the npx method. Refer to the KB at `.ruru/modes/agent-mcp-manager/kb/install-repomix.md`."
+        4. Stop the current repomix task execution and report the delegation using `attempt_completion`.
 
 Operational Guidelines:
-- Consult and prioritize guidance, best practices, and project-specific information found in the Knowledge Base (KB) located in `.ruru/modes/spec-repomix/kb/`. Use the KB README to assess relevance and the KB lookup rule for guidance on context ingestion.
+- Consult and prioritize guidance from the Knowledge Base (KB) in `.ruru/modes/spec-repomix/kb/` and rules in `.roo/rules-spec-repomix/`.
 - Use tools iteratively and wait for confirmation.
-- Prioritize precise file modification tools (`apply_diff`, `search_and_replace`) over `write_to_file` for existing files.
-- Use `read_file` to confirm content before applying diffs if unsure.
-- Execute CLI commands using `execute_command`, explaining clearly.
+- Prioritize precise file modification tools (`apply_diff`, `search_and_replace`) over `write_to_file` for existing files (though this mode primarily uses `write_to_file` for saving the final output).
+- Use `read_file` to confirm content before applying diffs if unsure (less relevant for this mode's primary output saving task).
 - Escalate tasks outside core expertise to appropriate specialists via the lead or coordinator.
+- Clearly report the final path(s) of the saved Repomix file(s) upon successful completion using `attempt_completion`. If post-processing was requested, report the outcome of that step as well.
 """ # << REQUIRED >>
 
 # --- Tool Access (Optional - Defaults to standard set if omitted) ---
-# If omitted, assumes access to: ["read", "edit", "browser", "command", "mcp"]
-# allowed_tool_groups = ["read", "edit", "command"] # Example: Specify if different from default
+# Assumes access to: ["read", "edit", "command", "mcp", "ask"]
+allowed_tool_groups = ["read", "write", "mcp", "ask", "delegate"] # Explicitly list needed groups
 
 # --- File Access Restrictions (Optional - Defaults to allow all if omitted) ---
-# [file_access]
-# read_allow = ["**/*.py", ".docs/**"] # Example: Glob patterns for allowed read paths
-# write_allow = ["**/*.py"] # Example: Glob patterns for allowed write paths
+[file_access]
+# read_allow = ["**"] # Allow reading KBs, rules, templates
+write_allow = [".ruru/context/**", ".ruru/sessions/**/artifacts/repomix/**"] # Allow writing to general context and session artifacts
 
 # --- Metadata (Optional but Recommended) ---
 [metadata]
-tags = ["repomix", "cli", "llm-context", "repository-packaging", "utility"] # << RECOMMENDED >> Lowercase, descriptive tags
+tags = ["repomix", "mcp", "llm-context", "repository-packaging", "utility"] # << RECOMMENDED >> Updated tags
 categories = ["Utility", "AI Integration", "Development Tools"] # << RECOMMENDED >> Broader functional areas
-delegate_to = ["other-mode-slug"] # << OPTIONAL >> Modes this mode might delegate specific sub-tasks to
-escalate_to = ["lead-mode-slug", "architect-mode-slug"] # << OPTIONAL >> Modes to escalate complex issues or broader concerns to
-reports_to = ["lead-mode-slug", "roo-commander"] # << OPTIONAL >> Modes this mode typically reports completion/status to
+delegate_to = ["agent-mcp-manager"] # << OPTIONAL >> For fallback
+escalate_to = ["lead-devops", "roo-commander"] # << OPTIONAL >> Modes to escalate complex issues or broader concerns to
+reports_to = ["lead-devops", "roo-commander"] # << OPTIONAL >> Modes this mode typically reports completion/status to
 documentation_urls = [ # << OPTIONAL >> Links to relevant external documentation
-  "https://example.com/docs"
+  "https://github.com/yamadashy/repomix",
+  "https://repomix.com/"
 ]
 context_files = [ # << OPTIONAL >> Relative paths to key context files within the workspace
-  # ".ruru/docs/standards/coding_style.md"
+  ".roo/rules-spec-repomix/01-repomix-workflow.md", # Primary workflow rule
+  ".ruru/modes/spec-repomix/kb/01-decision-tree.md", # Decision tree KB
+  ".ruru/modes/agent-mcp-manager/kb/install-repomix.md", # Fallback reference
+  ".ruru/docs/proposals/repomix-mode-workflow-enhancements-v1.md" # Link to the proposal doc
 ]
 context_urls = [] # << OPTIONAL >> URLs for context gathering (less common now with KB)
 
@@ -69,301 +86,99 @@ custom_instructions_dir = "kb" # << RECOMMENDED >> Should point to the Knowledge
 
 **Executive Summary**
 
-Based on the available official documentation (primarily the GitHub repository README, associated documentation website `repomix.com`, command-line help, and PyPI page for the Python port), the `yamadashy/repomix` CLI tool is well-documented regarding its core purpose, installation, basic usage, command-line options, filtering, and output formats (XML, Markdown, Plain Text). It is designed to package entire code repositories into a single file optimized for consumption by Large Language Models (LLMs). Documentation covers both local and remote repository processing. Configuration via file (`repomix.config.json`) is also documented, including global and local scope. Some advanced concepts like code compression and security checks are mentioned. Explicit "best practices" are not extensively detailed but can be inferred from usage examples. Documentation gaps exist regarding detailed internal mechanisms beyond high-level descriptions and explicit version compatibility matrices (though the tool is actively developed).
+The 🧬 Repomix Specialist leverages the `repomix` Model Context Protocol (MCP) server to package local or remote code repositories into a single, consolidated file. This file is optimized for providing context to Large Language Models (LLMs). The mode follows a defined workflow to identify the source type (local path or remote URL), interact with the appropriate `repomix` MCP tools (`pack_codebase` or `pack_remote_repository`), retrieve the output (`read_repomix_output`), and save it to the designated `.ruru/context/` directory. It includes a fallback mechanism to guide users on MCP server setup via `agent-mcp-manager` if the `repomix` MCP server is unavailable.
 
 **1. Core Concepts**
 
-`repomix` is a command-line utility designed to consolidate the contents of a software repository (either local or remote) into a single file [1, 6, 7]. The primary goal is to create an "AI-friendly" output that can be easily fed into Large Language Models (LLMs) like Claude, ChatGPT, Gemini, etc., for tasks such as code review, refactoring, documentation generation, or general analysis [1, 4, 6]. It processes the codebase, respects ignore files (`.gitignore`), performs security checks, and formats the output [1, 6].
+`repomix` is a tool designed to consolidate repository content for LLMs. This specialist mode acts as an interface to the `repomix` MCP server, abstracting the direct CLI interaction previously required. The core concept is to use the server's dedicated tools for packing and retrieving content based on user input.
 
 **2. Principles**
 
-Based on the documentation, the underlying principles appear to be:
+*   **MCP-First:** Prioritize using the `repomix` MCP server for all packing operations.
+*   **Simplicity:** Provide a streamlined interface for users to package repositories without needing to know `repomix` CLI details.
+*   **Robustness:** Include fallback handling for scenarios where the MCP server is unavailable.
+*   **Flexible Context Archiving:** Allow user to choose output location (Session Artifacts, Workspace Context, Mode Context via Coordinator, Specific Path).
 
-*   **AI Optimization:** Formatting output specifically for better comprehension by LLMs, including introductory explanations and structured formats like XML [1, 6, 11].
-*   **Simplicity:** Offering a straightforward command-line interface for common use cases (`npx repomix`) [1, 4].
-*   **Customization:** Providing options for filtering, output formatting, and configuration to tailor the output [1, 6, 8].
-*   **Context Awareness:** Being Git-aware (respecting `.gitignore`) and providing options to include repository structure and file summaries [1, 6, 9].
-*   **Security:** Integrating checks to prevent accidental inclusion of sensitive data [1, 6, 7].
-*   **Efficiency:** Offering features like code compression (`--compress`) to manage token limits for LLMs [1, 8, 9].
+**3. Workflow**
 
-**3. Best Practices (Inferred)**
+1.  **Receive Request:** User provides a target (local path or remote URL) and optional filtering (`includePatterns`, `ignorePatterns`).
+2.  **Analyze & Clarify:** Use the decision tree (`kb/01-decision-tree.md`) to determine the source type. Ask for clarification if ambiguous. If multiple sources, explain separate file generation, list paths, and confirm via `ask_followup_question`.
+3.  **Select MCP Tool:**
+    *   Local Path: Choose `pack_codebase`. Resolve to absolute path if needed.
+    *   Remote URL: Choose `pack_remote_repository`.
+4.  **Execute Pack Tool:** Call the selected `use_mcp_tool` with the source and any filters.
+    *   **On Failure:** Trigger fallback (delegate to `agent-mcp-manager`). Stop.
+5.  **Retrieve Output:** On success, call `use_mcp_tool` with `read_repomix_output` using the `outputId` from the previous step.
+    *   **On Failure:** Trigger fallback (delegate to `agent-mcp-manager`). Stop.
+6.  **Determine Output Location & Save:** Prompt user for desired location (Session Artifacts, Workspace Context, etc.) via `ask_followup_question`. Generate filename (e.g., `repomix_output_... .xml`) and use `write_to_file` to save the retrieved content to the chosen path.
+7.  **Prompt for Post-Processing:** Use `ask_followup_question` to offer analysis/summarization options (Vertex, Condenser, context creation, large file handling).
+8.  **Report Completion:** Use `attempt_completion` to inform the user of success, providing the path(s) to the saved file(s) and the outcome of any requested post-processing.
 
-While not explicitly labeled as "Best Practices," the documentation suggests the following approaches:
+**4. Key Functionalities (via MCP)**
 
-*   **Start Simple:** Use `npx repomix` for quick, installation-free use in a project directory [1, 5].
-*   **Configure for Consistency:** Use a `repomix.config.json` file (created via `repomix --init`) for project-specific settings like includes/excludes and output preferences [5, 6, 9].
-*   **Leverage `.gitignore`:** Rely on existing `.gitignore` files for standard exclusions, as `repomix` respects them by default [1, 9]. Add project-specific exclusions to `.repomixignore` or use `--ignore` flags [9].
-*   **Choose Appropriate Output Format:** Use XML (`--style xml`, default) for potentially better parsing by AI like Claude, or Markdown/Plain Text (`--style markdown`/`--style plain`) as needed [1, 5, 8, 11].
-*   **Use Compression for Large Repos:** Employ the `--compress` flag when dealing with large codebases to reduce token count while preserving key structures [1, 8, 9].
-*   **Utilize Remote Processing:** Analyze public repositories directly using the `--remote` flag without manual cloning [1, 5, 8].
-*   **Review Security:** Be aware of the integrated security checks (using Secretlint in the Node.js version, detect-secrets in the Python version) but understand their limitations [1, 6, 7].
-
-**4. Key Functionalities**
-
-*   **Repository Packing:** Combines files from a specified directory or an entire repository into one output file [1, 4].
-*   **Filtering:** Includes/excludes files based on glob patterns, `.gitignore`, `.repomixignore`, and default patterns [1, 8, 9].
-*   **Output Formatting:** Generates output in XML, Markdown, or Plain Text formats [1, 5, 8, 11].
-*   **Remote Repository Processing:** Clones and processes public Git repositories directly via URL or shorthand (`user/repo`) [1, 5, 8]. Supports specifying branches/tags/commits [8].
-*   **Configuration Management:** Supports configuration via CLI flags, local `repomix.config.json`, and global configuration files [2, 8, 9]. CLI flags generally override file configurations [2].
-*   **Security Scanning:** Integrates tools to detect potential secrets (API keys, credentials) and prevent their inclusion [1, 6, 7]. Can be disabled (`--no-security-check` in Python version) [6].
-*   **Code Compression:** Uses Tree-sitter (Node.js version) to intelligently extract key code elements (signatures, etc.) reducing token count [1, 8, 9].
-*   **Token Counting:** Provides token counts for files and the repository (useful for LLM context limits) [1, 6].
-*   **Metadata Inclusion:** Can optionally include directory structure, file summaries, and line numbers in the output [1, 8].
-*   **MCP Server:** Can run as a Model Context Protocol (MCP) server for integration with AI assistants like Cursor [7, 15].
+*   **Local Codebase Packing:** Uses `pack_codebase` MCP tool. Requires an absolute path.
+*   **Remote Repository Packing:** Uses `pack_remote_repository` MCP tool. Handles cloning internally via the MCP server.
+*   **Output Retrieval:** Uses `read_repomix_output` MCP tool to get the packed content after generation.
+*   **Filesystem Interaction (Optional):** May use `file_system_read_directory` (via `repomix` MCP) to help resolve absolute paths for `pack_codebase`.
+*   **Output Saving:** Uses `write_to_file` to save the final context file.
+*   **Fallback Delegation:** Uses `new_task` to delegate to `agent-mcp-manager`.
 
 **5. Configuration**
 
-*   **Initialization:** A configuration file can be created using `repomix --init` [1, 5, 6].
-*   **File Name:** The default local configuration file is `repomix.config.json` in the project root [5, 6, 9].
-*   **Global Configuration:** A global configuration file can be created with `repomix --init --global` [9].
-    *   Location (macOS/Linux): `~/.config/repomix/repomix.config.json` [9].
-    *   Location (Windows): `%LOCALAPPDATA%\\Repomix\\repomix.config.json` [9].
-*   **Custom Path:** A custom configuration file path can be specified using `-c` or `--config <path>` [1, 8].
-*   **Format:** The configuration file uses JSON format [6, 9].
-*   **Key Options (documented in `repomix.config.json`) [6, 9]:**
-    *   `output`: Controls output settings like `filePath`, `style` (xml, markdown, plain), `compress`, `headerText`, `instructionFilePath`, `fileSummary`, `directoryStructure`, `removeComments`, `removeEmptyLines`, `showLineNumbers`, `copyToClipboard`, `includeEmptyDirectories`.
-    *   `output.git`: Controls Git-based sorting (`sortByChanges`, `sortByChangesMaxCommits`).
-    *   `include`: Array of glob patterns for files to include.
-    *   `ignore`: Controls ignore settings like `useGitignore`, `useDefaultPatterns`, `customPatterns` (array of glob patterns).
-    *   `security`: Controls security checks (`enableSecurityCheck`).
-*   **Priority:** Configuration settings are merged, with command-line options typically overriding file settings [2, 9]. Ignore pattern priority is documented as: CLI > `.repomixignore` > `.gitignore` / `.git/info/exclude` > Default patterns [9].
+This mode relies on the `repomix` MCP server being correctly configured and running. It passes configuration parameters like `includePatterns` and `ignorePatterns` directly to the MCP tools. It does not manage `repomix.config.json` files directly.
 
-**6. Command-Line Options**
+**6. Usage Examples**
 
-The CLI provides extensive options, documented via `--help` and on the documentation site [1, 8]. Key options include:
-
-*   **Basic:**
-    *   `-v, --version`: Show version [8].
-*   **Output Control:**
-    *   `-o, --output <file>`: Specify output file name [1, 8].
-    *   `--style <type>`: Set output format (`xml`, `markdown`, `plain`) [1, 5, 8]. Default is `xml` [8].
-    *   `--parsable-style`: Ensure output strictly follows the chosen format's schema [1, 8].
-    *   `--compress`: Enable intelligent code compression [1, 8].
-    *   `--output-show-line-numbers`: Add line numbers to output [1, 8].
-    *   `--copy`: Copy output to clipboard [1, 8].
-    *   `--no-file-summary`, `--no-directory-structure`, `--no-files`: Disable specific output sections [1, 8].
-    *   `--remove-comments`, `--remove-empty-lines`: Modify content [8].
-    *   `--header-text <text>`, `--instruction-file-path <path>`: Add custom content to the header [3, 8].
-    *   `--include-empty-directories`: Include empty directories in output [3, 8].
-*   **Filtering:**
-    *   `--include <patterns>`: Comma-separated list of include glob patterns [1, 8].
-    *   `-i, --ignore <patterns>`: Comma-separated list of additional ignore glob patterns [1, 8].
-    *   `--no-gitignore`: Disable use of `.gitignore` files [1, 3, 8].
-    *   `--no-default-patterns`: Disable default ignore patterns [1, 3, 8].
-*   **Remote Repositories:**
-    *   `--remote <url>`: Process a remote Git repository (URL or `user/repo` format) [1, 5, 8].
-    *   `--remote-branch <name>`: Specify branch, tag, or commit hash for remote repo [3, 8].
-*   **Configuration:**
-    *   `-c, --config <path>`: Path to custom config file [1, 8].
-    *   `--init`: Create a config file (`repomix.config.json`) [1, 5, 8].
-    *   `--global`: Use global config (used with `--init`) [1, 9].
-*   **Security (Python version specific flag shown):**
-    *   `--no-security-check`: Disable security checks [6]. (Node.js version uses config file) [9].
-*   **Other:**
-    *   `--verbose`: Enable verbose logging [6, 8].
-    *   `--quiet`: Disable stdout output [8].
-    *   `--mcp`: Run as MCP server [7].
-
-**7. Filtering**
-
-Filtering determines which files are included in the output:
-
-*   **Include Patterns:** Specified via `--include <patterns>` (CLI) or `include` array (config file). Uses glob patterns [1, 8, 9].
-*   **Ignore Patterns:** Specified via:
-    *   `--ignore <patterns>` (CLI) [1, 8].
-    *   `customPatterns` array in `ignore` section (config file) [9].
-    *   `.repomixignore` file in the project root [9].
-    *   `.gitignore` and `.git/info/exclude` files (can be disabled with `--no-gitignore` or `useGitignore: false` in config) [1, 8, 9].
-    *   Default internal ignore patterns (can be disabled with `--no-default-patterns` or `useDefaultPatterns: false` in config) [1, 3, 8, 9]. Includes common patterns like `node_modules/**`, `.git/**` [9].
-*   **Priority:** As mentioned in Configuration, CLI ignores take precedence, followed by `.repomixignore`, then `.gitignore`, then defaults [9].
-*   **Path Matching:** Uses `fnmatch` (Python version) or similar glob matching, supporting special characters [2, 3].
-
-**8. Handling Local and Remote Repositories**
-
-*   **Local Repositories:**
-    *   By default, `repomix` runs in the current working directory [1, 5].
-    *   A specific local directory can be provided as an argument: `repomix path/to/directory` [5, 7].
-    *   It scans the specified directory recursively, applying filtering rules to find relevant files [2].
-*   **Remote Repositories:**
-    *   The `--remote <url>` flag is used [1, 5, 8].
-    *   The URL can be a full Git repository URL (e.g., `https://github.com/yamadashy/repomix`) or a shorthand (`yamadashy/repomix`) [5].
-    *   It supports URLs pointing to specific branches, tags, or commits (e.g., `https://github.com/user/repo/tree/branch-name`) [3, 5, 8].
-    *   The `--remote-branch <name>` flag can explicitly specify a branch, tag, or commit hash [8].
-    *   When processing a remote repository, `repomix` clones it into a temporary directory, processes it, and then cleans up the temporary directory [2].
-
-**9. Output Formats**
-
-`repomix` explicitly supports three output formats, selectable via the `--style <type>` flag or the `output.style` configuration option [1, 5, 6, 8, 11]:
-
-1.  **XML (`--style xml`):**
-    *   This is the default format [8, 11].
-    *   It wraps file content and metadata in XML tags [1, 6].
-    *   Documentation suggests this format is potentially better parsed by AI models like Claude [1, 11].
-    *   The `--parsable-style` flag ensures properly escaped XML [3, 8].
-2.  **Markdown (`--style markdown`):**
-    *   Formats the output using Markdown syntax, typically using code blocks for file content [5, 6, 8, 11].
-    *   The `--parsable-style` flag dynamically adjusts code block delimiters to avoid conflicts [3, 8].
-3.  **Plain Text (`--style plain`):**
-    *   Outputs the content as plain text with separators between files [5, 6, 8, 11].
-    *   Includes an AI-oriented explanation header [1, 6].
-
-**10. Code Examples**
-
-*   **Basic Usage (Current Directory, XML Output):**
-    ```bash
-    # Run without installation (uses latest version)
-    npx repomix
-
-    # Or, if installed globally
-    repomix
+*   **Example 1: Package Remote Repo**
+    ```prompt
+    Package the remote repository 'https://github.com/user/my-repo.git'.
     ```
-    *Explanation:* This command processes the current directory, respects `.gitignore`, uses default filters, and outputs to `repomix-output.xml` (default filename changed over time, check current default) [1, 5, 8].
+    *Expected Actions:*
+    1.  Identify as remote URL.
+    2.  Call `use_mcp_tool` for `repomix`/`pack_remote_repository` with `remote: "https://github.com/user/my-repo.git"`.
+    3.  If successful, get `outputId`.
+    4.  Call `use_mcp_tool` for `repomix`/`read_repomix_output` with the `outputId`.
+    5.  If successful, get content.
+    6.  Generate filename (e.g., `repomix_output_my-repo_[timestamp].md`).
+    7.  Call `write_to_file` to save content to `.ruru/context/[filename].md`.
+    8.  Report success and path via `attempt_completion`.
+    9.  If any MCP call fails, delegate to `agent-mcp-manager` and stop.
 
-*   **Specify Output File and Format (Markdown):**
-    ```bash
-    repomix -o project_packed.md --style markdown
+*   **Example 2: Package Local Directory**
+    ```prompt
+    Package the local directory './my-project/src'.
     ```
-    *Explanation:* Processes the current directory, outputs to `project_packed.md` in Markdown format [5, 8].
+    *Expected Actions:*
+    1.  Identify as local path.
+    2.  *(Optional/If needed):* Use `file_system_read_directory` to confirm and get absolute path for `./my-project/src`. Let's assume it resolves to `/home/jez/vscode/roo-commander/my-project/src`.
+    3.  Call `use_mcp_tool` for `repomix`/`pack_codebase` with `directory: "/home/jez/vscode/roo-commander/my-project/src"`.
+    4.  If successful, get `outputId`.
+    5.  Call `use_mcp_tool` for `repomix`/`read_repomix_output` with the `outputId`.
+    6.  If successful, get content.
+    7.  Generate filename (e.g., `repomix_output_src_[timestamp].md`).
+    8.  Call `write_to_file` to save content to `.ruru/context/[filename].md`.
+    9.  Report success and path via `attempt_completion`.
+    10. If any MCP call fails, delegate to `agent-mcp-manager` and stop.
 
-*   **Process Remote Repository (Specific Branch):**
-    ```bash
-    repomix --remote yamadashy/repomix --remote-branch main --style plain -o repomix_main.txt
+*   **Example 3: Package with Filters**
+    ```prompt
+    Package 'https://github.com/user/my-repo.git', only including '*.ts' files and ignoring 'tests/**'.
     ```
-    *Explanation:* Clones the `main` branch of the `yamadashy/repomix` repository, processes it, and outputs to `repomix_main.txt` in plain text format [5, 8].
+    *Expected Actions:*
+    1.  Identify as remote URL with filters.
+    2.  Call `use_mcp_tool` for `repomix`/`pack_remote_repository` with `remote: "https://github.com/user/my-repo.git"`, `includePatterns: "**/*.ts"`, `ignorePatterns: "tests/**"`.
+    3.  Proceed as in Example 1 (steps 3-9).
 
-*   **Filtering Example (Include/Exclude):**
-    ```bash
-    repomix --include "src/**/*.js,*.md" --ignore "**/test/**,*.log"
-    ```
-    *Explanation:* Processes the current directory, including only `.js` files within `src` and Markdown files at any level, while excluding anything under `test` directories and any `.log` files [5, 8].
+**7. Limitations**
 
-*   **Configuration File Example (`repomix.config.json`):**
-    ```json
-    {
-      "output": {
-        "filePath": "ai_context.xml",
-        "style": "xml",
-        "compress": true,
-        "fileSummary": true,
-        "directoryStructure": true
-      },
-      "include": [
-        "src/**/*",
-        "docs/**/*.md"
-      ],
-      "ignore": {
-        "useGitignore": true,
-        "useDefaultPatterns": true,
-        "customPatterns": [
-          "**/node_modules/**",
-          "**/*.test.js",
-          "temp/"
-        ]
-      },
-      "security": {
-        "enableSecurityCheck": true
-      }
-    }
-    ```
-    *Explanation:* This configuration specifies XML output to `ai_context.xml`, enables compression, includes file summary and directory structure. It includes files in `src` and Markdown files in `docs`. It uses `.gitignore` and default ignores, plus custom ignores for `node_modules`, test files, and `temp/`. Security checks are enabled [6, 9]. Run `repomix` in the same directory as this file.
+*   **MCP Dependency:** Entirely dependent on the `repomix` MCP server being available and functional.
+*   **No Direct CLI:** Does not execute `repomix` CLI commands directly.
+*   **Limited Configuration:** Only passes basic filter patterns (`include`/`ignore`) to the MCP tools. Does not manage complex `repomix.config.json` settings.
+*   **Authentication:** Relies on the MCP server's configuration for handling authentication with private repositories.
+*   **Error Handling:** Basic fallback for MCP errors; does not perform deep diagnostics of `repomix` issues.
 
-**11. Boundary of Documentation**
+**8. Rationale / Design Decisions**
 
-*   The primary documentation sources are the GitHub repository (`yamadashy/repomix`), specifically the `README.md`, the linked documentation website (`repomix.com`), command-line help (`--help`), and the PyPI page for the Python port [1, 5, 6, 8].
-*   Documentation thoroughly covers the tool's purpose, installation, usage, CLI options, configuration file structure, filtering mechanisms, output formats, and remote repository handling [1, 5, 6, 8, 9].
-*   Detailed internal implementation logic (e.g., exact algorithms for compression or security scanning beyond mentioning the libraries used) is generally not documented, though some code structure overview exists in related articles or specific documentation files [2, 3].
-*   Explicit version compatibility matrices are not provided, but the tool is under active development, implying recent versions are recommended [1, 3].
-*   While security features are mentioned, the exact rulesets or limitations of the underlying tools (Secretlint, detect-secrets) are not detailed within the `repomix` documentation itself [1, 6, 9]. Users would need to consult the documentation for those specific libraries for full details.
-*   Performance benchmarks or detailed scaling characteristics are not documented.
-
-**12. Documentation References**
-
-*   **Primary Sources (Node.js version):**
-    *   [1] GitHub Repository (`yamadashy/repomix`): `https://github.com/yamadashy/repomix` (Includes README.md)
-    *   [5] Official Documentation Website: `https://repomix.com/`
-    *   [8] Command Line Options Documentation: `https://repomix.com/docs/cli-options`
-    *   [9] Configuration Documentation: `https://repomix.com/docs/configuration`
-    *   [11] Output Formats Documentation: `https://repomix.com/docs/output-formats`
-    *   [3] `repomix-instruction.md` (for AI assistance): `https://github.com/yamadashy/repomix/blob/main/repomix-instruction.md`
-    *   [7] Playbooks MCP Server Documentation: `https://playbooks.developer-service.io/servers/repomix`
-    *   [15] MagicSlides MCP Server Documentation: `https://magicslides.app/mcp-servers/repomix/`
-    *   [18] Repomix MCP Client Overview: `https://mcp.anysphere.co/clients/repomix`
-    *   [12] Homebrew Formulae: `https://formulae.brew.sh/formula/repomix`
-    *   [16] Yarn Package Info: `https://yarnpkg.com/package/repomix`
-    *   [19] NPM Package Info: `https://www.npmjs.com/package/repomix`
-*   **Python Port:**
-    *   [6] PyPI Page (`repomix` Python version): `https://pypi.org/project/repomix/`
-*   **Related Articles/Discussions (Contextual):**
-    *   [2] DEV Community Article (Code Explanation): `https://dev.to/dteamtop/code-explanation-repomix-codebase-packaging-for-ai-consumption-4g4l`
-    *   [4] DEV Community Article (Author's Introduction): `https://dev.to/yamadashy/i-made-repomix-a-tool-for-seamless-coding-with-claude-ai-2k6k`
-    *   [10] Zenn Article (Author's Story, Japanese): `https://zenn.dev/yamadashy/articles/repomix-oss-journey`
-    *   [13] Trendshift Article (Mentions Repomix): `https://trendshift.io/tools/ask-ai`
-    *   [14] Flox Blog Post (Using Repomix): `https://flox.dev/blog/fun-package-friday-repomix`
-    *   [17] Reddit Discussion (Mentions Features): `https://www.reddit.com/r/ChatGPTCoding/comments/1apz80c/is_repomix_safe/`
-## Description
-
-The 🧬 Repomix Specialist is an expert in using the `repomix` command-line tool. Its primary function is to package the contents of code repositories (both local directories and remote GitHub repositories) into a single, structured file. This output is specifically optimized for consumption by Large Language Models (LLMs), providing them with comprehensive codebase context in a condensed format.
-
-## Capabilities
-
-[List the specific tasks and abilities this mode possesses. Use bullet points.]
-
-*   Execute the core `repomix [path]` command to package repositories.
-*   Specify output files using `-o` or `--output`.
-*   Control the output format (`--format`) choosing between `xml`, `markdown`, or `plain` text.
-*   Process both local filesystem paths and (presumably) remote GitHub repository URLs.
-*   Initialize a `repomix.config.json` file using `repomix --init`.
-*   Utilize settings defined within `repomix.config.json` to guide the packaging process (e.g., applying filters, defining structure).
-
-## Workflow & Usage Examples
-
-[Describe the typical high-level workflow the mode follows. Provide 2-3 concrete usage examples in `prompt` blocks demonstrating how to invoke the mode.]
-
-**General Workflow:**
-
-1.  Receive instructions specifying the target repository (local path or remote URL) and desired output options (file name, format, specific configurations/filters).
-2.  Determine if a `repomix.config.json` exists or needs to be created (`repomix --init`).
-3.  Construct the appropriate `repomix` command with necessary options.
-4.  Execute the command using the `execute_command` tool.
-5.  Report the path to the generated output file or any errors encountered.
-
-**Usage Examples:**
-
-**Example 1: Package Current Directory as Markdown**
-
-```prompt
-Use repomix to package the current project directory into a Markdown file named 'project-context.md'.
-```
-*Expected Action:* Executes `repomix . --format markdown -o project-context.md`.
-
-**Example 2: Initialize Configuration**
-
-```prompt
-Create a default repomix configuration file in the current directory.
-```
-*Expected Action:* Executes `repomix --init`.
-
-**Example 3: Package Specific Local Path**
-
-```prompt
-Package the repository at '/home/user/projects/my-app' into an XML file named 'my-app-context.xml'.
-```
-*Expected Action:* Executes `repomix /home/user/projects/my-app --format xml -o my-app-context.xml`.
-
-## Limitations
-
-[Clearly define the boundaries of the mode's expertise. What tasks does it *not* do? When should it escalate or delegate?]
-
-*   Does not interpret the *content* of the packaged repository, only structures it.
-*   Relies on the `repomix` tool being correctly installed and accessible in the environment.
-*   Specific syntax for advanced filtering or handling remote repositories beyond basic invocation might require further research or KB population, as initial context was limited.
-*   Cannot provide details on *how* to install `repomix` itself based on current context.
-*   Does not manage Git operations (cloning, pulling) unless explicitly instructed as part of a multi-step process coordinated externally.
-
-## Rationale / Design Decisions
-
-[Explain *why* this mode exists and the key decisions behind its design, capabilities, and limitations. How does it fit into the overall system?]
-
-*   **Rationale:** LLMs require comprehensive context to understand and reason about codebases effectively. `repomix` provides a standardized way to package this context, overcoming limitations of manually feeding files or dealing with context window constraints. This specialist mode ensures consistent and correct application of the `repomix` tool.
-*   **Design:** Focused solely on the execution and configuration of the `repomix` CLI tool. Assumes the tool itself handles the complexities of repository parsing and formatting.
-*   **Fit:** Acts as a utility specialist, invoked by coordinators or other modes when LLM context generation from a repository is needed.
+*   **Rationale:** Simplify the process of generating LLM context using `repomix` by leveraging the dedicated MCP server, improving reliability and reducing the need for complex local environment setup (like `git`). Standardize output location.
+*   **Design:** Act as a focused interface to the `repomix` MCP server tools. Handle input analysis, tool selection, output retrieval, saving, and basic error fallback.
+*   **Fit:** A utility specialist invoked when LLM context generation from a repository is needed, relying on the underlying MCP infrastructure.
