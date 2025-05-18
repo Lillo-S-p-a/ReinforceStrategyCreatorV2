@@ -10,9 +10,22 @@ import json
 import logging
 import datetime
 import torch
+import numpy as np
 from typing import Dict, Any, Optional
 
 from reinforcestrategycreator.rl_agent import StrategyAgent as RLAgent
+
+# Custom JSON encoder to handle NumPy types
+class NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles NumPy data types by converting them to Python native types."""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -108,7 +121,7 @@ class ModelExporter:
             # Save metadata
             metadata_path = os.path.join(self.export_dir, f"{model_id}.json")
             with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=4)
+                json.dump(metadata, f, indent=4, cls=NumpyEncoder)
             
             logger.info(f"Model exported successfully to {model_path}")
             logger.info(f"Model metadata saved to {metadata_path}")

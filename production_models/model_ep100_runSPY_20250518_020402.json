@@ -1,0 +1,35 @@
+{
+    "model_id": "model_ep100_runSPY_20250518_020402",
+    "asset": "SPY",
+    "training_period": "2018-01-01 to 2023-01-01",
+    "created_date": "20250518_020402",
+    "parameters": {
+        "learning_rate": 0.0005,
+        "gamma": 0.98,
+        "batch_size": 64,
+        "state_size": 52,
+        "action_size": 3
+    },
+    "test_metrics": {
+        "pnl": 41.502566829833086,
+        "pnl_percentage": 0.40788139405379087,
+        "sharpe_ratio": 6.18408267442139,
+        "max_drawdown": 0.0007203605749999893,
+        "win_rate": 0.580952380952381,
+        "trades": 0
+    },
+    "benchmark_comparison": {
+        "buy_and_hold": {
+            "pnl_difference": 41.502566829833086,
+            "sharpe_difference": 6.18408267442139
+        },
+        "simple_moving_average": {
+            "pnl_difference": 739.4922227285006,
+            "sharpe_difference": 6.7078452592247
+        },
+        "random": {
+            "pnl_difference": 1778.3333921336616,
+            "sharpe_difference": 6.942080802759246
+        }
+    }
+}

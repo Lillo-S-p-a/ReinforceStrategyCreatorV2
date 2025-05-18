@@ -87,9 +87,16 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     
     try:
         # Find the 'close', 'high', 'low' columns case-insensitively
-        close_col = next((col for col in result_df.columns if col.lower() == 'close'), None)
-        high_col = next((col for col in result_df.columns if col.lower() == 'high'), None)
-        low_col = next((col for col in result_df.columns if col.lower() == 'low'), None)
+        # Handle both string columns and tuple columns (from multi-index DataFrames)
+        close_col = next((col for col in result_df.columns if
+                         (isinstance(col, str) and col.lower() == 'close') or
+                         (isinstance(col, tuple) and col[-1].lower() == 'close')), None)
+        high_col = next((col for col in result_df.columns if
+                        (isinstance(col, str) and col.lower() == 'high') or
+                        (isinstance(col, tuple) and col[-1].lower() == 'high')), None)
+        low_col = next((col for col in result_df.columns if
+                       (isinstance(col, str) and col.lower() == 'low') or
+                       (isinstance(col, tuple) and col[-1].lower() == 'low')), None)
 
         # Check if DataFrame is empty or doesn't have the required columns
         if result_df.empty or close_col is None or high_col is None or low_col is None:

@@ -63,6 +63,9 @@ class BenchmarkStrategy:
         Returns:
             Dictionary of performance metrics
         """
+        # Convert portfolio values to numpy array of float type to ensure consistency
+        portfolio_values = np.array(portfolio_values, dtype=float)
+        
         # Calculate returns
         returns = np.diff(portfolio_values) / portfolio_values[:-1]
         
@@ -168,16 +171,22 @@ class BuyAndHoldStrategy(BenchmarkStrategy):
                     "trades": 0
                 }
             
+            # Ensure price data is a 1D numpy array of float type
+            prices = np.array(prices, dtype=float).flatten()
+            
             # Calculate number of shares to buy
-            initial_price = prices[0]
+            initial_price = float(prices[0])
             shares = self.initial_balance / initial_price
             shares = shares * (1 - self.transaction_fee)  # Account for transaction fee
             
             # Calculate portfolio value over time
-            portfolio_values = [self.initial_balance]  # Initial balance
+            portfolio_values = [float(self.initial_balance)]  # Initial balance
             for price in prices[1:]:
-                portfolio_value = shares * price
+                portfolio_value = float(shares * price)
                 portfolio_values.append(portfolio_value)
+            
+            # Convert portfolio values to numpy array to ensure consistency
+            portfolio_values = np.array(portfolio_values, dtype=float).tolist()
             
             # Calculate metrics
             metrics = self.calculate_metrics(
@@ -270,6 +279,9 @@ class SMAStrategy(BenchmarkStrategy):
                     "win_rate": 0,
                     "trades": 0
                 }
+            
+            # Ensure price data is a 1D numpy array of float type
+            prices = np.array(prices, dtype=float).flatten()
             
             # Calculate moving averages
             short_ma = np.convolve(prices, np.ones(self.short_window)/self.short_window, mode='valid')
@@ -423,6 +435,9 @@ class RandomStrategy(BenchmarkStrategy):
                     "win_rate": 0,
                     "trades": 0
                 }
+            
+            # Ensure price data is a 1D numpy array of float type
+            prices = np.array(prices, dtype=float).flatten()
             
             # Generate random signals
             signals = np.random.random(len(prices)) < self.trade_probability

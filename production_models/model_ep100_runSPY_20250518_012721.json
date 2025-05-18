@@ -1,0 +1,11 @@
+{
+    "model_id": "model_ep100_runSPY_20250518_012721",
+    "asset": "SPY",
+    "training_period": "2018-01-01 to 2023-01-01",
+    "created_date": "20250518_012721",
+    "parameters": {
+        "learning_rate": 0.0005,
+        "gamma": 0.98,
+        "batch_size": 64,
+        "state_size": 52,
+        "action_size": 
