@@ -195,16 +195,6 @@ class BuyAndHoldStrategy(BenchmarkStrategy):
                 profitable_trades=1 if portfolio_values[-1] > portfolio_values[0] else 0
             )
             
-            # Debug logging to track benchmark calculation details
-            logger.debug(f"Buy and Hold strategy completed with:")
-            logger.debug(f"  - Initial price: {prices[0]}")
-            logger.debug(f"  - Final price: {prices[-1]}")
-            logger.debug(f"  - Shares: {shares}")
-            logger.debug(f"  - Initial balance: {self.initial_balance}")
-            logger.debug(f"  - Final value: {shares * prices[-1]}")
-            logger.debug(f"  - PnL: {metrics['pnl']}")
-            logger.debug(f"  - PnL %: {metrics['pnl_percentage']}")
-            
             return metrics
             
         except Exception as e:
