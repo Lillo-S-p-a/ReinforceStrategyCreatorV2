@@ -99,7 +99,10 @@ class BacktestingWorkflow:
             test_ratio=test_ratio
         )
         
-        self.metrics_calculator = MetricsCalculator()
+        # Initialize metrics calculator with sharpe_window_size from config
+        sharpe_window_size = config.get("sharpe_window_size", None)
+        self.metrics_calculator = MetricsCalculator(sharpe_window_size=sharpe_window_size)
+        logger.info(f"Initialized MetricsCalculator with sharpe_window_size={sharpe_window_size}")
         
         self.visualizer = Visualizer(
             plots_dir=self.plots_dir

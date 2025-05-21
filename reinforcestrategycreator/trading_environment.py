@@ -423,11 +423,20 @@ class TradingEnv(gym.Env):
             info['pnl'] = self.portfolio_value - self.initial_balance
             info['completed_trades'] = list(self._completed_trades) # Make a copy
             
+            # CRITICAL FIX: Explicitly add trades_count to the info dictionary
+            trades_count = len(self._completed_trades)
+            info['trades_count'] = trades_count
+            
             if self._completed_trades:
                 winning_trades = sum(1 for trade in self._completed_trades if trade.get('pnl', 0) > 0)
                 info['win_rate'] = winning_trades / len(self._completed_trades) if len(self._completed_trades) > 0 else 0.0
             else:
                 info['win_rate'] = 0.0
+                
+            # Alternative backup for trades_count based on self._trade_count attribute
+            if info['trades_count'] == 0 and self._trade_count > 0:
+                logger.warning(f"Inconsistency detected: _completed_trades is empty but _trade_count={self._trade_count}. Using _trade_count as fallback.")
+                info['trades_count'] = self._trade_count
             
             info['max_drawdown'] = self.episode_max_drawdown
             
