@@ -90,6 +90,7 @@ class ModelTrainer:
                 "sharpe_window_size": self.config.get("sharpe_window_size", 100),
                 "use_sharpe_ratio": self.config.get("use_sharpe_ratio", True),
                 "trading_frequency_penalty": self.config.get("trading_frequency_penalty", 0.001),
+                "trading_incentive": self.config.get("trading_incentive", 0.002),  # Add new parameter
                 "drawdown_penalty": self.config.get("drawdown_penalty", 0.001),
                 "risk_fraction": self.config.get("risk_fraction", 0.1),
                 "normalization_window_size": self.config.get("normalization_window_size", 20)

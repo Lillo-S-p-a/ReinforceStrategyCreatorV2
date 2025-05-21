@@ -57,7 +57,9 @@ def main():
         "use_risk_adjusted_reward": True,
         "sharpe_weight": 0.5,
         "drawdown_penalty": 0.3,
-        "sharpe_window_size": 1000,  # Assicura che l'intero periodo di test sia coperto
+        "trading_frequency_penalty": 0.0005,  # Reduced penalty to encourage more trading
+        "trading_incentive": 0.003,          # Added incentive for trading when conditions are favorable
+        "sharpe_window_size": 1000,          # Ensure the entire test period is covered
         
         # Feature engineering
         "use_technical_indicators": True,

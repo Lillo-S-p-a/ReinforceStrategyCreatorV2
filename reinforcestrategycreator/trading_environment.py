@@ -71,7 +71,8 @@ class TradingEnv(gym.Env):
         self.window_size = env_config.get("window_size", 5)
         self.sharpe_window_size = env_config.get("sharpe_window_size", 20)
         self.use_sharpe_ratio = env_config.get("use_sharpe_ratio", True)
-        self.trading_frequency_penalty = env_config.get("trading_frequency_penalty", 0.01)
+        self.trading_frequency_penalty = env_config.get("trading_frequency_penalty", 0.001)  # Reduced default penalty
+        self.trading_incentive = env_config.get("trading_incentive", 0.002)  # New parameter to incentivize trading
         self.drawdown_penalty = env_config.get("drawdown_penalty", 0.1)
         self.risk_free_rate = env_config.get("risk_free_rate", 0.0)
         self.stop_loss_pct = env_config.get("stop_loss_pct", None)
@@ -182,6 +183,7 @@ class TradingEnv(gym.Env):
         self.episode_max_drawdown = 0.0 # Reset for new episode
         self._episode_total_reward = 0.0 # Reset episode total reward
         self._episode_steps = 0 # Reset episode steps
+        self._prev_trade_count = 0 # Reset previous trade count for trading incentive tracking
         self.graceful_shutdown_signaled = False # Reset instance flag on environment reset
         self.cached_final_info_for_callback = None # Clear cached info on reset
  
@@ -851,12 +853,13 @@ class TradingEnv(gym.Env):
 
     def _calculate_reward(self) -> float:
         """
-        Calculate the reward based on risk-adjusted returns, trading frequency, and drawdowns.
+        Calculate the reward based on risk-adjusted returns, trading activity, and drawdowns.
         
-        The reward consists of three components:
+        The reward consists of four components:
         1. Risk-adjusted return (Sharpe ratio or simple percentage change)
-        2. Trading frequency penalty (to discourage excessive trading)
-        3. Drawdown penalty (to encourage capital preservation)
+        2. Trading frequency penalty (reduced to allow more trading)
+        3. Trading incentive (to encourage trading when conditions are favorable)
+        4. Drawdown penalty (to encourage capital preservation)
         
         Returns:
             float: The calculated reward value.
@@ -897,11 +900,28 @@ class TradingEnv(gym.Env):
             # If not using Sharpe ratio or not enough history, use percentage change
             risk_adjusted_return = percentage_change
         
-        # Component 2: Trading frequency penalty
-        # Penalize based on the number of trades in this episode
+        # Component 2: Trading frequency penalty (reduced impact)
+        # Apply a much smaller penalty based on the number of trades
         trading_penalty = self.trading_frequency_penalty * self._trade_count
         
-        # Component 3: Drawdown penalty
+        # Component 3: Trading incentive
+        # Add a small positive reward for each trade to encourage trading
+        # This incentive is applied only when a trade occurs in the current step
+        # We track this by comparing the current trade count with the previous step's count
+        trading_incentive = 0.0
+        
+        # Store the current trade count as a class attribute if it doesn't exist yet
+        if not hasattr(self, '_prev_trade_count'):
+            self._prev_trade_count = 0
+            
+        # Check if a new trade occurred in this step
+        if self._trade_count > self._prev_trade_count:
+            trading_incentive = self.trading_incentive
+            logger.debug(f"Trading incentive applied: +{trading_incentive:.6f} (trade count: {self._trade_count})")
+            # Update the previous trade count
+            self._prev_trade_count = self._trade_count
+        
+        # Component 4: Drawdown penalty
         # Calculate current drawdown as percentage from peak
         if self.max_portfolio_value > 0:
             current_drawdown = max(0, (self.max_portfolio_value - self.portfolio_value) / self.max_portfolio_value)
@@ -911,11 +931,11 @@ class TradingEnv(gym.Env):
             drawdown_penalty = 0
         
         # Combine all components into final reward
-        reward = risk_adjusted_return - trading_penalty - drawdown_penalty
+        reward = risk_adjusted_return - trading_penalty + trading_incentive - drawdown_penalty
         
         logger.debug(f"Reward components: risk_adjusted={risk_adjusted_return:.6f}, "
-                   f"trading_penalty={trading_penalty:.6f}, drawdown_penalty={drawdown_penalty:.6f}, "
-                   f"final_reward={reward:.6f}")
+                   f"trading_penalty={trading_penalty:.6f}, trading_incentive={trading_incentive:.6f}, "
+                   f"drawdown_penalty={drawdown_penalty:.6f}, final_reward={reward:.6f}")
         
         return reward
     

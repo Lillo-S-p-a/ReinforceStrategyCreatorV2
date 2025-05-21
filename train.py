@@ -47,7 +47,8 @@ ENV_TRANSACTION_FEE_PERCENT = 0.001
 ENV_WINDOW_SIZE = 5 # Default from original TradingEnv
 ENV_SHARPE_WINDOW_SIZE = 100
 ENV_DRAWDOWN_PENALTY = 0.005
-ENV_TRADING_PENALTY = 0.002
+ENV_TRADING_PENALTY = 0.001  # Reduced penalty to encourage more trading
+ENV_TRADING_INCENTIVE = 0.002  # New parameter to incentivize trading
 ENV_RISK_FRACTION = 0.1
 ENV_STOP_LOSS_PCT = 5.0
 ENV_USE_SHARPE_RATIO = False # As per last setting in original train.py
@@ -99,6 +100,7 @@ def evaluate_on_validation_data(algo, validation_data_ref):
         "sharpe_window_size": ENV_SHARPE_WINDOW_SIZE,
         "use_sharpe_ratio": ENV_USE_SHARPE_RATIO,
         "trading_frequency_penalty": ENV_TRADING_PENALTY,
+        "trading_incentive": ENV_TRADING_INCENTIVE,  # Add new parameter
         "drawdown_penalty": ENV_DRAWDOWN_PENALTY,
         "risk_fraction": ENV_RISK_FRACTION,
         "stop_loss_pct": ENV_STOP_LOSS_PCT,
@@ -260,6 +262,7 @@ def main():
         "sharpe_window_size": ENV_SHARPE_WINDOW_SIZE,
         "use_sharpe_ratio": ENV_USE_SHARPE_RATIO,
         "trading_frequency_penalty": ENV_TRADING_PENALTY,
+        "trading_incentive": ENV_TRADING_INCENTIVE,  # Add new parameter
         "drawdown_penalty": ENV_DRAWDOWN_PENALTY,
         "risk_fraction": ENV_RISK_FRACTION,
         "stop_loss_pct": ENV_STOP_LOSS_PCT,
