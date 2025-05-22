@@ -49,7 +49,8 @@ class TradingEnv(gym.Env):
                 window_size (int): Number of time steps for observation.
                 sharpe_window_size (int): Window for Sharpe ratio calculation.
                 use_sharpe_ratio (bool): Whether to use Sharpe ratio for reward.
-                trading_frequency_penalty (float): Penalty for frequent trading.
+                trading_incentive_base (float): Base incentive for each trade to encourage activity.
+                trading_incentive_profitable (float): Additional incentive multiplier for profitable trades.
                 drawdown_penalty (float): Penalty for drawdowns.
                 risk_free_rate (float): Risk-free rate for Sharpe ratio.
                 stop_loss_pct (Optional[float]): Stop-loss percentage.
@@ -81,7 +82,9 @@ class TradingEnv(gym.Env):
         self.window_size = env_config.get("window_size", 5)
         self.sharpe_window_size = env_config.get("sharpe_window_size", 20)
         self.use_sharpe_ratio = env_config.get("use_sharpe_ratio", True)
-        self.trading_frequency_penalty = env_config.get("trading_frequency_penalty", 0.01)
+        # Replace trading penalty with incentive parameters
+        self.trading_incentive_base = env_config.get("trading_incentive_base", 0.001)
+        self.trading_incentive_profitable = env_config.get("trading_incentive_profitable", 0.005)
         self.drawdown_penalty = env_config.get("drawdown_penalty", 0.1)
         self.risk_free_rate = env_config.get("risk_free_rate", 0.0)
         self.stop_loss_pct = env_config.get("stop_loss_pct", None)
@@ -988,9 +991,17 @@ class TradingEnv(gym.Env):
             # If not using Sharpe ratio or not enough history, use percentage change
             risk_adjusted_return = percentage_change
         
-        # Component 2: Trading frequency penalty
-        # Penalize based on the number of trades in this episode
-        trading_penalty = self.trading_frequency_penalty * self._trade_count
+        # Component 2: Trading incentive (was a penalty before)
+        # Reward based on the number of trades in this episode to encourage trading activity
+        # A small constant incentive for each trade plus a multiplier for profitable trades
+        profitable_trades = sum(1 for trade in self._completed_trades if trade.get('pnl', 0) > 0)
+        trading_incentive = self.trading_incentive_base * self._trade_count
+        
+        # Additional incentive for profitable trades
+        if self._completed_trades:
+            win_rate = profitable_trades / len(self._completed_trades) if len(self._completed_trades) > 0 else 0.0
+            # Quadratic scaling to reward high win rates more significantly
+            trading_incentive += self.trading_incentive_profitable * win_rate * win_rate * self._trade_count
         
         # Component 3: Drawdown penalty
         # Calculate current drawdown as percentage from peak
@@ -1002,10 +1013,10 @@ class TradingEnv(gym.Env):
             drawdown_penalty = 0
         
         # Combine all components into final reward
-        reward = risk_adjusted_return - trading_penalty - drawdown_penalty
+        reward = risk_adjusted_return + trading_incentive - drawdown_penalty
         
         logger.debug(f"Reward components: risk_adjusted={risk_adjusted_return:.6f}, "
-                   f"trading_penalty={trading_penalty:.6f}, drawdown_penalty={drawdown_penalty:.6f}, "
+                   f"trading_incentive={trading_incentive:.6f}, drawdown_penalty={drawdown_penalty:.6f}, "
                    f"final_reward={reward:.6f}")
         
         return reward

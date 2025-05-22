@@ -62,8 +62,8 @@ def main():
         "learning_rate": 0.0005,       # Lower learning rate for more stable learning
         "gamma": 0.98,                 # Slightly adjusted discount factor
         "epsilon": 1.0,                # Starting exploration rate
-        "epsilon_decay": 0.998,        # Slower decay for better exploration
-        "epsilon_min": 0.05,           # Higher minimum exploration
+        "epsilon_decay": 0.995,        # Further slowed decay for extended exploration
+        "epsilon_min": 0.08,           # Increased minimum exploration rate
         "batch_size": 64,              # Larger batch size for better gradient estimates
         "memory_size": 10000,          # Larger replay buffer
         "update_target_frequency": 10, # More frequent target network updates
@@ -72,18 +72,20 @@ def main():
         "position_sizing_method": "fixed_fractional", # Options: fixed_fractional, all_in
         "risk_fraction": 0.1,          # Risk 10% of capital per trade for fixed_fractional method
         "use_dynamic_sizing": True,    # Enable dynamic position sizing based on model confidence
-        "min_risk_fraction": 0.05,     # Minimum risk (5% of capital) for low confidence trades
-        "max_risk_fraction": 0.20,     # Maximum risk (20% of capital) for high confidence trades
+        "min_risk_fraction": 0.03,     # Reduced minimum risk (3% of capital) for low confidence trades
+        "max_risk_fraction": 0.25,     # Increased maximum risk (25% of capital) for high confidence trades
         
         # Training parameters
-        "episodes": 150,               # More episodes for cross-validation
-        "final_episodes": 300,         # More episodes for final model
+        "episodes": 200,               # Increased episodes for cross-validation
+        "final_episodes": 400,         # Increased episodes for final model
         
-        # Enhanced reward function parameters
+        # Enhanced reward function parameters with trading incentives (replacing penalties)
         "use_risk_adjusted_reward": True,
-        "sharpe_weight": 0.5,
-        "drawdown_penalty": 0.3,
-        "sharpe_window_size": 1000,  # Assicura che l'intero periodo di test sia coperto
+        "sharpe_weight": 0.6,        # Increased weight on risk-adjusted returns
+        "trading_incentive_base": 0.006,  # Increased 6x to strongly encourage more trading
+        "trading_incentive_profitable": 0.005,  # Additional incentive for profitable trades
+        "drawdown_penalty": 0.15,    # Further reduced drawdown penalty to allow more trading
+        "sharpe_window_size": 1000,  # Cover entire test period
         
         # Feature engineering
         "use_technical_indicators": True,
