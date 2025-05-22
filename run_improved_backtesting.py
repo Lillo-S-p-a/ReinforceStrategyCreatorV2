@@ -55,15 +55,16 @@ def main():
     # Define improved configuration with optimized hyperparameters
     improved_config = {
         # Basic configuration
-        "initial_balance": 10000,
-        "transaction_fee": 0.001,
+        "initial_balance": 100000,  # Increased initial capital
+        "commission_pct": 0.03,     # Commission percentage (0.03%)
+        "slippage_bps": 3,          # Slippage in basis points (3 bps = 0.03%)
         
-        # Improved RL hyperparameters
-        "learning_rate": 0.0005,       # Lower learning rate for more stable learning
-        "gamma": 0.98,                 # Slightly adjusted discount factor
+        # Improved RL hyperparameters with enhanced exploration
+        "learning_rate": 0.0003,       # Further reduced for better stability
+        "gamma": 0.985,                # Higher discount factor to value future rewards more
         "epsilon": 1.0,                # Starting exploration rate
-        "epsilon_decay": 0.995,        # Further slowed decay for extended exploration
-        "epsilon_min": 0.08,           # Increased minimum exploration rate
+        "epsilon_decay": 0.992,        # Even slower decay for longer exploration phase
+        "epsilon_min": 0.12,           # Significantly higher minimum exploration rate
         "batch_size": 64,              # Larger batch size for better gradient estimates
         "memory_size": 10000,          # Larger replay buffer
         "update_target_frequency": 10, # More frequent target network updates
@@ -73,18 +74,19 @@ def main():
         "risk_fraction": 0.1,          # Risk 10% of capital per trade for fixed_fractional method
         "use_dynamic_sizing": True,    # Enable dynamic position sizing based on model confidence
         "min_risk_fraction": 0.03,     # Reduced minimum risk (3% of capital) for low confidence trades
-        "max_risk_fraction": 0.25,     # Increased maximum risk (25% of capital) for high confidence trades
+        "max_risk_fraction": 0.30,     # Further increased maximum risk (30% of capital) for high confidence trades
         
-        # Training parameters
-        "episodes": 200,               # Increased episodes for cross-validation
-        "final_episodes": 400,         # Increased episodes for final model
+        # Training parameters - extended for better learning
+        "episodes": 250,               # Further increased episodes for cross-validation
+        "final_episodes": 500,         # Further increased episodes for final model
         
         # Enhanced reward function parameters with trading incentives (replacing penalties)
         "use_risk_adjusted_reward": True,
         "sharpe_weight": 0.6,        # Increased weight on risk-adjusted returns
-        "trading_incentive_base": 0.006,  # Increased 6x to strongly encourage more trading
+        "trading_incentive_base": 0.015,  # Maintain current incentive level
+        "ideal_trades_per_period": 8,  # Target trades per 20-step period for streak bonus
         "trading_incentive_profitable": 0.005,  # Additional incentive for profitable trades
-        "drawdown_penalty": 0.15,    # Further reduced drawdown penalty to allow more trading
+        "drawdown_penalty": 0.15,    # Reduced drawdown penalty to allow more trading
         "sharpe_window_size": 1000,  # Cover entire test period
         
         # Feature engineering
@@ -187,6 +189,11 @@ def main():
         avg_position_size = f"${improved_config['initial_balance']:.2f} (100%)"
         logger.info(f"Average Position Size: {avg_position_size}")
     logger.info(f"Initial Capital: ${improved_config['initial_balance']:.2f}")
+    
+    # Display transaction cost information
+    logger.info(f"Commission: {improved_config['commission_pct']:.3f}%")
+    logger.info(f"Slippage: {improved_config['slippage_bps']} bps ({improved_config['slippage_bps']/100:.3f}%)")
+    logger.info(f"Total Transaction Cost: {improved_config['commission_pct'] + improved_config['slippage_bps']/100:.3f}%")
     logger.info("="*50)
     logger.info(f"Full report saved to: {report_path}")
     logger.info(f"Model exported to: {model_path}")

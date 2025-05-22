@@ -9,7 +9,7 @@ This module provides a reinforcement learning agent for strategy creation.
 import logging
 import numpy as np
 import random
-from typing import List, Tuple, Any, Union
+from typing import List, Tuple, Any, Union, Dict
 from collections import deque
 
 import torch
@@ -54,7 +54,15 @@ class StrategyAgent:
                  epsilon_decay: float = 0.995,
                  memory_size: int = 2000, batch_size: int = 32,
                  gamma: float = 0.95,
-                 target_update_freq: int = 100):
+                 target_update_freq: int = 100,
+                 # Enhanced DQN features
+                 use_dueling: bool = False,
+                 use_double_q: bool = False,
+                 use_prioritized_replay: bool = False,
+                 prioritized_replay_alpha: float = 0.6,
+                 prioritized_replay_beta: float = 0.4,
+                 prioritized_replay_beta_annealing: bool = False,
+                 prioritized_replay_beta_annealing_steps: int = 10000):
         """
         Initialize the DQN agent with Experience Replay and Target Network (PyTorch).
 
@@ -64,6 +72,9 @@ class StrategyAgent:
         :Algorithm EpsilonGreedyExploration
         :Algorithm ExperienceReplay
         :Algorithm TargetNetwork
+        :Algorithm DuelingDQN (when use_dueling=True)
+        :Algorithm DoubleDQN (when use_double_q=True)
+        :Algorithm PrioritizedExperienceReplay (when use_prioritized_replay=True)
 
         Args:
             state_size (int): Dimension of the state space (input features).
@@ -76,6 +87,13 @@ class StrategyAgent:
             batch_size (int): Size of the mini-batch sampled for learning. Defaults to 32.
             gamma (float): Discount factor for future rewards. Defaults to 0.95.
             target_update_freq (int): How often (in learning steps) to update the target network. Defaults to 100.
+            use_dueling (bool): Whether to use Dueling DQN architecture. Defaults to False.
+            use_double_q (bool): Whether to use Double Q-learning. Defaults to False.
+            use_prioritized_replay (bool): Whether to use Prioritized Experience Replay. Defaults to False.
+            prioritized_replay_alpha (float): Alpha parameter for PER, controls how much prioritization is used. Defaults to 0.6.
+            prioritized_replay_beta (float): Beta parameter for PER, controls importance sampling. Defaults to 0.4.
+            prioritized_replay_beta_annealing (bool): Whether to anneal beta to 1.0 over time. Defaults to False.
+            prioritized_replay_beta_annealing_steps (int): Number of steps over which to anneal beta. Defaults to 10000.
         """
         self.state_size = state_size
         self.action_size = action_size
@@ -88,6 +106,21 @@ class StrategyAgent:
         self.gamma = gamma
         self.target_update_freq = target_update_freq
         self.update_counter = 0
+        
+        # Enhanced DQN features
+        self.use_dueling = use_dueling
+        self.use_double_q = use_double_q
+        self.use_prioritized_replay = use_prioritized_replay
+        self.prioritized_replay_alpha = prioritized_replay_alpha
+        self.prioritized_replay_beta = prioritized_replay_beta
+        self.initial_prioritized_replay_beta = prioritized_replay_beta  # Store initial beta for annealing
+        self.prioritized_replay_beta_annealing = prioritized_replay_beta_annealing
+        self.prioritized_replay_beta_annealing_steps = prioritized_replay_beta_annealing_steps
+        self.prioritized_replay_epsilon = 1e-6  # Small epsilon to add to priorities
+        self.beta_step = 0  # Counter for beta annealing
+        
+        # PER metrics tracking
+        self.per_metrics = {'td_error': 0.0, 'mean_priority': 0.0}
 
         # --- Device Configuration ---
         if torch.cuda.is_available():
@@ -101,46 +134,119 @@ class StrategyAgent:
             logger.info("No GPU or MPS found. PyTorch will use CPU.")
         # --- End Device Configuration ---
 
-        self.memory = deque(maxlen=self.memory_size)
+        # Initialize replay buffer based on whether PER is used
+        if self.use_prioritized_replay:
+            # For PER, we store (experience, priority)
+            self.memory = []  # List for more flexibility with priorities
+            self.priorities = np.zeros(self.memory_size)  # Store priorities separately
+            self.memory_indices = []  # Track indices for update
+            logger.info(f"Using Prioritized Experience Replay with alpha={self.prioritized_replay_alpha}, beta={self.prioritized_replay_beta}")
+        else:
+            # Standard uniform replay buffer
+            self.memory = deque(maxlen=self.memory_size)
 
         self.model = self._build_model().to(self.device)
         self.target_model = self._build_model().to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         
-        self.update_target_model() # Initialize target model weights
+        # Initialize target model weights by copying from main model
+        self.target_model.load_state_dict(self.model.state_dict())
+        logger.debug("Target model weights initialized from main model.")
 
         logger.info(f"StrategyAgent (PyTorch DQN with Target Network) initialized: state_size={state_size}, "
                     f"action_size={action_size}, learning_rate={learning_rate}, device={self.device}. "
                     "Models built. Target model initialized. Replay memory initialized.")
 
     def _build_model(self) -> nn.Module:
-        """Builds the PyTorch model for the Q-network."""
-        model = nn.Sequential(
-            nn.Linear(self.state_size, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, self.action_size)  # Output layer, linear activation for Q-values
-        )
-        logger.debug("PyTorch Q-Network model built.")
+        """
+        Builds the PyTorch model for the Q-network.
+        
+        If use_dueling is True, uses a Dueling network architecture.
+        Otherwise, uses a standard DQN architecture.
+        """
+        if self.use_dueling:
+            # Dueling network architecture
+            class DuelingDQN(nn.Module):
+                def __init__(self, state_size, action_size):
+                    super(DuelingDQN, self).__init__()
+                    self.feature_layer = nn.Sequential(
+                        nn.Linear(state_size, 64),
+                        nn.ReLU(),
+                        nn.Linear(64, 64),
+                        nn.ReLU()
+                    )
+                    
+                    # State value stream
+                    self.value_stream = nn.Sequential(
+                        nn.Linear(64, 32),
+                        nn.ReLU(),
+                        nn.Linear(32, 1)  # Single state value
+                    )
+                    
+                    # Action advantage stream
+                    self.advantage_stream = nn.Sequential(
+                        nn.Linear(64, 32),
+                        nn.ReLU(),
+                        nn.Linear(32, action_size)  # Advantage for each action
+                    )
+                
+                def forward(self, state):
+                    features = self.feature_layer(state)
+                    value = self.value_stream(features)
+                    advantage = self.advantage_stream(features)
+                    
+                    # Combine value and advantage to get Q-values
+                    # Q(s,a) = V(s) + (A(s,a) - mean(A(s,a')))
+                    q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
+                    return q_values
+            
+            model = DuelingDQN(self.state_size, self.action_size)
+            logger.debug("PyTorch Dueling DQN model built.")
+        else:
+            # Standard DQN architecture
+            model = nn.Sequential(
+                nn.Linear(self.state_size, 64),
+                nn.ReLU(),
+                nn.Linear(64, 64),
+                nn.ReLU(),
+                nn.Linear(64, self.action_size)  # Output layer, linear activation for Q-values
+            )
+            logger.debug("PyTorch Standard DQN model built.")
+            
         return model
-
     def remember(self, state: Union[List[float], np.ndarray],
                  action: int,
                  reward: float,
                  next_state: Union[List[float], np.ndarray],
                  done: bool) -> None:
-        """Store an experience tuple in the replay memory."""
+        """
+        Store an experience tuple in the replay memory.
+        
+        If using Prioritized Experience Replay, adds with max priority.
+        """
         # Ensure states are numpy arrays for consistency before potential tensor conversion
         if isinstance(state, list):
             state = np.array(state, dtype=np.float32)
         if isinstance(next_state, list):
             next_state = np.array(next_state, dtype=np.float32)
         
-        # No need to reshape here if RLlib handles batching correctly later
-        self.memory.append((state, action, reward, next_state, done))
-        # logger.debug(f"Remembered experience. Memory size: {len(self.memory)}")
-
+        experience = (state, action, reward, next_state, done)
+        
+        if self.use_prioritized_replay:
+            if len(self.memory) < self.memory_size:
+                # Add to memory with max priority
+                self.memory.append(experience)
+                max_priority = max(self.priorities) if len(self.priorities) > 0 else 1.0
+                self.priorities = np.append(self.priorities, max_priority)
+            else:
+                # Replace oldest experience
+                idx = len(self.memory) % self.memory_size
+                self.memory[idx] = experience
+                max_priority = max(self.priorities) if len(self.priorities) > 0 else 1.0
+                self.priorities[idx] = max_priority
+        else:
+            # Standard uniform replay buffer
+            self.memory.append(experience)
 
     def select_action(self, state: Union[List[float], np.ndarray], return_confidence: bool = False) -> Union[int, Tuple[int, float]]:
         """
@@ -209,13 +315,70 @@ class StrategyAgent:
         else:
             return int(action)
 
-    def learn(self) -> None:
-        """Samples a batch from memory, calculates target Q-values, and trains the Q-network."""
-        if len(self.memory) < self.batch_size:
-            # logger.debug(f"Learn called but not enough samples in memory ({len(self.memory)}/{self.batch_size}).")
-            return
+    def learn(self, return_stats: bool = False) -> Union[None, dict]:
+        """
+        Samples a batch from memory, calculates target Q-values, and trains the Q-network.
+        
+        If using Double DQN:
+          Uses main network to select actions and target network to evaluate them.
+          
+        If using PER:
+          Samples based on priorities and uses importance sampling weights.
+          Updates priorities based on TD errors.
+          
+        Args:
+            return_stats: If True, returns a dictionary of training statistics
+            
+        Returns:
+            Dictionary of training statistics if return_stats=True, otherwise None
+        """
+        # Check if we have enough experiences
+        if self.use_prioritized_replay:
+            memory_size = len(self.memory)
+            if memory_size < self.batch_size:
+                if return_stats:
+                    return {'td_error': 0.0, 'mean_priority': 0.0}
+                return
+        else:
+            if len(self.memory) < self.batch_size:
+                if return_stats:
+                    return {'td_error': 0.0, 'mean_priority': 0.0}
+                return
 
-        minibatch = random.sample(self.memory, self.batch_size)
+        # Beta annealing for Prioritized Experience Replay
+        if self.use_prioritized_replay and self.prioritized_replay_beta_annealing:
+            self.beta_step += 1
+            progress = min(1.0, self.beta_step / self.prioritized_replay_beta_annealing_steps)
+            self.prioritized_replay_beta = self.initial_prioritized_replay_beta + progress * (1.0 - self.initial_prioritized_replay_beta)
+
+        # Sample batch based on whether we're using PER
+        if self.use_prioritized_replay:
+            # Convert priorities to probabilities via softmax
+            probs = self.priorities[:len(self.memory)] ** self.prioritized_replay_alpha
+            
+            # Add safety check to prevent division by zero/NaN
+            sum_probs = np.sum(probs)
+            if sum_probs <= 0 or np.isnan(sum_probs):
+                # If sum is zero or NaN, fall back to uniform distribution
+                probs = np.ones(len(self.memory)) / len(self.memory)
+            else:
+                probs = probs / sum_probs
+            
+            # Sample based on priorities
+            indices = np.random.choice(len(self.memory), self.batch_size, p=probs, replace=False)
+            self.memory_indices = indices  # Store indices for priority update
+            
+            # Calculate importance sampling weights
+            weights = (len(self.memory) * probs[indices]) ** (-self.prioritized_replay_beta)
+            weights = weights / np.max(weights)  # Normalize
+            weights_tensor = torch.from_numpy(weights).float().to(self.device)
+            
+            # Get experiences from sampled indices
+            minibatch = [self.memory[idx] for idx in indices]
+        else:
+            # Standard uniform sampling
+            minibatch = random.sample(self.memory, self.batch_size)
+            weights_tensor = torch.ones(self.batch_size).to(self.device)  # No weighting
         
         states = np.array([experience[0] for experience in minibatch], dtype=np.float32)
         actions = np.array([experience[1] for experience in minibatch])
@@ -229,10 +392,19 @@ class StrategyAgent:
         next_states_tensor = torch.from_numpy(next_states).float().to(self.device)
         dones_tensor = torch.from_numpy(dones).float().to(self.device) # Float for (1 - dones)
 
-        # Get Q-values for next states from target model
-        next_q_values_target = self.target_model(next_states_tensor).detach()
-        # Select max Q-value for next states (Double DQN would use main model here for action selection)
-        max_next_q_values = torch.max(next_q_values_target, dim=1)[0]
+        # Implement Double DQN if enabled
+        if self.use_double_q:
+            # Use main network to SELECT action
+            next_q_values_main = self.model(next_states_tensor)
+            next_actions = torch.argmax(next_q_values_main, dim=1)
+            
+            # Use target network to EVALUATE action
+            next_q_values_target = self.target_model(next_states_tensor).detach()
+            max_next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+        else:
+            # Standard DQN
+            next_q_values_target = self.target_model(next_states_tensor).detach()
+            max_next_q_values = torch.max(next_q_values_target, dim=1)[0]
         
         # Compute target Q-values: R + gamma * max_a' Q_target(s', a')
         target_q_val = rewards_tensor + self.gamma * max_next_q_values * (1 - dones_tensor)
@@ -242,18 +414,39 @@ class StrategyAgent:
         # Gather Q-values for the actions taken
         action_q_values = current_q_values.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
 
-        # Compute loss (e.g., MSELoss or SmoothL1Loss)
-        loss = F.mse_loss(action_q_values, target_q_val)
-        # loss = nn.MSELoss()(action_q_values, target_q_val)
-
+        # Compute TD errors for PER
+        td_errors = (target_q_val - action_q_values).detach().cpu().numpy()
+        
+        # Apply weights if using PER
+        if self.use_prioritized_replay:
+            # Weighted MSE loss
+            losses = weights_tensor * (target_q_val - action_q_values) ** 2
+            loss = losses.mean()
+            
+            # Update priorities with new TD errors
+            new_priorities = np.abs(td_errors) + self.prioritized_replay_epsilon
+            for idx, priority in zip(self.memory_indices, new_priorities):
+                self.priorities[idx] = priority
+        else:
+            # Standard MSE loss
+            loss = F.mse_loss(action_q_values, target_q_val)
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         
-        # logger.debug(f"Training batch complete. Loss: {loss.item()}")
-
         self._update_target_if_needed()
+        
+        # Update PER metrics
+        mean_td_error = np.mean(np.abs(td_errors))
+        mean_priority = np.mean(self.priorities[:len(self.memory)]) if self.use_prioritized_replay else 0.0
+        self.per_metrics = {
+            'td_error': mean_td_error,
+            'mean_priority': mean_priority
+        }
+        
+        if return_stats:
+            return self.per_metrics
 
     def _update_target_if_needed(self) -> None:
         """Checks the counter and updates the target network weights if the frequency is met."""
@@ -280,3 +473,12 @@ class StrategyAgent:
         # self.update_target_model() # Ensure target model is also updated
         # logger.info(f"PyTorch model loaded from {path}")
         pass # RLlib handles loading
+        
+    def get_per_metrics(self) -> Dict[str, float]:
+        """
+        Returns metrics related to Prioritized Experience Replay.
+        
+        Returns:
+            Dict containing PER metrics like TD error and mean priority
+        """
+        return self.per_metrics

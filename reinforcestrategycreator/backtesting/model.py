@@ -106,7 +106,7 @@ class ModelTrainer:
             # Create environment
             env = TradingEnvironment(env_config=env_config)
             
-            # Create agent with specified parameters
+            # Create agent with specified parameters and enhanced DQN features
             agent = RLAgent(
                 state_size=state_size,
                 action_size=action_size,
@@ -114,7 +114,14 @@ class ModelTrainer:
                 gamma=agent_params.get("gamma", 0.99),
                 epsilon=agent_params.get("epsilon", 1.0),
                 epsilon_decay=agent_params.get("epsilon_decay", 0.995),
-                epsilon_min=agent_params.get("epsilon_min", 0.01)
+                epsilon_min=agent_params.get("epsilon_min", 0.01),
+                # Enhanced DQN features
+                use_dueling=env_config_base.get("use_dueling", True),
+                use_double_q=env_config_base.get("use_double_q", True),
+                use_prioritized_replay=env_config_base.get("use_prioritized_replay", True),
+                prioritized_replay_alpha=env_config_base.get("prioritized_replay_alpha", 0.6),
+                prioritized_replay_beta=env_config_base.get("prioritized_replay_beta", 0.4),
+                prioritized_replay_beta_annealing=True
             )
             
             # Apply epsilon decay for starting episode (to match sequential training)
@@ -205,6 +212,14 @@ class ModelTrainer:
         if train_data is None or len(train_data) == 0:
             raise ValueError("No training data available")
             
+        # Update configuration to include enhanced DQN features
+        self.config["use_dueling"] = True  # Task 3.1
+        self.config["use_double_q"] = True  # Task 3.1
+        self.config["use_prioritized_replay"] = True  # Task 3.2
+        self.config["prioritized_replay_alpha"] = 0.6  # Task 3.2
+        self.config["prioritized_replay_beta"] = 0.4  # Task 3.2
+        self.config["learning_rate"] = 2e-4  # Task 3.3
+            
         self.best_params = best_params
         
         try:
@@ -247,15 +262,22 @@ class ModelTrainer:
             action_size = tmp_env.action_space.n
             logger.info(f"State size: {state_size}, Action size: {action_size}")
             
-            # Create main agent with best parameters (will be updated with experiences from parallel training)
+            # Create main agent with best parameters and enhanced DQN features
             agent = RLAgent(  # Using RLAgent alias
                 state_size=state_size,
                 action_size=action_size,
-                learning_rate=self.best_params.get("learning_rate", 0.001),
+                learning_rate=self.config.get("learning_rate", 2e-4),  # Use reduced learning rate from config
                 gamma=self.best_params.get("gamma", 0.99),
                 epsilon=self.config.get("epsilon", 1.0),
                 epsilon_decay=self.config.get("epsilon_decay", 0.995),
-                epsilon_min=self.config.get("epsilon_min", 0.01)
+                epsilon_min=self.config.get("epsilon_min", 0.01),
+                # Enhanced DQN features from config
+                use_dueling=self.config.get("use_dueling", True),
+                use_double_q=self.config.get("use_double_q", True),
+                use_prioritized_replay=self.config.get("use_prioritized_replay", True),
+                prioritized_replay_alpha=self.config.get("prioritized_replay_alpha", 0.6),
+                prioritized_replay_beta=self.config.get("prioritized_replay_beta", 0.4),
+                prioritized_replay_beta_annealing=True  # Enable beta annealing
             )
             
             # Agent parameters for consistent initialization across workers
@@ -326,10 +348,41 @@ class ModelTrainer:
             num_batches_to_train = len(agent.memory) // batch_size
             logger.info(f"Training main agent on {len(agent.memory)} experiences ({num_batches_to_train} batches)")
             
+            # Initialize metrics tracking for PER
+            per_loss_values = []
+            priority_mean_values = []
+            
             for i in range(num_batches_to_train):
-                agent.learn()
+                result = agent.learn(return_stats=True)  # Get training stats
+                
+                # Extract and track PER metrics if available
+                if isinstance(result, dict) and 'td_error' in result:
+                    per_loss_values.append(result.get('td_error', 0))
+                    priority_mean_values.append(result.get('mean_priority', 0))
+                
                 if (i + 1) % 100 == 0:
                     logger.info(f"Training progress: {i+1}/{num_batches_to_train} batches completed")
+                    if per_loss_values and priority_mean_values:
+                        logger.info(f"Recent PER metrics - Loss: {per_loss_values[-1]:.4f}, Priority Mean: {priority_mean_values[-1]:.4f}")
+            
+            # Calculate and log average PER metrics if available
+            avg_per_loss = sum(per_loss_values) / len(per_loss_values) if per_loss_values else 0.0
+            avg_priority_mean = sum(priority_mean_values) / len(priority_mean_values) if priority_mean_values else 0.0
+            logger.info(f"Training completed with avg PER Loss: {avg_per_loss:.4f}, avg Priority Mean: {avg_priority_mean:.4f}")
+            
+            # Save PER metrics to agent
+            agent.per_metrics = {
+                'td_error': avg_per_loss,
+                'mean_priority': avg_priority_mean
+            }
+            
+            # Add method to retrieve PER metrics
+            def get_per_metrics(self):
+                return getattr(self, 'per_metrics', {'td_error': 0.0, 'mean_priority': 0.0})
+            
+            # Add the method to the agent instance
+            import types
+            agent.get_per_metrics = types.MethodType(get_per_metrics, agent)
             
             # Save final model
             final_model_path = os.path.join(self.models_dir, "final_model.pth")
@@ -387,7 +440,7 @@ class ModelTrainer:
             # Create environment
             env = TradingEnvironment(env_config=env_config)
             
-            # Create agent
+            # Create agent with enhanced DQN features
             agent = RLAgent(
                 state_size=state_size,
                 action_size=action_size,
@@ -395,7 +448,14 @@ class ModelTrainer:
                 gamma=agent_params.get("gamma", 0.99),
                 epsilon=agent_params.get("epsilon_min", 0.01),  # Use minimal exploration for evaluation
                 epsilon_decay=1.0,  # No decay during evaluation
-                epsilon_min=agent_params.get("epsilon_min", 0.01)
+                epsilon_min=agent_params.get("epsilon_min", 0.01),
+                # Enhanced DQN features
+                use_dueling=env_config_base.get("use_dueling", True),
+                use_double_q=env_config_base.get("use_double_q", True),
+                use_prioritized_replay=env_config_base.get("use_prioritized_replay", True),
+                prioritized_replay_alpha=env_config_base.get("prioritized_replay_alpha", 0.6),
+                prioritized_replay_beta=env_config_base.get("prioritized_replay_beta", 0.4),
+                prioritized_replay_beta_annealing=False  # No annealing during evaluation
             )
             
             # Load model state dictionary
@@ -547,7 +607,21 @@ class ModelTrainer:
                 raise ValueError("All evaluation episodes encountered errors")
             
             # Average the metrics across all episodes
-            aggregated_metrics = {}
+            # Get PER metrics from model if available
+            per_loss = 0.0
+            priority_mean = 0.0
+            
+            # Try to extract PER metrics if the model has them
+            if hasattr(model, 'get_per_metrics'):
+                per_metrics = model.get_per_metrics()
+                per_loss = per_metrics.get('td_error', 0.0)
+                priority_mean = per_metrics.get('mean_priority', 0.0)
+                
+            aggregated_metrics = {
+                # Add PER metrics to the aggregated metrics
+                "per_loss": per_loss,
+                "priority_mean": priority_mean,
+            }
             for key in ["pnl", "sharpe_ratio", "max_drawdown", "win_rate", "trades"]:
                 values = [m.get(key, 0) for m in valid_metrics]
                 aggregated_metrics[key] = sum(values) / len(values) if values else 0

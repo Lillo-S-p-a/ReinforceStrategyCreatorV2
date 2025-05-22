@@ -42,8 +42,9 @@ IMPROVEMENT_THRESHOLD = 0.01  # Minimum improvement in Sharpe ratio to be consid
 METRICS_WINDOW_SIZE = 3  # Number of iterations to average metrics over
 
 # Environment parameters (to be passed in env_config)
-ENV_INITIAL_BALANCE = 10000.0
-ENV_TRANSACTION_FEE_PERCENT = 0.001
+ENV_INITIAL_BALANCE = 100000.0  # Increased initial capital
+ENV_COMMISSION_PCT = 0.03  # 0.03% commission
+ENV_SLIPPAGE_BPS = 3  # 3 basis points slippage (0.03%)
 ENV_WINDOW_SIZE = 5 # Default from original TradingEnv
 ENV_SHARPE_WINDOW_SIZE = 100
 ENV_DRAWDOWN_PENALTY = 0.005
@@ -54,7 +55,8 @@ ENV_USE_SHARPE_RATIO = False # As per last setting in original train.py
 ENV_NORMALIZATION_WINDOW_SIZE = 20 # Default from TradingEnv
 
 # Agent Hyperparameters for RLlib DQN
-AGENT_LEARNING_RATE = 0.001
+# Reduced learning rate for stability with PER as per task 3.3
+AGENT_LEARNING_RATE = 2e-4  # Changed from 0.001 to 2e-4
 AGENT_GAMMA = 0.90
 AGENT_BUFFER_SIZE = 10000 # RLlib default is 50000, original was 2000. Let's use a bit more.
 AGENT_TRAIN_BATCH_SIZE = 32 # RLlib default is 32
@@ -94,7 +96,8 @@ def evaluate_on_validation_data(algo, validation_data_ref):
     env_config = {
         "df": validation_data_ref,
         "initial_balance": ENV_INITIAL_BALANCE,
-        "transaction_fee_percent": ENV_TRANSACTION_FEE_PERCENT,
+        "commission_pct": ENV_COMMISSION_PCT,
+        "slippage_bps": ENV_SLIPPAGE_BPS,
         "window_size": ENV_WINDOW_SIZE,
         "sharpe_window_size": ENV_SHARPE_WINDOW_SIZE,
         "use_sharpe_ratio": ENV_USE_SHARPE_RATIO,
@@ -255,7 +258,8 @@ def main():
     env_config_params = {
         "df": training_data_ref,  # Use training data for training
         "initial_balance": ENV_INITIAL_BALANCE,
-        "transaction_fee_percent": ENV_TRANSACTION_FEE_PERCENT,
+        "commission_pct": ENV_COMMISSION_PCT,
+        "slippage_bps": ENV_SLIPPAGE_BPS,
         "window_size": ENV_WINDOW_SIZE,
         "sharpe_window_size": ENV_SHARPE_WINDOW_SIZE,
         "use_sharpe_ratio": ENV_USE_SHARPE_RATIO,
@@ -281,8 +285,13 @@ def main():
     # Define NUM_TRAINING_ITERATIONS for backward compatibility with callbacks
     NUM_TRAINING_ITERATIONS = MAX_TRAINING_ITERATIONS
 
+    # Enhanced DQN Configuration with Dueling & Double DQN and Prioritized Experience Replay
+    # as per tasks 3.1 and 3.2
     config = (
         DQNConfig()
+        # Enable Dueling & Double DQN as per task 3.1
+        .dueling(True)
+        .double_q(True)
         # New API stack is enabled by default, so removing the explicit disabling.
         .environment(env="TradingEnv-v0", env_config=env_config_params)
         .framework("torch") # Switch to PyTorch
@@ -292,16 +301,22 @@ def main():
             exploration_config={} # Use empty dict for default exploration with new API
         )
         .training(
-            lr=AGENT_LEARNING_RATE,
+            lr=AGENT_LEARNING_RATE,  # Using reduced learning rate (2e-4) for stability with PER
             gamma=AGENT_GAMMA,
             train_batch_size=AGENT_TRAIN_BATCH_SIZE,
             n_step=1, # Changed from 0 to 1 for consistency with replay buffer
+            # Enable Prioritized Experience Replay as per task 3.2
             replay_buffer_config={
-                "type": "EpisodeReplayBuffer",
+                "type": "PrioritizedReplayBuffer",  # Changed from EpisodeReplayBuffer
                 "capacity": 50000,
-                "n_step": 1, # Changed from 0 to 1 to fix empty reward list issue
+                "n_step": 1,
+                "prioritized_replay_alpha": 0.6,  # PER alpha parameter
+                "prioritized_replay_beta": 0.4,   # Starting beta value
+                "prioritized_replay_eps": 1e-6,   # Small epsilon to add to priorities
+                # Beta annealing over time to 1.0
+                "prioritized_replay_beta_annealing_timesteps": 100000,
+                "final_prioritized_replay_beta": 1.0,  # Final beta value
                 "worker_side_prioritization": False,
-                # 'store_n_step_transitions' is intentionally removed/False
             },
             target_network_update_freq=AGENT_TARGET_NETWORK_UPDATE_FREQ_TIMESTEPS
             # Model config now under .rl_module()
@@ -343,7 +358,8 @@ def main():
         "agent_epsilon_timesteps": AGENT_EPSILON_TIMESTEPS,
         # Env params
         "env_initial_balance": ENV_INITIAL_BALANCE,
-        "env_transaction_fee": ENV_TRANSACTION_FEE_PERCENT,
+        "env_commission_pct": ENV_COMMISSION_PCT,
+        "env_slippage_bps": ENV_SLIPPAGE_BPS,
         "env_window_size": ENV_WINDOW_SIZE,
         "env_sharpe_window_size": ENV_SHARPE_WINDOW_SIZE,
         "env_drawdown_penalty": ENV_DRAWDOWN_PENALTY,
@@ -418,6 +434,7 @@ def main():
             logger.info(pretty_print(result))
             
             # Extract training metrics
+            # Add PER loss and priority mean as per task 3.4
             training_metrics = {
                 'iteration': current_iteration,
                 'episode_reward_mean': result.get('episode_reward_mean', 0),
@@ -426,13 +443,18 @@ def main():
                 'episode_len_mean': result.get('episode_len_mean', 0),
                 'episodes_this_iter': result.get('episodes_this_iter', 0),
                 'episodes_total': result.get('episodes_total', 0),
+                # Add PER metrics
+                'per_loss': result.get('info', {}).get('learner', {}).get('default_policy', {}).get('learner_stats', {}).get('td_error', 0),
+                'priority_mean': result.get('info', {}).get('learner', {}).get('default_policy', {}).get('learner_stats', {}).get('mean_priority', 0),
             }
             training_metrics_history.append(training_metrics)
             
             # Log training metrics
             logger.info(f"Training metrics: Reward Mean={training_metrics['episode_reward_mean']:.4f}, "
                         f"Episodes={training_metrics['episodes_this_iter']}, "
-                        f"Total Episodes={training_metrics['episodes_total']}")
+                        f"Total Episodes={training_metrics['episodes_total']}, "
+                        f"PER Loss={training_metrics['per_loss']:.4f}, "
+                        f"Priority Mean={training_metrics['priority_mean']:.4f}")
             
             # Evaluate on validation data
             validation_metrics = evaluate_on_validation_data(algo, validation_data_ref)

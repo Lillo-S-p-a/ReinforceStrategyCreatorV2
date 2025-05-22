@@ -36,6 +36,10 @@ class TradingEnv(gym.Env):
     
     # Class-level attribute for system-wide graceful shutdown signaling
     _system_wide_graceful_shutdown_active = False
+    
+    # Class-level constants for inactivity tracking
+    MAX_INACTIVITY_STEPS = 20  # Maximum number of steps to track inactivity
+    INACTIVITY_PENALTY_FACTOR = 0.0008  # Per-step penalty factor
         
     def __init__(self, env_config: dict):
         """
@@ -46,6 +50,8 @@ class TradingEnv(gym.Env):
                 df (ray.ObjectRef): Ray object reference to the historical market data DataFrame.
                 initial_balance (float): Initial account balance.
                 transaction_fee_percent (float): Fee percentage for each transaction.
+                commission_pct (float): Commission percentage for each trade.
+                slippage_bps (int): Slippage in basis points (1 bp = 0.01%).
                 window_size (int): Number of time steps for observation.
                 sharpe_window_size (int): Window for Sharpe ratio calculation.
                 use_sharpe_ratio (bool): Whether to use Sharpe ratio for reward.
@@ -77,15 +83,17 @@ class TradingEnv(gym.Env):
                 logger.error(f"Error retrieving DataFrame from Ray object store: {e}")
                 raise ValueError(f"Invalid DataFrame reference: {e}")
 
-        self.initial_balance = env_config.get("initial_balance", 10000.0)
-        self.transaction_fee_percent = env_config.get("transaction_fee_percent", 0.1)
+        self.initial_balance = env_config.get("initial_balance", 100000.0)  # Increased default capital
+        self.transaction_fee_percent = env_config.get("transaction_fee_percent", 0.1)  # Kept for backward compatibility
+        self.commission_pct = env_config.get("commission_pct", 0.03)  # New commission as a separate parameter
+        self.slippage_bps = env_config.get("slippage_bps", 3)  # Slippage in basis points (1 bp = 0.01%)
         self.window_size = env_config.get("window_size", 5)
         self.sharpe_window_size = env_config.get("sharpe_window_size", 20)
-        self.use_sharpe_ratio = env_config.get("use_sharpe_ratio", True)
+        self.use_sharpe_ratio = env_config.get("use_sharpe_ratio", True)  # Enabled by default
         # Replace trading penalty with incentive parameters
-        self.trading_incentive_base = env_config.get("trading_incentive_base", 0.001)
-        self.trading_incentive_profitable = env_config.get("trading_incentive_profitable", 0.005)
-        self.drawdown_penalty = env_config.get("drawdown_penalty", 0.1)
+        self.trading_incentive_base = env_config.get("trading_incentive_base", 0.0005)  # Reduced base incentive
+        self.trading_incentive_profitable = env_config.get("trading_incentive_profitable", 0.001)  # Reduced profitable trade multiplier
+        self.drawdown_penalty = env_config.get("drawdown_penalty", 0.002)  # Recalibrated to 0.002
         self.risk_free_rate = env_config.get("risk_free_rate", 0.0)
         self.stop_loss_pct = env_config.get("stop_loss_pct", None)
         self.take_profit_pct = env_config.get("take_profit_pct", None)
@@ -116,6 +124,10 @@ class TradingEnv(gym.Env):
         self._entry_step = 0        # Step at which the current position was entered
         self._trade_count = 0       # Count of trades in the current episode
         
+        # Tracking for inactivity penalty and streak bonus
+        self._steps_since_last_trade = 0  # Steps since last trade (for inactivity penalty)
+        self._consecutive_trading_periods = 0  # Count of consecutive periods with trading (for streak bonus)
+        self._ideal_trades_per_period = env_config.get("ideal_trades_per_period", 5)  # Target trades per period
         # Portfolio value history for Sharpe ratio calculation
         self._portfolio_value_history = deque(maxlen=self.sharpe_window_size) # Corrected
         self._portfolio_returns = deque(maxlen=self.sharpe_window_size)  # Corrected: Store returns for Sharpe ratio
@@ -142,7 +154,7 @@ class TradingEnv(gym.Env):
             low=-np.inf, high=np.inf, shape=(total_features,), dtype=np.float32
         )
         
-        logger.info(f"TradingEnv initialized with {len(self.df)} data points (including indicators) and initial balance {self.initial_balance}") # Corrected
+        logger.info(f"TradingEnv initialized with {len(self.df)} data points (including indicators), initial balance {self.initial_balance}, commission {self.commission_pct}%, slippage {self.slippage_bps} bps")
  
         self.graceful_shutdown_signaled = False # Added for graceful shutdown
         self.cached_final_info_for_callback = None # Cache for the last info dict of a completed episode
@@ -199,6 +211,8 @@ class TradingEnv(gym.Env):
         self.episode_max_drawdown = 0.0 # Reset for new episode
         self._episode_total_reward = 0.0 # Reset episode total reward
         self._episode_steps = 0 # Reset episode steps
+        self._steps_since_last_trade = 0  # Reset inactivity counter
+        self._consecutive_trading_periods = 0  # Reset streak counter
         self.graceful_shutdown_signaled = False # Reset instance flag on environment reset
         self.cached_final_info_for_callback = None # Clear cached info on reset
  
@@ -390,6 +404,20 @@ class TradingEnv(gym.Env):
 
         # --- Execute Trade Action (potentially overridden by SL/TP) and get operation details ---
         # _execute_trade_action will now return details about the operation performed
+        # Check if this action results in a trade
+        trade_occurred = False
+        if (action == 1 and self.current_position != 1) or (action == 2 and self.current_position != -1) or (action == 0 and self.current_position != 0):
+            trade_occurred = True
+            self._steps_since_last_trade = 0  # Reset inactivity counter on trade
+            # Update consecutive trading periods if we reach the ideal trade count in a period
+            if self._trade_count % self._ideal_trades_per_period == 0 and self._trade_count > 0:
+                self._consecutive_trading_periods += 1
+        else:
+            self._steps_since_last_trade += 1  # Increment inactivity counter
+            # Reset consecutive trading periods if we go too long without trading
+            if self._steps_since_last_trade > self.MAX_INACTIVITY_STEPS:
+                self._consecutive_trading_periods = 0
+
         operation_details_for_log = self._execute_trade_action(action)
         # operation_details_for_log should be a dict like:
         # {'operation_type_for_log': OperationType.ENTRY_LONG, 'shares_transacted_this_step': X, 'execution_price_this_step': Y}
@@ -634,17 +662,28 @@ class TradingEnv(gym.Env):
                     shares_to_buy = int(max_shares_possible)
                     logger.debug(f"Position Sizing (All In): Max Shares={shares_to_buy}")
 
-                # Ensure we don't try to buy more than we can afford after fees
-                cost_per_share_with_fee = self.current_price * (1 + self.transaction_fee_percent / 100)
-                affordable_shares = int(self.balance / cost_per_share_with_fee)
+                # Ensure we don't try to buy more than we can afford after fees and slippage
+                # Calculate slippage and commission separately
+                slippage_factor = self.slippage_bps / 10000  # Convert basis points to decimal
+                commission_factor = self.commission_pct / 100  # Convert percentage to decimal
+                
+                # Calculate effective price with slippage (higher for buys)
+                effective_price = self.current_price * (1 + slippage_factor)
+                
+                # Calculate total cost per share including effective price and commission
+                cost_per_share_with_fees = effective_price * (1 + commission_factor)
+                
+                affordable_shares = int(self.balance / cost_per_share_with_fees)
                 shares_to_buy = min(shares_to_buy, affordable_shares) # Take the minimum
 
                 # Check if we can buy at least 1 share
                 if shares_to_buy > 0:
-                    # Calculate the cost including fees
-                    cost = shares_to_buy * self.current_price
-                    transaction_fee = cost * (self.transaction_fee_percent / 100)
-                    total_cost = cost + transaction_fee
+                    # Calculate components separately for clarity and logging
+                    base_cost = shares_to_buy * self.current_price
+                    slippage_cost = base_cost * slippage_factor
+                    effective_cost = base_cost + slippage_cost
+                    commission = effective_cost * commission_factor
+                    total_cost = effective_cost + commission
 
                     # Update balance and shares
                     self.balance -= total_cost
@@ -660,8 +699,8 @@ class TradingEnv(gym.Env):
                         'execution_price_this_step': self.current_price
                     }
  
-                    logger.debug(f"Flat -> Long: Bought {shares_to_buy} shares at {self.current_price:.2f} each, "
-                                f"total cost: {total_cost:.2f} (including fee: {transaction_fee:.2f})")
+                    logger.debug(f"Flat -> Long: Bought {shares_to_buy} shares at {effective_price:.2f} each, "
+                                f"total cost: {total_cost:.2f} (slippage: {slippage_cost:.2f}, commission: {commission:.2f})")
                 else:
                     logger.debug("Flat -> Long: Cannot buy shares (insufficient funds or zero shares calculated).")
 
@@ -669,16 +708,20 @@ class TradingEnv(gym.Env):
                 # First, cover the short position
                 shares_covered_in_reversal = 0
                 if self.shares_held < 0:
-                    # Calculate the cost to buy back shares including fees
-                    cover_cost = abs(self.shares_held) * self.current_price
-                    cover_fee = cover_cost * (self.transaction_fee_percent / 100)
-                    total_cover_cost = cover_cost + cover_fee
+                    # Calculate slippage for buying back shares (higher price for covering shorts)
+                    slippage_factor = self.slippage_bps / 10000  # Convert basis points to decimal
+                    effective_price = self.current_price * (1 + slippage_factor)
+                    
+                    # Calculate costs
+                    cover_cost = abs(self.shares_held) * effective_price
+                    commission = cover_cost * (self.commission_pct / 100)
+                    total_cover_cost = cover_cost + commission
                     
                     # Check if we have enough balance to cover
                     if self.balance >= total_cover_cost:
                         # Calculate Profit/Loss for the closed short position
                         shares_covered_in_reversal = abs(self.shares_held)
-                        pnl = (self._entry_price - self.current_price) * shares_covered_in_reversal - cover_fee
+                        pnl = (self._entry_price - effective_price) * shares_covered_in_reversal - commission
                         
                         # Record completed trade
                         entry_time = self.df.index[self._entry_step]
@@ -693,15 +736,15 @@ class TradingEnv(gym.Env):
                             'quantity': shares_covered_in_reversal,      # Use 'quantity'
                             'direction': 'short',            # Use 'direction'
                             'pnl': pnl,                      # Use 'pnl'
-                            'costs': cover_fee               # Use 'costs'
+                            'costs': commission               # Use 'costs'
                         }
                         self._completed_trades.append(trade_details)
                         
                         # Update balance after covering
                         self.balance -= total_cover_cost
                         
-                        logger.debug(f"Short -> Long (Step 1): Covered {shares_covered_in_reversal} shares at {self.current_price} each, "
-                                   f"total cost: {total_cover_cost} (including fee: {cover_fee}), PnL: {pnl}")
+                        logger.debug(f"Short -> Long (Step 1): Covered {shares_covered_in_reversal} shares at {effective_price:.2f} each, "
+                                   f"total cost: {total_cover_cost:.2f} (slippage impact: {slippage_factor*100:.3f}%, commission: {commission:.2f}), PnL: {pnl:.2f}")
                         
                         self.shares_held = 0
                         self._entry_price = 0.0 # Reset entry price/step after closing short
@@ -728,16 +771,20 @@ class TradingEnv(gym.Env):
                             shares_to_buy = int(max_shares_possible)
                             logger.debug(f"Position Sizing (All In): Max Shares={shares_to_buy}")
 
-                        # Ensure affordability
-                        cost_per_share_with_fee = self.current_price * (1 + self.transaction_fee_percent / 100)
-                        affordable_shares = int(self.balance / cost_per_share_with_fee)
+                        # Ensure affordability with slippage and commission
+                        slippage_factor = self.slippage_bps / 10000  # Convert basis points to decimal
+                        effective_price = self.current_price * (1 + slippage_factor)
+                        cost_per_share_with_fees = effective_price * (1 + self.commission_pct / 100)
+                        affordable_shares = int(self.balance / cost_per_share_with_fees)
                         shares_to_buy = min(shares_to_buy, affordable_shares)
 
                         if shares_to_buy > 0:
-                            # Calculate the cost including fees
-                            buy_cost = shares_to_buy * self.current_price
-                            buy_fee = buy_cost * (self.transaction_fee_percent / 100)
-                            total_buy_cost = buy_cost + buy_fee
+                            # Calculate components separately
+                            base_cost = shares_to_buy * self.current_price
+                            slippage_cost = base_cost * slippage_factor
+                            effective_cost = base_cost + slippage_cost
+                            commission = effective_cost * (self.commission_pct / 100)
+                            total_buy_cost = effective_cost + commission
 
                             # Update balance and shares
                             self.balance -= total_buy_cost
@@ -754,8 +801,8 @@ class TradingEnv(gym.Env):
                                 'execution_price_this_step': self.current_price
                             }
  
-                            logger.debug(f"Short -> Long (Step 2): Bought {shares_to_buy} shares at {self.current_price:.2f} each, "
-                                       f"total cost: {total_buy_cost:.2f} (including fee: {buy_fee:.2f})")
+                            logger.debug(f"Short -> Long (Step 2): Bought {shares_to_buy} shares at {effective_price:.2f} each, "
+                                       f"total cost: {total_buy_cost:.2f} (slippage: {slippage_cost:.2f}, commission: {commission:.2f})")
                         else:
                             # If we can't buy any shares after covering, we're just flat
                             self.current_position = 0
@@ -797,10 +844,14 @@ class TradingEnv(gym.Env):
 
                 # Basic check: Ensure we have some balance to act as margin (simplistic)
                 if shares_to_short > 0 and self.balance > 0:
+                    # Calculate slippage for shorting (lower price for sells/shorts)
+                    slippage_factor = self.slippage_bps / 10000  # Convert basis points to decimal
+                    effective_price = self.current_price * (1 - slippage_factor)
+                    
                     # Calculate the proceeds from shorting
-                    proceeds = shares_to_short * self.current_price
-                    transaction_fee = proceeds * (self.transaction_fee_percent / 100)
-                    total_proceeds = proceeds - transaction_fee
+                    proceeds = shares_to_short * effective_price
+                    commission = proceeds * (self.commission_pct / 100)
+                    total_proceeds = proceeds - commission
 
                     # Update balance and shares (negative shares for short)
                     self.balance += total_proceeds # Add proceeds (margin increases)
@@ -816,8 +867,8 @@ class TradingEnv(gym.Env):
                         'execution_price_this_step': self.current_price
                     }
  
-                    logger.debug(f"Flat -> Short: Sold short {shares_to_short} shares at {self.current_price:.2f} each, "
-                                f"total proceeds: {total_proceeds:.2f} (after fee: {transaction_fee:.2f})")
+                    logger.debug(f"Flat -> Short: Sold short {shares_to_short} shares at {effective_price:.2f} each, "
+                                f"total proceeds: {total_proceeds:.2f} (slippage impact: {slippage_factor*100:.3f}%, commission: {commission:.2f})")
                 else:
                      logger.debug("Flat -> Short: Cannot short shares (zero shares calculated or zero balance).")
 
@@ -825,14 +876,18 @@ class TradingEnv(gym.Env):
                 # First, sell all long shares
                 shares_sold_in_reversal = 0
                 if self.shares_held > 0:
+                    # Calculate slippage for selling (lower price for sells)
+                    slippage_factor = self.slippage_bps / 10000  # Convert basis points to decimal
+                    effective_price = self.current_price * (1 - slippage_factor)
+                    
                     # Calculate the revenue including fees
-                    revenue = self.shares_held * self.current_price
-                    sell_fee = revenue * (self.transaction_fee_percent / 100)
-                    total_revenue = revenue - sell_fee
+                    revenue = self.shares_held * effective_price
+                    commission = revenue * (self.commission_pct / 100)
+                    total_revenue = revenue - commission
                     
                     # Calculate Profit/Loss for the closed long position
                     shares_sold_in_reversal = self.shares_held
-                    pnl = (self.current_price - self._entry_price) * shares_sold_in_reversal - sell_fee
+                    pnl = (effective_price - self._entry_price) * shares_sold_in_reversal - commission
                     
                     # Record completed trade
                     entry_time = self.df.index[self._entry_step]
@@ -847,15 +902,15 @@ class TradingEnv(gym.Env):
                         'quantity': shares_sold_in_reversal,         # Use 'quantity'
                         'direction': 'long',             # Use 'direction'
                         'pnl': pnl,                      # Use 'pnl'
-                        'costs': sell_fee                # Use 'costs'
+                        'costs': commission              # Use 'costs'
                     }
                     self._completed_trades.append(trade_details)
                     
                     # Update balance after selling
                     self.balance += total_revenue
                     
-                    logger.debug(f"Long -> Short (Step 1): Sold {shares_sold_in_reversal} shares at {self.current_price} each, "
-                                f"total revenue: {total_revenue} (after fee: {sell_fee}), PnL: {pnl}")
+                    logger.debug(f"Long -> Short (Step 1): Sold {shares_sold_in_reversal} shares at {effective_price:.2f} each, "
+                                f"total revenue: {total_revenue:.2f} (slippage impact: {slippage_factor*100:.3f}%, commission: {commission:.2f}), PnL: {pnl:.2f}")
                     
                     self.shares_held = 0
                     self._entry_price = 0.0 # Reset entry price/step after closing long
@@ -884,10 +939,14 @@ class TradingEnv(gym.Env):
                         logger.debug(f"Position Sizing (All In): Max Shares={shares_to_short}")
 
                     if shares_to_short > 0 and self.balance > 0:
+                        # Calculate slippage for shorting (lower price for sells/shorts)
+                        slippage_factor = self.slippage_bps / 10000  # Convert basis points to decimal
+                        effective_price = self.current_price * (1 - slippage_factor)
+                        
                         # Calculate the proceeds from shorting
-                        proceeds = shares_to_short * self.current_price
-                        short_fee = proceeds * (self.transaction_fee_percent / 100)
-                        total_proceeds = proceeds - short_fee
+                        proceeds = shares_to_short * effective_price
+                        commission = proceeds * (self.commission_pct / 100)
+                        total_proceeds = proceeds - commission
 
                         # Update balance and shares
                         self.balance += total_proceeds
@@ -904,8 +963,8 @@ class TradingEnv(gym.Env):
                             'execution_price_this_step': self.current_price
                         }
  
-                        logger.debug(f"Long -> Short (Step 2): Sold short {shares_to_short} shares at {self.current_price:.2f} each, "
-                                    f"total proceeds: {total_proceeds:.2f} (after fee: {short_fee:.2f})")
+                        logger.debug(f"Long -> Short (Step 2): Sold short {shares_to_short} shares at {effective_price:.2f} each, "
+                                    f"total proceeds: {total_proceeds:.2f} (slippage impact: {slippage_factor*100:.3f}%, commission: {commission:.2f})")
                     else:
                         # If we can't short any shares after selling, we're just flat
                         self.current_position = 0
@@ -991,33 +1050,55 @@ class TradingEnv(gym.Env):
             # If not using Sharpe ratio or not enough history, use percentage change
             risk_adjusted_return = percentage_change
         
-        # Component 2: Trading incentive (was a penalty before)
-        # Reward based on the number of trades in this episode to encourage trading activity
-        # A small constant incentive for each trade plus a multiplier for profitable trades
-        profitable_trades = sum(1 for trade in self._completed_trades if trade.get('pnl', 0) > 0)
+        # Component 2: Simpler trade reward based on PnL relative to initial balance and risk fraction
+        # Calculate the total PnL from trades in this step
+        current_step_pnl = 0
+        for trade in self._completed_trades:
+            # Only consider trades completed in the current step
+            if trade.get('exit_step') == self.current_step:
+                current_step_pnl += trade.get('pnl', 0)
+        
+        # New formula: trade_reward = pnl / initial_balance * risk_fraction
+        # This scales the reward by the proportion of capital risked
+        if current_step_pnl != 0:
+            trade_reward = current_step_pnl / self.initial_balance * self.risk_fraction
+        else:
+            trade_reward = 0
+        
+        # Maintain a small base incentive for trading activity
         trading_incentive = self.trading_incentive_base * self._trade_count
         
-        # Additional incentive for profitable trades
+        # Add small incentive for profitable trades based on win rate
+        profitable_trades = sum(1 for trade in self._completed_trades if trade.get('pnl', 0) > 0)
         if self._completed_trades:
             win_rate = profitable_trades / len(self._completed_trades) if len(self._completed_trades) > 0 else 0.0
-            # Quadratic scaling to reward high win rates more significantly
-            trading_incentive += self.trading_incentive_profitable * win_rate * win_rate * self._trade_count
+            # Linear scaling (removed quadratic scaling) with reduced multiplier
+            trading_incentive += self.trading_incentive_profitable * win_rate * self._trade_count
+        
+        # Combine trade-based rewards
+        trading_incentive += trade_reward
+            
+        # Inactivity penalty - increases with steps without trading
+        # This creates a soft pressure to trade more frequently
+        inactivity_penalty = min(0.05, self.INACTIVITY_PENALTY_FACTOR * self._steps_since_last_trade)  # Cap at 0.05
         
         # Component 3: Drawdown penalty
         # Calculate current drawdown as percentage from peak
         if self.max_portfolio_value > 0:
             current_drawdown = max(0, (self.max_portfolio_value - self.portfolio_value) / self.max_portfolio_value)
             self.episode_max_drawdown = max(self.episode_max_drawdown, current_drawdown) # Track max drawdown for episode
+            # Drawdown penalty recalibrated to be more sensitive
             drawdown_penalty = self.drawdown_penalty * current_drawdown
         else:
             drawdown_penalty = 0
         
         # Combine all components into final reward
-        reward = risk_adjusted_return + trading_incentive - drawdown_penalty
+        reward = risk_adjusted_return + trading_incentive - drawdown_penalty - inactivity_penalty
         
         logger.debug(f"Reward components: risk_adjusted={risk_adjusted_return:.6f}, "
-                   f"trading_incentive={trading_incentive:.6f}, drawdown_penalty={drawdown_penalty:.6f}, "
-                   f"final_reward={reward:.6f}")
+                   f"trading_incentive={trading_incentive:.6f}, trade_reward={trade_reward:.6f}, "
+                   f"drawdown_penalty={drawdown_penalty:.6f}, inactivity_penalty={inactivity_penalty:.6f}, "
+                   f"consecutive_periods={self._consecutive_trading_periods}, final_reward={reward:.6f}")
         
         return reward
     
