@@ -61,10 +61,20 @@ class TradingEnv(gym.Env):
         super(TradingEnv, self).__init__()
 
         # Extract parameters from env_config
-        # Retrieve the DataFrame from the Ray object store
+        # Handle both direct DataFrame and Ray object references
         data_ref = env_config["df"]
-        self.df = ray.get(data_ref)
-        logger.info(f"TradingEnv instance retrieved DataFrame from Ray object store.")
+        if isinstance(data_ref, pd.DataFrame):
+            # Direct DataFrame object (no Ray object reference)
+            self.df = data_ref
+            logger.info(f"TradingEnv instance using direct DataFrame (no Ray object reference).")
+        else:
+            # Assume it's a Ray object reference
+            try:
+                self.df = ray.get(data_ref)
+                logger.info(f"TradingEnv instance retrieved DataFrame from Ray object store.")
+            except Exception as e:
+                logger.error(f"Error retrieving DataFrame from Ray object store: {e}")
+                raise ValueError(f"Invalid DataFrame reference: {e}")
 
         self.initial_balance = env_config.get("initial_balance", 10000.0)
         self.transaction_fee_percent = env_config.get("transaction_fee_percent", 0.1)
@@ -79,8 +89,12 @@ class TradingEnv(gym.Env):
         self.position_sizing_method = env_config.get("position_sizing_method", "fixed_fractional")
         self.risk_fraction = env_config.get("risk_fraction", 0.1)
         self.normalization_window_size = env_config.get("normalization_window_size", 20)
-
-
+        
+        # Dynamic position sizing parameters
+        self.use_dynamic_sizing = env_config.get("use_dynamic_sizing", False)
+        self.min_risk_fraction = env_config.get("min_risk_fraction", 0.05)  # Minimum 5% of capital
+        self.max_risk_fraction = env_config.get("max_risk_fraction", 0.20)  # Maximum 20% of capital
+        self._current_confidence = None  # Will be updated in step() if confidence is provided
 
         # Placeholder for current step in the environment
         self.current_step = 0
@@ -270,12 +284,14 @@ class TradingEnv(gym.Env):
         logger.info(f"Environment reset - Starting at step {self.current_step}")
         return observation, info
     
-    def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
+    def step(self, action: int, confidence: float = None) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
         """
-        Take a step in the environment based on the given action.
+        Take a step in the environment based on the given action and confidence.
         
         Args:
             action (int): The action to take (0 = Flat, 1 = Long, 2 = Short).
+            confidence (float, optional): Model's confidence score for the action (0-1).
+                When provided, used for dynamic position sizing.
             
         Returns:
             Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
@@ -287,6 +303,9 @@ class TradingEnv(gym.Env):
         """
         # Save the last portfolio value for reward calculation
         self.last_portfolio_value = self.portfolio_value
+        
+        # Store the confidence for use in _execute_trade_action
+        self._current_confidence = confidence
 
         # Move to the next time step
         self.current_step += 1
@@ -590,9 +609,22 @@ class TradingEnv(gym.Env):
             if prev_position == 0:  # Flat -> Long (Buy shares)
                 # --- Position Sizing ---
                 if self.position_sizing_method == "fixed_fractional":
-                    target_position_value = self.balance * self.risk_fraction
-                    shares_to_buy = int(target_position_value / self.current_price)
-                    logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_buy}")
+                    # Check if we should use dynamic sizing based on confidence
+                    if self.use_dynamic_sizing and self._current_confidence is not None:
+                        # Scale risk fraction based on confidence
+                        # Higher confidence = higher risk fraction (more allocation)
+                        dynamic_risk = self._calculate_dynamic_risk_fraction(self._current_confidence)
+                        target_position_value = self.balance * dynamic_risk
+                        shares_to_buy = int(target_position_value / self.current_price)
+                        logger.debug(f"Dynamic Position Sizing: Confidence={self._current_confidence:.2f}, "
+                                    f"Risk Fraction={dynamic_risk:.2f}, Target Value={target_position_value:.2f}, "
+                                    f"Shares={shares_to_buy}")
+                    else:
+                        # Standard fixed fractional sizing
+                        target_position_value = self.balance * self.risk_fraction
+                        shares_to_buy = int(target_position_value / self.current_price)
+                        logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, "
+                                    f"Shares={shares_to_buy}")
                 else: # Default to 'all_in' or handle other methods
                     # Calculate maximum shares that can be bought (original 'all_in' logic)
                     max_shares_possible = self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100))
@@ -674,9 +706,20 @@ class TradingEnv(gym.Env):
                         
                         # Then, buy shares with remaining balance using position sizing
                         if self.position_sizing_method == "fixed_fractional":
-                            target_position_value = self.balance * self.risk_fraction
-                            shares_to_buy = int(target_position_value / self.current_price)
-                            logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_buy}")
+                            # Check if we should use dynamic sizing based on confidence
+                            if self.use_dynamic_sizing and self._current_confidence is not None:
+                                # Scale risk fraction based on confidence
+                                dynamic_risk = self._calculate_dynamic_risk_fraction(self._current_confidence)
+                                target_position_value = self.balance * dynamic_risk
+                                shares_to_buy = int(target_position_value / self.current_price)
+                                logger.debug(f"Dynamic Position Sizing (Short->Long): Confidence={self._current_confidence:.2f}, "
+                                            f"Risk Fraction={dynamic_risk:.2f}, Target Value={target_position_value:.2f}, "
+                                            f"Shares={shares_to_buy}")
+                            else:
+                                # Standard fixed fractional sizing
+                                target_position_value = self.balance * self.risk_fraction
+                                shares_to_buy = int(target_position_value / self.current_price)
+                                logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_buy}")
                         else: # Default to 'all_in'
                             max_shares_possible = self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100))
                             shares_to_buy = int(max_shares_possible)
@@ -727,10 +770,22 @@ class TradingEnv(gym.Env):
             if prev_position == 0:  # Flat -> Short (Sell short)
                 # --- Position Sizing ---
                 if self.position_sizing_method == "fixed_fractional":
-                    # For shorting, the 'value' is based on the potential proceeds
-                    target_position_value = self.balance * self.risk_fraction # Use balance as proxy for capital base
-                    shares_to_short = int(target_position_value / self.current_price)
-                    logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_short}")
+                    # Check if we should use dynamic sizing based on confidence
+                    if self.use_dynamic_sizing and self._current_confidence is not None:
+                        # Scale risk fraction based on confidence
+                        dynamic_risk = self._calculate_dynamic_risk_fraction(self._current_confidence)
+                        # For shorting, the 'value' is based on the potential proceeds
+                        target_position_value = self.balance * dynamic_risk # Use balance as proxy for capital base
+                        shares_to_short = int(target_position_value / self.current_price)
+                        logger.debug(f"Dynamic Position Sizing (Short): Confidence={self._current_confidence:.2f}, "
+                                    f"Risk Fraction={dynamic_risk:.2f}, Target Value={target_position_value:.2f}, "
+                                    f"Shares={shares_to_short}")
+                    else:
+                        # Standard fixed fractional sizing
+                        target_position_value = self.balance * self.risk_fraction # Use balance as proxy for capital base
+                        shares_to_short = int(target_position_value / self.current_price)
+                        logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, "
+                                    f"Shares={shares_to_short}")
                 else: # Default to 'all_in'
                     # Mirroring long logic for simplicity: short the amount we *could* buy
                     buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
@@ -805,9 +860,21 @@ class TradingEnv(gym.Env):
                     
                     # Then, short shares using position sizing
                     if self.position_sizing_method == "fixed_fractional":
-                        target_position_value = self.balance * self.risk_fraction
-                        shares_to_short = int(target_position_value / self.current_price)
-                        logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, Shares={shares_to_short}")
+                        # Check if we should use dynamic sizing based on confidence
+                        if self.use_dynamic_sizing and self._current_confidence is not None:
+                            # Scale risk fraction based on confidence
+                            dynamic_risk = self._calculate_dynamic_risk_fraction(self._current_confidence)
+                            target_position_value = self.balance * dynamic_risk
+                            shares_to_short = int(target_position_value / self.current_price)
+                            logger.debug(f"Dynamic Position Sizing (Long->Short): Confidence={self._current_confidence:.2f}, "
+                                        f"Risk Fraction={dynamic_risk:.2f}, Target Value={target_position_value:.2f}, "
+                                        f"Shares={shares_to_short}")
+                        else:
+                            # Standard fixed fractional sizing
+                            target_position_value = self.balance * self.risk_fraction
+                            shares_to_short = int(target_position_value / self.current_price)
+                            logger.debug(f"Position Sizing (Fixed Fractional): Target Value={target_position_value:.2f}, "
+                                        f"Shares={shares_to_short}")
                     else: # Default to 'all_in'
                         buyable_shares = int(self.balance / (self.current_price * (1 + self.transaction_fee_percent / 100)))
                         shares_to_short = buyable_shares
@@ -848,6 +915,30 @@ class TradingEnv(gym.Env):
                         }
         
         return operation_log_details
+        
+    def _calculate_dynamic_risk_fraction(self, confidence: float) -> float:
+        """
+        Calculate a dynamic risk fraction based on the model's confidence score.
+        
+        Higher confidence values result in larger position sizes (higher risk fraction).
+        
+        Args:
+            confidence (float): Model's confidence score (0-1).
+            
+        Returns:
+            float: Calculated risk fraction between min_risk_fraction and max_risk_fraction.
+        """
+        # Ensure confidence is within valid range
+        confidence = max(0.0, min(1.0, confidence))
+        
+        # Calculate risk fraction by scaling between min and max risk
+        # Linear scaling: min_risk + confidence * (max_risk - min_risk)
+        dynamic_risk = self.min_risk_fraction + confidence * (self.max_risk_fraction - self.min_risk_fraction)
+        
+        logger.debug(f"Dynamic risk calculation: Confidence={confidence:.3f}, Risk Fraction={dynamic_risk:.3f} "
+                    f"(Range: {self.min_risk_fraction:.3f}-{self.max_risk_fraction:.3f})")
+        
+        return dynamic_risk
 
     def _calculate_reward(self) -> float:
         """

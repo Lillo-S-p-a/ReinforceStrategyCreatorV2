@@ -7,6 +7,8 @@ potential improvements to the reinforcement learning trading model.
 
 import os
 import logging
+import ray
+import time
 import matplotlib.pyplot as plt
 from datetime import datetime
 
@@ -22,7 +24,28 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Run the improved backtesting workflow."""
-    logger.info("Starting improved backtesting workflow")
+    start_time = time.time()
+    logger.info("Starting improved backtesting workflow with enhanced Ray parallelization")
+    
+    # Enhanced parallelization to better utilize 63 available cores:
+    # 1. Increased CV folds from 5 to 20
+    # 2. Removed 8-CPU limitation in model training
+    # 3. Added dynamic scaling of evaluation episodes
+    # 4. Increased batches per CPU from 2 to 4
+    
+    # Initialize Ray for distributed processing
+    if not ray.is_initialized():
+        # Get available CPUs, but leave 1 for the main process
+        num_cpus = os.cpu_count()
+        cpus_to_use = max(num_cpus - 1, 1) if num_cpus else 2
+        
+        logger.info(f"Initializing Ray with {cpus_to_use} CPUs")
+        ray.init(
+            num_cpus=cpus_to_use,
+            ignore_reinit_error=True,
+            log_to_driver=True,
+            include_dashboard=False  # Disable dashboard for simplicity
+        )
     
     # Create results directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -48,6 +71,9 @@ def main():
         # Position Sizing Configuration
         "position_sizing_method": "fixed_fractional", # Options: fixed_fractional, all_in
         "risk_fraction": 0.1,          # Risk 10% of capital per trade for fixed_fractional method
+        "use_dynamic_sizing": True,    # Enable dynamic position sizing based on model confidence
+        "min_risk_fraction": 0.05,     # Minimum risk (5% of capital) for low confidence trades
+        "max_risk_fraction": 0.20,     # Maximum risk (20% of capital) for high confidence trades
         
         # Training parameters
         "episodes": 150,               # More episodes for cross-validation
@@ -76,7 +102,7 @@ def main():
         asset="SPY",
         start_date="2018-01-01",       # Extended training period
         end_date="2024-12-31",         # Esteso fino a fine 2024 per testare in diverse condizioni di mercato
-        cv_folds=5,
+        cv_folds=20,                   # Aumentato da 5 a 20 per sfruttare meglio i core disponibili
         test_ratio=0.2,
         random_seed=42
     )
@@ -137,16 +163,27 @@ def main():
     # Position Sizing Information
     position_sizing_method = improved_config.get('position_sizing_method', 'fixed_fractional')
     risk_fraction = improved_config.get('risk_fraction', 0.1)
+    use_dynamic_sizing = improved_config.get('use_dynamic_sizing', False)
+    min_risk_fraction = improved_config.get('min_risk_fraction', 0.05)
+    max_risk_fraction = improved_config.get('max_risk_fraction', 0.20)
     
     logger.info(f"Position Sizing Method: {position_sizing_method}")
     if position_sizing_method == 'fixed_fractional':
-        logger.info(f"Risk Fraction (% of capital per trade): {risk_fraction * 100:.1f}%")
-        avg_position_size = f"${improved_config['initial_balance'] * risk_fraction:.2f} ({risk_fraction * 100:.1f}%)"
+        if use_dynamic_sizing:
+            logger.info(f"Dynamic Sizing: Enabled (based on confidence)")
+            logger.info(f"Risk Fraction Range: {min_risk_fraction * 100:.1f}% - {max_risk_fraction * 100:.1f}% of capital")
+            min_position = f"${improved_config['initial_balance'] * min_risk_fraction:.2f} ({min_risk_fraction * 100:.1f}%)"
+            max_position = f"${improved_config['initial_balance'] * max_risk_fraction:.2f} ({max_risk_fraction * 100:.1f}%)"
+            logger.info(f"Position Size Range: {min_position} - {max_position}")
+        else:
+            logger.info(f"Dynamic Sizing: Disabled (using fixed risk fraction)")
+            logger.info(f"Risk Fraction (% of capital per trade): {risk_fraction * 100:.1f}%")
+            avg_position_size = f"${improved_config['initial_balance'] * risk_fraction:.2f} ({risk_fraction * 100:.1f}%)"
+            logger.info(f"Average Position Size: {avg_position_size}")
     else:  # all_in
         logger.info(f"Risk Fraction: 100% (All-In method)")
         avg_position_size = f"${improved_config['initial_balance']:.2f} (100%)"
-    
-    logger.info(f"Average Position Size: {avg_position_size}")
+        logger.info(f"Average Position Size: {avg_position_size}")
     logger.info(f"Initial Capital: ${improved_config['initial_balance']:.2f}")
     logger.info("="*50)
     logger.info(f"Full report saved to: {report_path}")
@@ -161,7 +198,13 @@ def main():
     except Exception as e:
         logger.error(f"Failed to open report: {e}")
     
-    logger.info("Workflow complete!")
+    # Shutdown Ray
+    if ray.is_initialized():
+        logger.info("Shutting down Ray")
+        ray.shutdown()
+    
+    elapsed_time = time.time() - start_time
+    logger.info(f"Workflow complete! Total execution time: {elapsed_time:.2f} seconds")
     
     return report_path, model_path
 

@@ -142,12 +142,29 @@ class StrategyAgent:
         # logger.debug(f"Remembered experience. Memory size: {len(self.memory)}")
 
 
-    def select_action(self, state: Union[List[float], np.ndarray]) -> int:
-        """Select an action based on the current state using an epsilon-greedy policy."""
+    def select_action(self, state: Union[List[float], np.ndarray], return_confidence: bool = False) -> Union[int, Tuple[int, float]]:
+        """
+        Select an action based on the current state using an epsilon-greedy policy.
+        
+        Args:
+            state: The current state observation
+            return_confidence: If True, returns a tuple of (action, confidence)
+                               where confidence is a value between 0-1
+        
+        Returns:
+            Either the selected action (int) or a tuple of (action, confidence)
+        """
+        action = None
+        confidence = 0.0
+        q_values_np = None
+        
         if np.random.rand() <= self.epsilon:
+            # Exploration - random action with low confidence
             action = np.random.randint(self.action_size)
+            confidence = 0.1  # Low confidence for random actions
             # logger.debug(f"Exploration: Selected random action {action}")
         else:
+            # Exploitation - use model
             if isinstance(state, list) or isinstance(state, np.ndarray):
                 # Ensure state is a flat numpy array first if it's a list
                 if isinstance(state, list):
@@ -162,8 +179,24 @@ class StrategyAgent:
                 q_values = self.model(state_tensor)
             self.model.train() # Set model back to training mode
 
-            action = torch.argmax(q_values[0]).item() # Get action with max Q-value
-            # logger.debug(f"Exploitation: Q-values={q_values[0].cpu().numpy()}, Selected action {action}")
+            # Convert to numpy for easier processing
+            q_values_np = q_values[0].cpu().numpy()
+            
+            # Get action with max Q-value
+            action = int(np.argmax(q_values_np))
+            
+            # Calculate confidence based on Q-values
+            # Softmax normalization for Q-values to get probabilities
+            exp_q_values = np.exp(q_values_np - np.max(q_values_np))  # Subtract max for numerical stability
+            softmax_probs = exp_q_values / np.sum(exp_q_values)
+            
+            # Confidence is the softmax probability of the selected action
+            confidence = float(softmax_probs[action])
+            
+            # Additional scaling - avoid overconfidence by keeping max confidence to 0.9
+            confidence = min(0.9, confidence)
+            
+            # logger.debug(f"Exploitation: Q-values={q_values_np}, Selected action {action}, Confidence={confidence:.4f}")
         
         # Epsilon decay is typically handled by RLlib's exploration config when integrated
         # If running standalone, uncomment:
@@ -171,7 +204,10 @@ class StrategyAgent:
         #     self.epsilon *= self.epsilon_decay
         #     logger.debug(f"Epsilon decayed to {self.epsilon}")
             
-        return int(action)
+        if return_confidence:
+            return int(action), confidence
+        else:
+            return int(action)
 
     def learn(self) -> None:
         """Samples a batch from memory, calculates target Q-values, and trains the Q-network."""
