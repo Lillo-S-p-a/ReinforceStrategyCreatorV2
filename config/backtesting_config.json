@@ -1,0 +1,59 @@
+{
+    "model": {
+        "type": "dqn",
+        "learning_rate": 0.001,
+        "discount_factor": 0.99,
+        "batch_size": 32,
+        "memory_size": 10000,
+        "layers": [
+            64,
+            32
+        ]
+    },
+    "training": {
+        "episodes": 100,
+        "steps_per_episode": 1000,
+        "validation_split": 0.2,
+        "early_stopping_patience": 10
+    },
+    "hyperparameters": {
+        "learning_rate": [
+            0.001,
+            0.0001
+        ],
+        "batch_size": [
+            32,
+            64
+        ],
+        "layers": [
+            [
+                64,
+                32
+            ],
+            [
+                128,
+                64
+            ]
+        ]
+    },
+    "cross_validation": {
+        "folds": 5,
+        "metric_weights": {
+            "sharpe_ratio": 0.4,
+            "pnl": 0.3,
+            "win_rate": 0.2,
+            "max_drawdown": 0.1
+        }
+    },
+    "data": {
+        "features": [
+            "price",
+            "volume",
+            "ma_20",
+            "ma_50",
+            "rsi"
+        ],
+        "target": "returns"
+    },
+    "random_seed": 42
+}

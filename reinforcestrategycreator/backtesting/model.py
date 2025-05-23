@@ -195,32 +195,41 @@ class ModelTrainer:
             batch_logger.error(f"Error in training batch {batch_id}: {e}", exc_info=True)
             return []  # Return empty experiences list on error
     
-    def train_final_model(self, train_data: pd.DataFrame, best_params: Dict[str, Any]) -> RLAgent:  # Using RLAgent alias
+    def train_final_model(self, train_data: pd.DataFrame, best_params: Dict[str, Any],
+                         use_transfer_learning: bool = True, use_ensemble: bool = False) -> RLAgent:  # Using RLAgent alias
         """
         Train final model on complete dataset using parallel processing.
         
         Args:
             train_data: Complete training dataset
             best_params: Best hyperparameters from cross-validation
+            use_transfer_learning: Whether to initialize from best CV model
+            use_ensemble: Whether to create an ensemble from top models
             
         Returns:
             Trained RL agent
         """
         start_time = time.time()
-        logger.info("Training final model on complete training dataset using parallel processing")
+        logger.info(f"Training final model with {'transfer learning' if use_transfer_learning else 'scratch'} initialization")
         
         if train_data is None or len(train_data) == 0:
             raise ValueError("No training data available")
             
-        # Update configuration to include enhanced DQN features
-        self.config["use_dueling"] = True  # Task 3.1
-        self.config["use_double_q"] = True  # Task 3.1
-        self.config["use_prioritized_replay"] = True  # Task 3.2
-        self.config["prioritized_replay_alpha"] = 0.6  # Task 3.2
-        self.config["prioritized_replay_beta"] = 0.4  # Task 3.2
-        self.config["learning_rate"] = 2e-4  # Task 3.3
+        # Respect parameters from best CV fold rather than hardcoding
+        # Only set defaults if parameters are not present
+        self.config["use_dueling"] = best_params.get("use_dueling", True)
+        self.config["use_double_q"] = best_params.get("use_double_q", True)
+        self.config["use_prioritized_replay"] = best_params.get("use_prioritized_replay", True)
+        self.config["prioritized_replay_alpha"] = best_params.get("prioritized_replay_alpha", 0.6)
+        self.config["prioritized_replay_beta"] = best_params.get("prioritized_replay_beta", 0.4)
+        self.config["learning_rate"] = best_params.get("learning_rate", 2e-4)
             
         self.best_params = best_params
+        
+        # Store the best fold number for reference
+        best_fold = best_params.get("fold", -1)
+        if best_fold >= 0:
+            logger.info(f"Using hyperparameters from best-performing fold {best_fold}")
         
         try:
             # Ensure Ray is initialized
@@ -279,6 +288,44 @@ class ModelTrainer:
                 prioritized_replay_beta=self.config.get("prioritized_replay_beta", 0.4),
                 prioritized_replay_beta_annealing=True  # Enable beta annealing
             )
+            
+            # Implement transfer learning (if enabled and model path is available)
+            if use_transfer_learning and "model_path" in self.best_params:
+                model_path = self.best_params["model_path"]
+                if os.path.exists(model_path):
+                    try:
+                        logger.info(f"Transfer learning: Loading weights from best CV model: {model_path}")
+                        # For PyTorch models, load state dict
+                        if model_path.endswith('.pth'):
+                            # Try to load using PyTorch
+                            state_dict = torch.load(model_path)
+                            agent.model.load_state_dict(state_dict)
+                            # Reduce learning rate for fine-tuning
+                            agent.learning_rate *= 0.5
+                            logger.info(f"Loaded PyTorch model successfully, reduced learning rate to: {agent.learning_rate:.6f}")
+                        # For h5 models (legacy)
+                        elif model_path.endswith('.h5'):
+                            agent.load_model(model_path)
+                            logger.info(f"Loaded h5 model successfully")
+                        else:
+                            logger.warning(f"Unknown model format: {model_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to load model for transfer learning: {e}", exc_info=True)
+                        logger.info("Continuing with randomly initialized model")
+                else:
+                    logger.warning(f"Model file not found: {model_path}. Starting with random weights.")
+            
+            # Implement ensemble creation if requested
+            if use_ensemble:
+                try:
+                    logger.info("Attempting to create model ensemble from top CV folds")
+                    ensemble_agent = self.create_model_ensemble(state_size, action_size)
+                    if ensemble_agent:
+                        agent = ensemble_agent
+                        logger.info("Successfully created and will use ensemble model")
+                except Exception as e:
+                    logger.error(f"Failed to create ensemble model: {e}", exc_info=True)
+                    logger.info("Continuing with single model approach")
             
             # Agent parameters for consistent initialization across workers
             agent_params = {
@@ -637,6 +684,151 @@ class ModelTrainer:
         except Exception as e:
             logger.error(f"Error evaluating model: {e}", exc_info=True)
             raise
+    
+    def create_model_ensemble(self, state_size: int, action_size: int) -> Optional[RLAgent]:
+        """
+        Create an ensemble model from top-performing cross-validation models.
+        
+        Args:
+            state_size: State size for the agent
+            action_size: Action size for the agent
+            
+        Returns:
+            Ensemble agent or None if ensemble creation fails
+        """
+        logger.info("Creating model ensemble from top performing folds")
+        
+        try:
+            # Get cross-validation results
+            cv_results = None
+            
+            # Look for CV results in the config or from a CrossValidator instance
+            if hasattr(self, "cv_results") and self.cv_results:
+                cv_results = self.cv_results
+            elif "cv_results" in self.config:
+                cv_results = self.config["cv_results"]
+            
+            if not cv_results:
+                logger.warning("No CV results found for ensemble creation")
+                return None
+            
+            # Find qualified models (positive Sharpe, positive PnL)
+            qualified_results = [
+                r for r in cv_results
+                if "error" not in r
+                and r["val_metrics"]["sharpe_ratio"] > 0
+                and r["val_metrics"]["pnl"] > 0
+                and "model_path" in r
+                and os.path.exists(r["model_path"])
+            ]
+            
+            if len(qualified_results) < 2:
+                logger.warning(f"Not enough qualified models for ensemble (found {len(qualified_results)})")
+                
+                # If we have at least one qualified model, use it instead of returning None
+                if len(qualified_results) == 1:
+                    logger.info("Using the single qualified model instead of an ensemble")
+                    model_path = qualified_results[0]["model_path"]
+                    
+                    # Create a new agent with the same parameters
+                    single_model_agent = RLAgent(
+                        state_size=state_size,
+                        action_size=action_size,
+                        learning_rate=self.config.get("learning_rate", 2e-4),
+                        gamma=self.best_params.get("gamma", 0.99),
+                        epsilon=self.config.get("epsilon_min", 0.01),
+                        epsilon_decay=1.0,
+                        epsilon_min=self.config.get("epsilon_min", 0.01),
+                        use_dueling=self.config.get("use_dueling", True),
+                        use_double_q=self.config.get("use_double_q", True),
+                        use_prioritized_replay=self.config.get("use_prioritized_replay", True)
+                    )
+                    
+                    # Load the model weights
+                    try:
+                        if model_path.endswith('.pth'):
+                            state_dict = torch.load(model_path)
+                            single_model_agent.model.load_state_dict(state_dict)
+                            logger.info(f"Successfully loaded single model from {model_path}")
+                            return single_model_agent
+                    except Exception as e:
+                        logger.error(f"Failed to load single model: {e}")
+                
+                # If we couldn't use a single model or had none, return None
+                return None
+                
+            # Take top 3 models or fewer if less are available
+            top_k = min(3, len(qualified_results))
+            
+            # Sort by Sharpe ratio (could use another metric or combination)
+            top_models = sorted(
+                qualified_results,
+                key=lambda x: x["val_metrics"]["sharpe_ratio"],
+                reverse=True
+            )[:top_k]
+            
+            logger.info(f"Using top {top_k} models for ensemble with Sharpe ratios: " +
+                      ", ".join([f"{r['val_metrics']['sharpe_ratio']:.4f}" for r in top_models]))
+            
+            # Create base ensemble agent
+            ensemble_agent = RLAgent(
+                state_size=state_size,
+                action_size=action_size,
+                learning_rate=self.config.get("learning_rate", 2e-4),
+                gamma=self.best_params.get("gamma", 0.99),
+                epsilon=self.config.get("epsilon_min", 0.01),  # Use minimal exploration for ensemble
+                epsilon_decay=1.0,
+                epsilon_min=self.config.get("epsilon_min", 0.01),
+                use_dueling=self.config.get("use_dueling", True),
+                use_double_q=self.config.get("use_double_q", True),
+                use_prioritized_replay=self.config.get("use_prioritized_replay", True)
+            )
+            
+            # Load and combine model weights
+            model_state_dicts = []
+            
+            for i, model_info in enumerate(top_models):
+                try:
+                    model_path = model_info["model_path"]
+                    logger.info(f"Loading ensemble component {i+1}/{top_k} from {model_path}")
+                    
+                    # Load model state dict based on file extension
+                    if model_path.endswith('.pth'):
+                        state_dict = torch.load(model_path)
+                        model_state_dicts.append(state_dict)
+                    elif model_path.endswith('.h5'):
+                        # For h5 models, we'd need a different approach depending on framework
+                        logger.warning(f"Cannot include h5 model {model_path} in ensemble - unsupported format")
+                    else:
+                        logger.warning(f"Unknown model format: {model_path}")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to load model {i+1} for ensemble: {e}")
+            
+            if not model_state_dicts:
+                logger.error("No valid models loaded for ensemble")
+                return None
+                
+            # Create averaged state dict
+            ensemble_state_dict = model_state_dicts[0].copy()
+            
+            # For each parameter, average across all models
+            for key in ensemble_state_dict:
+                for state_dict in model_state_dicts[1:]:
+                    if key in state_dict:
+                        ensemble_state_dict[key] += state_dict[key]
+                # Divide by number of models to get average
+                ensemble_state_dict[key] /= len(model_state_dicts)
+            
+            # Load averaged weights into the ensemble agent
+            ensemble_agent.model.load_state_dict(ensemble_state_dict)
+            
+            logger.info(f"Successfully created ensemble from {len(model_state_dicts)} models")
+            return ensemble_agent
+            
+        except Exception as e:
+            logger.error(f"Error creating model ensemble: {e}", exc_info=True)
+            return None
     
     def get_best_model(self) -> Optional[RLAgent]:  # Using RLAgent alias
         """

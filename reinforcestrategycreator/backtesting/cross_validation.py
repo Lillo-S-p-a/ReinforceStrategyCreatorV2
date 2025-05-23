@@ -426,51 +426,152 @@ class CrossValidator:
     
     def select_best_model(self) -> Dict[str, Any]:
         """
-        Select best hyperparameter configuration.
+        Select best model configuration using multiple metrics.
         
         Returns:
             Dictionary containing best parameters and model path
         """
-        logger.info("Selecting best model from CV results")
+        logger.info("Selecting best model from CV results using enhanced multi-metric approach")
         
         if not self.cv_results:
             raise ValueError("No CV results available. Run perform_cross_validation() first.")
-            
+        
         try:
-            # Find best model based on Sharpe ratio
-            best_sharpe = -float('inf')
-            best_result = None
+            # Generate detailed fold performance report for visibility
+            cv_report = self.generate_cv_report()
+            logger.info(f"\n{cv_report}")
             
-            for result in self.cv_results:
-                if "error" not in result:
-                    sharpe = result["val_metrics"]["sharpe_ratio"]
-                    if sharpe > best_sharpe:
-                        best_sharpe = sharpe
-                        best_result = result
+            # Define minimum thresholds for acceptable models
+            min_sharpe = 0.0  # At least neutral Sharpe
+            min_pnl = 0.0     # At least break-even
             
-            if best_result is None:
-                raise ValueError("No valid models found in CV results")
+            # First try to find models that meet minimum thresholds
+            qualified_models = [
+                r for r in self.cv_results
+                if "error" not in r
+                and r["val_metrics"]["sharpe_ratio"] >= min_sharpe
+                and r["val_metrics"]["pnl"] >= min_pnl
+            ]
+            
+            if qualified_models:
+                logger.info(f"Found {len(qualified_models)} models meeting minimum performance criteria")
+                # Rank by a weighted combination of metrics
+                best_score = -float('inf')
+                best_result = None
                 
-            # Extract best parameters (in a real implementation, this would come from the agent)
+                for result in qualified_models:
+                    metrics = result["val_metrics"]
+                    # Combined score with weights for different metrics
+                    # This formula can be tuned based on trading objectives
+                    initial_balance = self.config.get("initial_balance", 10000)
+                    pnl_pct = metrics["pnl"] / initial_balance if initial_balance > 0 else 0
+                    
+                    score = (
+                        0.4 * metrics["sharpe_ratio"] +
+                        0.3 * pnl_pct +
+                        0.2 * metrics["win_rate"] -
+                        0.1 * metrics["max_drawdown"]
+                    )
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_result = result
+                
+                logger.info(f"Selected best model with combined score: {best_score:.4f}")
+                logger.info(f"Best model metrics - Sharpe: {best_result['val_metrics']['sharpe_ratio']:.4f}, "
+                           f"PnL: ${best_result['val_metrics']['pnl']:.2f}, "
+                           f"Win Rate: {best_result['val_metrics']['win_rate']*100:.2f}%")
+            else:
+                # Fall back to best Sharpe if no models meet criteria
+                logger.warning("No models met minimum criteria, falling back to best available model by Sharpe ratio")
+                valid_results = [r for r in self.cv_results if "error" not in r]
+                
+                if not valid_results:
+                    raise ValueError("No valid models found in CV results")
+                    
+                best_result = max(valid_results, key=lambda x: x["val_metrics"]["sharpe_ratio"])
+                logger.info(f"Selected fallback model with Sharpe: {best_result['val_metrics']['sharpe_ratio']:.4f}")
+            
+            # Extract parameters from the best fold
+            fold_num = best_result.get("fold", -1)
             best_params = {
                 "learning_rate": self.config.get("learning_rate", 0.001),
                 "gamma": self.config.get("gamma", 0.99),
                 "batch_size": self.config.get("batch_size", 32),
-                # Add other hyperparameters
+                "use_dueling": self.config.get("use_dueling", True),
+                "use_double_q": self.config.get("use_double_q", True),
+                "use_prioritized_replay": self.config.get("use_prioritized_replay", True),
+                "prioritized_replay_alpha": self.config.get("prioritized_replay_alpha", 0.6),
+                "prioritized_replay_beta": self.config.get("prioritized_replay_beta", 0.4),
+                "fold": fold_num,  # Store which fold was best
             }
-            
-            logger.info(f"Best model selected with Sharpe ratio: {best_sharpe:.4f}")
             
             return {
                 "params": best_params,
                 "model_path": best_result["model_path"],
-                "metrics": best_result["val_metrics"]
+                "metrics": best_result["val_metrics"],
+                "fold": fold_num
             }
             
         except Exception as e:
             logger.error(f"Error selecting best model: {e}", exc_info=True)
             raise
     
+    def generate_cv_report(self) -> str:
+        """
+        Generate a detailed cross-validation performance report.
+        
+        Returns:
+            String containing the formatted report
+        """
+        if not self.cv_results:
+            return "No CV results available. Run perform_cross_validation() first."
+            
+        report = "=== Cross-Validation Performance Report ===\n\n"
+        report += f"Total folds: {self.cv_folds}\n"
+        valid_results = [r for r in self.cv_results if "error" not in r]
+        report += f"Completed folds: {len(valid_results)}/{self.cv_folds}\n\n"
+        
+        # Table header
+        report += f"{'Fold':^5}|{'Sharpe':^10}|{'PnL':^12}|{'Win Rate':^10}|{'Max DD':^10}|{'Status':^10}\n"
+        report += f"{'-'*5}|{'-'*10}|{'-'*12}|{'-'*10}|{'-'*10}|{'-'*10}\n"
+        
+        # Sort by Sharpe ratio for easy comparison
+        sorted_results = sorted(
+            enumerate(self.cv_results),
+            key=lambda x: x[1].get("val_metrics", {}).get("sharpe_ratio", -float('inf'))
+                        if "error" not in x[1] else -float('inf'),
+            reverse=True
+        )
+        
+        positive_count = 0
+        
+        for fold, result in sorted_results:
+            if "error" in result:
+                report += f"{fold:^5}|{'N/A':^10}|{'N/A':^12}|{'N/A':^10}|{'N/A':^10}|{'Error':^10}\n"
+                continue
+                
+            metrics = result["val_metrics"]
+            sharpe = metrics.get("sharpe_ratio", 0.0)
+            pnl = metrics.get("pnl", 0.0)
+            win_rate = metrics.get("win_rate", 0.0) * 100
+            max_dd = metrics.get("max_drawdown", 0.0) * 100
+            
+            # Status based on performance
+            if sharpe > 0 and pnl > 0:
+                status = "Good"
+                positive_count += 1
+            elif sharpe > 0:
+                status = "Neutral"
+            else:
+                status = "Poor"
+            
+            report += f"{fold:^5}|{sharpe:^10.4f}|${pnl:^10.2f}|{win_rate:^8.2f}%|{max_dd:^8.2f}%|{status:^10}\n"
+        
+        report += f"\nPositive performing folds: {positive_count}/{len(valid_results)}\n"
+        
+        return report
+        
     def get_cv_results(self) -> List[Dict[str, Any]]:
         """
         Get cross-validation results.

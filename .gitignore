@@ -9,3 +9,7 @@ callbacks_debug.log
 results/
 production_models/
 multiple_test_results*
+logs/
+test_results*
+results_plots/
+*.csv
