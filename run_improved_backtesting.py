@@ -105,7 +105,7 @@ def main():
         results_dir=results_dir,
         asset="SPY",
         start_date="2018-01-01",       # Extended training period
-        end_date="2024-12-31",         # Esteso fino a fine 2024 per testare in diverse condizioni di mercato
+        end_date="2025-04-30",         # Esteso fino a fine 2024 per testare in diverse condizioni di mercato
         cv_folds=20,                   # Aumentato da 5 a 20 per sfruttare meglio i core disponibili
         test_ratio=0.2,
         random_seed=42
