@@ -226,12 +226,12 @@ class BacktestingWorkflow:
     
     def select_best_model(self) -> Dict[str, Any]:
         """
-        Select best hyperparameter configuration.
+        Select best model using enhanced multi-metric selection criteria.
         
         Returns:
             Dictionary containing best parameters and model path
         """
-        logger.info("Selecting best model from CV results")
+        logger.info("Selecting best model using enhanced multi-metric selection criteria")
         
         if not self.cv_results:
             logger.warning("No CV results available. Running cross-validation first.")
@@ -241,51 +241,57 @@ class BacktestingWorkflow:
             raise ValueError("Failed to generate CV results")
             
         try:
-            # Find best model based on Sharpe ratio
-            best_sharpe = -float('inf')
-            best_result = None
+            # Initialize cross-validator with existing results
+            cross_validator = CrossValidator(
+                train_data=self.train_data,
+                config=self.config,
+                cv_folds=self.cv_folds,
+                models_dir=self.models_dir,
+                random_seed=self.random_seed
+            )
+            # Set the CV results
+            cross_validator.cv_results = self.cv_results
             
-            for result in self.cv_results:
-                if "error" not in result:
-                    sharpe = result["val_metrics"]["sharpe_ratio"]
-                    if sharpe > best_sharpe:
-                        best_sharpe = sharpe
-                        best_result = result
+            # Generate and log the CV report
+            cv_report = cross_validator.generate_cv_report()
+            logger.info(f"Cross-validation Performance Report:\n{cv_report}")
             
-            if best_result is None:
-                raise ValueError("No valid models found in CV results")
-                
-            # Extract best parameters (in a real implementation, this would come from the agent)
-            best_params = {
-                "learning_rate": self.config.get("learning_rate", 0.001),
-                "gamma": self.config.get("gamma", 0.99),
-                "batch_size": self.config.get("batch_size", 32),
-                # Add other hyperparameters
-            }
+            # Use the enhanced multi-metric selection
+            best_model_info = cross_validator.select_best_model()
             
             # Store best parameters
-            self.best_params = best_params
+            self.best_params = best_model_info["params"]
             
-            logger.info(f"Best model selected with Sharpe ratio: {best_sharpe:.4f}")
+            # Log detailed selection metrics
+            metrics = best_model_info["metrics"]
+            fold_num = best_model_info.get("fold", -1)
+            logger.info(f"Selected best model from fold {fold_num} with metrics:")
+            logger.info(f"Sharpe Ratio: {metrics['sharpe_ratio']:.4f}")
+            logger.info(f"PnL: ${metrics['pnl']:.2f}")
+            logger.info(f"Win Rate: {metrics['win_rate']*100:.2f}%")
+            logger.info(f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
             
-            return {
-                "params": best_params,
-                "model_path": best_result["model_path"],
-                "metrics": best_result["val_metrics"]
-            }
+            return best_model_info
             
         except Exception as e:
             logger.error(f"Error selecting best model: {e}", exc_info=True)
             raise
     
-    def train_final_model(self) -> RLAgent:  # Using RLAgent alias
+    def train_final_model(self,
+                         use_transfer_learning: bool = True,
+                         use_ensemble: bool = False) -> RLAgent:  # Using RLAgent alias
         """
-        Train final model on complete dataset.
+        Train final model on complete dataset with enhanced techniques.
         
+        Args:
+            use_transfer_learning: Whether to initialize from best CV model weights
+            use_ensemble: Whether to create an ensemble from top-performing models
+            
         Returns:
             Trained RL agent
         """
-        logger.info("Training final model on complete training dataset")
+        logger.info(f"Training final model with {'transfer learning' if use_transfer_learning else 'scratch initialization'}" +
+                  f"{' and ensemble creation' if use_ensemble else ''}")
         
         if self.best_params is None:
             logger.warning("No best parameters available. Selecting best model first.")
@@ -302,10 +308,18 @@ class BacktestingWorkflow:
             random_seed=self.random_seed
         )
         
-        # Train final model
+        # Provide CV results for ensemble creation if enabled
+        if use_ensemble:
+            # Pass the CV results to the model trainer's config for ensemble creation
+            model_trainer.config["cv_results"] = self.cv_results
+            logger.info(f"Providing {len(self.cv_results)} CV results for potential ensemble creation")
+        
+        # Train final model with enhanced options
         agent = model_trainer.train_final_model(
             train_data=self.train_data,
-            best_params=self.best_params
+            best_params=self.best_params,
+            use_transfer_learning=use_transfer_learning,
+            use_ensemble=use_ensemble
         )
         
         # Store best model

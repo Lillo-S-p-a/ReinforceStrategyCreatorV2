@@ -118,12 +118,24 @@ def main():
     logger.info("Performing cross-validation to find optimal hyperparameters")
     cv_results = workflow.perform_cross_validation()
     
-    logger.info("Selecting best model configuration")
+    logger.info("Selecting best model using enhanced multi-metric evaluation")
     best_model_info = workflow.select_best_model()
-    logger.info(f"Best model has Sharpe ratio: {best_model_info['metrics']['sharpe_ratio']:.4f}")
     
-    logger.info("Training final model with best parameters")
-    workflow.train_final_model()
+    # Log detailed best model metrics
+    metrics = best_model_info['metrics']
+    fold = best_model_info.get('fold', -1)
+    logger.info(f"Selected best model from fold {fold} with:")
+    logger.info(f"Sharpe Ratio: {metrics['sharpe_ratio']:.4f}")
+    logger.info(f"PnL: ${metrics['pnl']:.2f}")
+    logger.info(f"Win Rate: {metrics['win_rate']*100:.2f}%")
+    logger.info(f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
+    
+    # Configure enhanced training options
+    use_transfer_learning = True
+    use_ensemble = True
+    
+    logger.info(f"Training final model with transfer learning: {use_transfer_learning}, ensemble: {use_ensemble}")
+    workflow.train_final_model(use_transfer_learning=use_transfer_learning, use_ensemble=use_ensemble)
     
     logger.info("Evaluating model on test data")
     test_metrics = workflow.evaluate_final_model()
