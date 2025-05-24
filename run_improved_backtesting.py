@@ -105,17 +105,23 @@ def main():
         results_dir=results_dir,
         asset="SPY",
         start_date="2018-01-01",       # Extended training period
-        end_date="2025-04-30",         # Esteso fino a fine 2024 per testare in diverse condizioni di mercato
-        cv_folds=20,                   # Aumentato da 5 a 20 per sfruttare meglio i core disponibili
+        end_date="2025-04-30",         # Extended to end of 2024 to test in various market conditions
+        cv_folds=20,                   # Increased from 5 to 20 to better utilize available cores
         test_ratio=0.2,
-        random_seed=42
+        random_seed=42,
+        use_hpo=True,                  # Enable hyperparameter optimization
+        hpo_num_samples=15,            # Number of hyperparameter configurations to try
+        hpo_max_concurrent_trials=4    # Maximum number of concurrent trials
     )
     
     # Run the complete workflow
     logger.info("Fetching and preparing data")
     workflow.fetch_data()
     
-    logger.info("Performing cross-validation to find optimal hyperparameters")
+    logger.info("Performing hyperparameter optimization to find optimal hyperparameters")
+    hpo_results = workflow.perform_hyperparameter_optimization()
+    
+    logger.info("Performing cross-validation with optimized hyperparameters")
     cv_results = workflow.perform_cross_validation()
     
     logger.info("Selecting best model using enhanced multi-metric evaluation")
@@ -124,7 +130,8 @@ def main():
     # Log detailed best model metrics
     metrics = best_model_info['metrics']
     fold = best_model_info.get('fold', -1)
-    logger.info(f"Selected best model from fold {fold} with:")
+    source = best_model_info.get('source', 'cv')
+    logger.info(f"Selected best model from {'HPO' if source == 'hpo' else f'fold {fold}'} with:")
     logger.info(f"Sharpe Ratio: {metrics['sharpe_ratio']:.4f}")
     logger.info(f"PnL: ${metrics['pnl']:.2f}")
     logger.info(f"Win Rate: {metrics['win_rate']*100:.2f}%")
@@ -150,6 +157,7 @@ def main():
     logger.info("\n" + "="*50)
     logger.info("BACKTESTING RESULTS SUMMARY")
     logger.info("="*50)
+    logger.info(f"Hyperparameter Optimization: {'Enabled' if workflow.use_hpo else 'Disabled'}")
     logger.info(f"Final PnL: ${test_metrics['pnl']:.2f}")
     logger.info(f"PnL Percentage: {test_metrics['pnl_percentage']:.2f}%")
     logger.info(f"Sharpe Ratio: {test_metrics['sharpe_ratio']:.4f}")

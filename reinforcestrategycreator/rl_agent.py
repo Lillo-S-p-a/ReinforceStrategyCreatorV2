@@ -214,21 +214,60 @@ class StrategyAgent:
             logger.debug("PyTorch Standard DQN model built.")
             
         return model
-    def remember(self, state: Union[List[float], np.ndarray],
+    def remember(self, state: Union[List[float], np.ndarray, tuple],
                  action: int,
                  reward: float,
-                 next_state: Union[List[float], np.ndarray],
+                 next_state: Union[List[float], np.ndarray, tuple],
                  done: bool) -> None:
         """
         Store an experience tuple in the replay memory.
         
         If using Prioritized Experience Replay, adds with max priority.
+        Ensures states have consistent shapes before storing.
+        Handles various input types including tuples from Gymnasium API.
         """
+        # Handle tuple case (from Gymnasium API)
+        if isinstance(state, tuple):
+            # Assume first element is the observation
+            state = state[0]
+        if isinstance(next_state, tuple):
+            # Assume first element is the observation
+            next_state = next_state[0]
+            
         # Ensure states are numpy arrays for consistency before potential tensor conversion
         if isinstance(state, list):
             state = np.array(state, dtype=np.float32)
         if isinstance(next_state, list):
             next_state = np.array(next_state, dtype=np.float32)
+            
+        # Ensure states have the expected shape (state_size,)
+        if not isinstance(state, np.ndarray):
+            state = np.array(state, dtype=np.float32)
+            
+        if not isinstance(next_state, np.ndarray):
+            next_state = np.array(next_state, dtype=np.float32)
+            
+        if state.shape != (self.state_size,):
+            logger.warning(f"State shape mismatch: expected ({self.state_size},), got {state.shape}. Reshaping...")
+            # Try to reshape if total size matches
+            if state.size == self.state_size:
+                state = state.reshape(self.state_size)
+            else:
+                # If sizes don't match, pad or truncate
+                new_state = np.zeros(self.state_size, dtype=np.float32)
+                copy_size = min(state.size, self.state_size)
+                new_state[:copy_size] = state.flatten()[:copy_size]
+                state = new_state
+                
+        if next_state.shape != (self.state_size,):
+            # Apply the same reshaping to next_state
+            if next_state.size == self.state_size:
+                next_state = next_state.reshape(self.state_size)
+            else:
+                new_next_state = np.zeros(self.state_size, dtype=np.float32)
+                copy_size = min(next_state.size, self.state_size)
+                new_next_state[:copy_size] = next_state.flatten()[:copy_size]
+                next_state = new_next_state
         
         experience = (state, action, reward, next_state, done)
         
@@ -380,11 +419,46 @@ class StrategyAgent:
             minibatch = random.sample(self.memory, self.batch_size)
             weights_tensor = torch.ones(self.batch_size).to(self.device)  # No weighting
         
-        states = np.array([experience[0] for experience in minibatch], dtype=np.float32)
-        actions = np.array([experience[1] for experience in minibatch])
-        rewards = np.array([experience[2] for experience in minibatch], dtype=np.float32)
-        next_states = np.array([experience[3] for experience in minibatch], dtype=np.float32)
-        dones = np.array([experience[4] for experience in minibatch], dtype=np.uint8)
+        # Safely create arrays from experiences, ensuring consistent shapes
+        try:
+            states = np.array([experience[0] for experience in minibatch], dtype=np.float32)
+            actions = np.array([experience[1] for experience in minibatch])
+            rewards = np.array([experience[2] for experience in minibatch], dtype=np.float32)
+            next_states = np.array([experience[3] for experience in minibatch], dtype=np.float32)
+            dones = np.array([experience[4] for experience in minibatch], dtype=np.uint8)
+        except ValueError as e:
+            # If we still encounter shape issues, log and handle them
+            logger.error(f"Shape error in minibatch: {e}")
+            
+            # Verify and fix shapes if needed
+            fixed_states = []
+            fixed_next_states = []
+            
+            for exp in minibatch:
+                state = exp[0]
+                next_state = exp[3]
+                
+                # Ensure state has correct shape
+                if state.shape != (self.state_size,):
+                    new_state = np.zeros(self.state_size, dtype=np.float32)
+                    copy_size = min(state.size, self.state_size)
+                    new_state[:copy_size] = state.flatten()[:copy_size]
+                    fixed_states.append(new_state)
+                else:
+                    fixed_states.append(state)
+                
+                # Ensure next_state has correct shape
+                if next_state.shape != (self.state_size,):
+                    new_next_state = np.zeros(self.state_size, dtype=np.float32)
+                    copy_size = min(next_state.size, self.state_size)
+                    new_next_state[:copy_size] = next_state.flatten()[:copy_size]
+                    fixed_next_states.append(new_next_state)
+                else:
+                    fixed_next_states.append(next_state)
+            
+            # Create arrays with fixed shapes
+            states = np.array(fixed_states, dtype=np.float32)
+            next_states = np.array(fixed_next_states, dtype=np.float32)
 
         states_tensor = torch.from_numpy(states).float().to(self.device)
         actions_tensor = torch.from_numpy(actions).long().to(self.device) # Actions are indices
