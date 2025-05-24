@@ -40,7 +40,7 @@ class BacktestingWorkflow:
     to implement the complete backtesting workflow.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  config: Dict[str, Any],
                  results_dir: Optional[str] = None,
                  asset: str = "SPY",
@@ -48,7 +48,10 @@ class BacktestingWorkflow:
                  end_date: str = "2023-01-01",
                  cv_folds: int = 5,
                  test_ratio: float = 0.2,
-                 random_seed: int = 42) -> None:
+                 random_seed: int = 42,
+                 use_hpo: bool = False,
+                 hpo_num_samples: int = 10,
+                 hpo_max_concurrent_trials: int = 4) -> None:
         """
         Initialize the backtesting workflow with configuration.
         
@@ -69,6 +72,9 @@ class BacktestingWorkflow:
         self.cv_folds = cv_folds
         self.test_ratio = test_ratio
         self.random_seed = random_seed
+        self.use_hpo = use_hpo
+        self.hpo_num_samples = hpo_num_samples
+        self.hpo_max_concurrent_trials = hpo_max_concurrent_trials
         
         # Set random seeds for reproducibility
         random.seed(random_seed)
@@ -85,11 +91,13 @@ class BacktestingWorkflow:
         self.plots_dir = os.path.join(self.results_dir, "plots")
         self.models_dir = os.path.join(self.results_dir, "models")
         self.reports_dir = os.path.join(self.results_dir, "reports")
+        self.hpo_dir = os.path.join(self.results_dir, "hpo")
         
         os.makedirs(self.results_dir, exist_ok=True)
         os.makedirs(self.plots_dir, exist_ok=True)
         os.makedirs(self.models_dir, exist_ok=True)
         os.makedirs(self.reports_dir, exist_ok=True)
+        os.makedirs(self.hpo_dir, exist_ok=True)
         
         # Initialize component modules
         self.data_manager = DataManager(
@@ -121,6 +129,7 @@ class BacktestingWorkflow:
         self.train_data = None
         self.test_data = None
         self.cv_results = []
+        self.hpo_results = None
         self.best_params = None
         self.best_model = None
         self.test_metrics = None
@@ -164,7 +173,10 @@ class BacktestingWorkflow:
             config=self.config,
             cv_folds=self.cv_folds,
             models_dir=self.models_dir,
-            random_seed=self.random_seed
+            random_seed=self.random_seed,
+            use_hpo=self.use_hpo,
+            hpo_num_samples=self.hpo_num_samples,
+            hpo_max_concurrent_trials=self.hpo_max_concurrent_trials
         )
         
         # Perform cross-validation
@@ -224,21 +236,97 @@ class BacktestingWorkflow:
         except Exception as e:
             logger.error(f"Error saving CV summary: {e}", exc_info=True)
     
+    def perform_hyperparameter_optimization(self) -> Dict[str, Any]:
+        """
+        Execute hyperparameter optimization.
+        
+        Returns:
+            Dictionary containing best hyperparameters
+        """
+        logger.info("Performing hyperparameter optimization")
+        
+        if not self.use_hpo:
+            logger.warning("HPO is not enabled. Set use_hpo=True when initializing BacktestingWorkflow.")
+            return {}
+        
+        if self.train_data is None:
+            logger.warning("No training data available. Fetching data first.")
+            self.fetch_data()
+        
+        # Initialize cross-validator
+        cross_validator = CrossValidator(
+            train_data=self.train_data,
+            config=self.config,
+            cv_folds=self.cv_folds,
+            models_dir=self.hpo_dir,
+            random_seed=self.random_seed,
+            use_hpo=True,
+            hpo_num_samples=self.hpo_num_samples,
+            hpo_max_concurrent_trials=self.hpo_max_concurrent_trials
+        )
+        
+        # Run hyperparameter optimization
+        best_hpo_params = cross_validator.run_hyperparameter_optimization()
+        
+        # Store HPO results
+        self.hpo_results = cross_validator.get_hpo_results()
+        
+        # Save HPO summary
+        self._save_hpo_summary(best_hpo_params)
+        
+        logger.info("Hyperparameter optimization completed")
+        return best_hpo_params
+    
+    def _save_hpo_summary(self, best_params: Dict[str, Any]) -> None:
+        """
+        Save hyperparameter optimization summary data.
+        """
+        if not best_params:
+            logger.warning("No HPO results to save")
+            return
+            
+        try:
+            # Extract summary data
+            summary = {
+                "best_params": best_params,
+                "hpo_config": {
+                    "num_samples": self.hpo_num_samples,
+                    "max_concurrent_trials": self.hpo_max_concurrent_trials
+                }
+            }
+            
+            # Save to file
+            import json
+            with open(os.path.join(self.results_dir, "hpo_summary.json"), "w") as f:
+                json.dump(summary, f, indent=4)
+                
+            logger.info(f"HPO summary saved to {self.results_dir}/hpo_summary.json")
+            
+        except Exception as e:
+            logger.error(f"Error saving HPO summary: {e}", exc_info=True)
+    
     def select_best_model(self) -> Dict[str, Any]:
         """
         Select best model using enhanced multi-metric selection criteria.
+        If HPO was used, incorporate those results.
         
         Returns:
             Dictionary containing best parameters and model path
         """
         logger.info("Selecting best model using enhanced multi-metric selection criteria")
         
+        # If HPO was used but not run yet, run it
+        if self.use_hpo and not self.hpo_results:
+            logger.info("HPO enabled but not run yet. Running hyperparameter optimization first.")
+            self.perform_hyperparameter_optimization()
+        
+        # If no CV results, run cross-validation
         if not self.cv_results:
             logger.warning("No CV results available. Running cross-validation first.")
             self.perform_cross_validation()
             
-        if not self.cv_results:
-            raise ValueError("Failed to generate CV results")
+        if not self.cv_results and not (self.use_hpo and self.hpo_results):
+            raise ValueError("Failed to generate CV or HPO results")
             
         try:
             # Initialize cross-validator with existing results
@@ -247,10 +335,17 @@ class BacktestingWorkflow:
                 config=self.config,
                 cv_folds=self.cv_folds,
                 models_dir=self.models_dir,
-                random_seed=self.random_seed
+                random_seed=self.random_seed,
+                use_hpo=self.use_hpo
             )
+            
             # Set the CV results
             cross_validator.cv_results = self.cv_results
+            
+            # Set HPO results if available
+            if self.use_hpo and self.hpo_results:
+                cross_validator.hpo_results = self.hpo_results
+                cross_validator.best_hpo_params = self.perform_hyperparameter_optimization()
             
             # Generate and log the CV report
             cv_report = cross_validator.generate_cv_report()
@@ -259,17 +354,58 @@ class BacktestingWorkflow:
             # Use the enhanced multi-metric selection
             best_model_info = cross_validator.select_best_model()
             
+            # Log the received best_model_info for debugging
+            logger.info(f"Received best_model_info: {best_model_info}")
+            
             # Store best parameters
-            self.best_params = best_model_info["params"]
+            self.best_params = best_model_info.get("params", {})
             
             # Log detailed selection metrics
-            metrics = best_model_info["metrics"]
+            metrics = best_model_info.get("metrics", {})
             fold_num = best_model_info.get("fold", -1)
+            
+            # Ensure metrics are not None and have valid values
+            if metrics is None or not isinstance(metrics, dict):
+                logger.warning(f"Invalid metrics found in best_model_info: {metrics}, using default values")
+                metrics = {
+                    "sharpe_ratio": 0.0,
+                    "pnl": 0.0,
+                    "win_rate": 0.0,
+                    "max_drawdown": 0.0
+                }
+            
+            # Check if we have valid metrics (non-zero values)
+            has_valid_metrics = any(
+                isinstance(v, (int, float)) and abs(v) > 1e-6
+                for k, v in metrics.items()
+                if k in ["sharpe_ratio", "pnl", "win_rate", "max_drawdown"]
+            )
+            
+            if not has_valid_metrics and fold_num == -1:
+                # Try to extract metrics from CV results if available
+                if self.cv_results and len(self.cv_results) > 0:
+                    logger.info("Attempting to extract metrics from CV results")
+                    try:
+                        # Find the best fold based on Sharpe ratio
+                        valid_results = [r for r in self.cv_results if "error" not in r]
+                        if valid_results:
+                            best_cv_result = max(valid_results, key=lambda x: x.get("val_metrics", {}).get("sharpe_ratio", -float('inf')))
+                            fold_num = best_cv_result.get("fold", -1)
+                            metrics = best_cv_result.get("val_metrics", metrics)
+                            logger.info(f"Extracted metrics from CV fold {fold_num}: {metrics}")
+                    except Exception as e:
+                        logger.error(f"Error extracting metrics from CV results: {e}")
+            
+            # Log the metrics
             logger.info(f"Selected best model from fold {fold_num} with metrics:")
-            logger.info(f"Sharpe Ratio: {metrics['sharpe_ratio']:.4f}")
-            logger.info(f"PnL: ${metrics['pnl']:.2f}")
-            logger.info(f"Win Rate: {metrics['win_rate']*100:.2f}%")
-            logger.info(f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
+            logger.info(f"Sharpe Ratio: {metrics.get('sharpe_ratio', 0.0):.4f}")
+            logger.info(f"PnL: ${metrics.get('pnl', 0.0):.2f}")
+            logger.info(f"Win Rate: {metrics.get('win_rate', 0.0)*100:.2f}%")
+            logger.info(f"Max Drawdown: {metrics.get('max_drawdown', 0.0)*100:.2f}%")
+            
+            # Update the best_model_info with the potentially improved metrics and fold
+            best_model_info["metrics"] = metrics
+            best_model_info["fold"] = fold_num
             
             return best_model_info
             
@@ -462,7 +598,9 @@ class BacktestingWorkflow:
             "test_metrics": self.test_metrics,
             "benchmark_metrics": self.benchmark_metrics if hasattr(self, "benchmark_metrics") else {},
             "cv_results": self.cv_results,
+            "hpo_results": self.hpo_results if self.use_hpo else None,
             "best_params": self.best_params,
+            "use_hpo": self.use_hpo,
             "plots": {
                 "benchmark_comparison": os.path.join(self.plots_dir, "benchmark_comparison.png"),
                 "metrics_summary": os.path.join(self.plots_dir, "metrics_summary.png"),
@@ -528,31 +666,39 @@ class BacktestingWorkflow:
         
         try:
             # Step 1: Fetch and prepare data
-            logger.info("Step 1/7: Fetching and preparing data")
+            logger.info(f"Step 1/{8 if self.use_hpo else 7}: Fetching and preparing data")
             self.fetch_data()
             
-            # Step 2: Perform cross-validation
-            logger.info("Step 2/7: Performing cross-validation")
+            # Step 2: Perform hyperparameter optimization if enabled
+            if self.use_hpo:
+                logger.info(f"Step 2/8: Performing hyperparameter optimization")
+                self.perform_hyperparameter_optimization()
+                step_offset = 1
+            else:
+                step_offset = 0
+            
+            # Step 3: Perform cross-validation
+            logger.info(f"Step {2+step_offset}/{'8' if self.use_hpo else '7'}: Performing cross-validation")
             cv_results = self.perform_cross_validation()
             
-            # Step 3: Select best model
-            logger.info("Step 3/7: Selecting best model")
+            # Step 4: Select best model
+            logger.info(f"Step {3+step_offset}/{'8' if self.use_hpo else '7'}: Selecting best model")
             best_model_info = self.select_best_model()
             
-            # Step 4: Train final model
-            logger.info("Step 4/7: Training final model")
+            # Step 5: Train final model
+            logger.info(f"Step {4+step_offset}/{'8' if self.use_hpo else '7'}: Training final model")
             self.train_final_model()
             
-            # Step 5: Evaluate final model
-            logger.info("Step 5/7: Evaluating final model")
+            # Step 6: Evaluate final model
+            logger.info(f"Step {5+step_offset}/{'8' if self.use_hpo else '7'}: Evaluating final model")
             test_metrics = self.evaluate_final_model()
             
-            # Step 6: Generate report
-            logger.info("Step 6/7: Generating report")
+            # Step 7: Generate report
+            logger.info(f"Step {6+step_offset}/{'8' if self.use_hpo else '7'}: Generating report")
             report_path = self.generate_report(format="html")
             
-            # Step 7: Export model for trading
-            logger.info("Step 7/7: Exporting model for trading")
+            # Step 8: Export model for trading
+            logger.info(f"Step {7+step_offset}/{'8' if self.use_hpo else '7'}: Exporting model for trading")
             model_path = self.export_for_trading()
             
             # Calculate execution time
@@ -567,6 +713,8 @@ class BacktestingWorkflow:
                 "cv_folds": len(cv_results),
                 "test_metrics": test_metrics,
                 "best_params": self.best_params,
+                "used_hpo": self.use_hpo,
+                "hpo_results": self.hpo_results if self.use_hpo else None,
                 "report_path": report_path,
                 "model_path": model_path,
                 "results_dir": self.results_dir

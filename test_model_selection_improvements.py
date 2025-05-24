@@ -53,10 +53,18 @@ logger = setup_logger(__name__, log_file)
 class ModelSelectionTester:
     """Class to test and compare different model selection and training approaches."""
     
-    def __init__(self, config_path, data_path):
-        """Initialize with configuration and data paths."""
+    def __init__(self, config_path, data_path, use_hpo=False):
+        """
+        Initialize with configuration and data paths.
+        
+        Args:
+            config_path: Path to the configuration file
+            data_path: Path to the data file
+            use_hpo: Whether to use hyperparameter optimization
+        """
         self.config_path = config_path
         self.data_path = data_path
+        self.use_hpo = use_hpo
         self.results_dir = Path(f"test_results_{timestamp}")
         self.results_dir.mkdir(exist_ok=True)
         
@@ -82,7 +90,10 @@ class ModelSelectionTester:
                 start_date="2020-01-01",
                 end_date="2023-01-01",
                 cv_folds=5,
-                test_ratio=0.2
+                test_ratio=0.2,
+                use_hpo=self.use_hpo,
+                hpo_num_samples=10,
+                hpo_max_concurrent_trials=4
             )
             
             logger.info(f"Initialized model selection tester with config: {config_path}")
@@ -231,11 +242,16 @@ class ModelSelectionTester:
                 }, f, indent=4)
                 
             logger.info(f"Original approach selected model from fold {best_model_info.get('fold', -1)}")
-            metrics = best_model_info['metrics']
-            logger.info(f"Metrics - Sharpe: {metrics['sharpe_ratio']:.4f}, "
-                       f"PnL: ${metrics['pnl']:.2f}, "
-                       f"Win Rate: {metrics['win_rate']*100:.2f}%, "
-                       f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
+            metrics = best_model_info.get('metrics', {})
+            
+            # Ensure metrics are not None and have default values if keys are missing
+            if metrics is None:
+                metrics = {}
+                
+            logger.info(f"Metrics - Sharpe: {metrics.get('sharpe_ratio', 0.0):.4f}, "
+                       f"PnL: ${metrics.get('pnl', 0.0):.2f}, "
+                       f"Win Rate: {metrics.get('win_rate', 0.0)*100:.2f}%, "
+                       f"Max Drawdown: {metrics.get('max_drawdown', 0.0)*100:.2f}%")
             
             return self.original_results
             
@@ -258,11 +274,16 @@ class ModelSelectionTester:
             }, f, indent=4)
             
         logger.info(f"Original approach selected model from fold {best_model_info.get('fold', -1)}")
-        metrics = best_model_info['metrics']
-        logger.info(f"Metrics - Sharpe: {metrics['sharpe_ratio']:.4f}, "
-                   f"PnL: ${metrics['pnl']:.2f}, "
-                   f"Win Rate: {metrics['win_rate']*100:.2f}%, "
-                   f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
+        metrics = best_model_info.get('metrics', {})
+        
+        # Ensure metrics are not None and have default values if keys are missing
+        if metrics is None:
+            metrics = {}
+            
+        logger.info(f"Metrics - Sharpe: {metrics.get('sharpe_ratio', 0.0):.4f}, "
+                   f"PnL: ${metrics.get('pnl', 0.0):.2f}, "
+                   f"Win Rate: {metrics.get('win_rate', 0.0)*100:.2f}%, "
+                   f"Max Drawdown: {metrics.get('max_drawdown', 0.0)*100:.2f}%")
         
         return self.original_results
     
@@ -302,24 +323,37 @@ class ModelSelectionTester:
                 logger.info("Using alternative cross-validation method")
                 workflow.perform_cross_validation()
             
-            # Generate comprehensive CV report
+            # Generate comprehensive CV report (text format)
             logger.info("Generating comprehensive cross-validation report")
             try:
-                cv_report = workflow.cross_validator.generate_cv_report()
-                # Check if cv_report is a DataFrame or string
-                if isinstance(cv_report, pd.DataFrame):
-                    cv_report_path = self.results_dir / "enhanced_cv_report.csv"
-                    cv_report.to_csv(cv_report_path)
-                    logger.info(f"Saved detailed cross-validation report to {cv_report_path}")
-                else:
-                    # If it's a string, save it as text
-                    cv_report_path = self.results_dir / "enhanced_cv_report.txt"
-                    with open(cv_report_path, 'w') as f:
-                        f.write(str(cv_report))
-                    logger.info(f"Saved CV report as text to {cv_report_path}")
+                # Get text report
+                cv_report_text = workflow.cross_validator.generate_cv_report()
+                
+                # Save text report
+                cv_report_path = self.results_dir / "enhanced_cv_report.txt"
+                with open(cv_report_path, 'w') as f:
+                    f.write(str(cv_report_text))
+                logger.info(f"Saved CV text report to {cv_report_path}")
+                
+                # Get DataFrame representation for visualization
+                cv_report_df = workflow.cross_validator.generate_cv_dataframe()
+                
+                # Save DataFrame as CSV
+                cv_df_path = self.results_dir / "enhanced_cv_report.csv"
+                cv_report_df.to_csv(cv_df_path)
+                logger.info(f"Saved CV DataFrame to {cv_df_path}")
+                
+                # Store both formats
+                cv_report = {
+                    'text': cv_report_text,
+                    'dataframe': cv_report_df
+                }
             except Exception as e:
                 logger.error(f"Error generating CV report: {str(e)}")
-                cv_report = str(e)
+                cv_report = {
+                    'text': str(e),
+                    'dataframe': pd.DataFrame()  # Empty DataFrame
+                }
             
             # Select best model using multi-metric approach
             logger.info("Selecting best model using enhanced multi-metric approach")
@@ -352,11 +386,16 @@ class ModelSelectionTester:
                 }, f, indent=4)
                 
             logger.info(f"Enhanced approach selected model from fold {best_model_info.get('fold', -1)}")
-            metrics = best_model_info['metrics']
-            logger.info(f"Metrics - Sharpe: {metrics['sharpe_ratio']:.4f}, "
-                       f"PnL: ${metrics['pnl']:.2f}, "
-                       f"Win Rate: {metrics['win_rate']*100:.2f}%, "
-                       f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
+            metrics = best_model_info.get('metrics', {})
+            
+            # Ensure metrics are not None and have default values if keys are missing
+            if metrics is None:
+                metrics = {}
+                
+            logger.info(f"Metrics - Sharpe: {metrics.get('sharpe_ratio', 0.0):.4f}, "
+                       f"PnL: ${metrics.get('pnl', 0.0):.2f}, "
+                       f"Win Rate: {metrics.get('win_rate', 0.0)*100:.2f}%, "
+                       f"Max Drawdown: {metrics.get('max_drawdown', 0.0)*100:.2f}%")
             
             return self.enhanced_results
             
@@ -378,23 +417,37 @@ class ModelSelectionTester:
                 'description': 'Multi-metric selection only',
                 'use_multi_metric': True,
                 'use_transfer_learning': False,
-                'use_ensemble': False
+                'use_ensemble': False,
+                'use_hpo': False
             },
             {
                 'name': 'transfer_learning_only',
                 'description': 'Transfer learning only',
                 'use_multi_metric': False,
                 'use_transfer_learning': True,
-                'use_ensemble': False
+                'use_ensemble': False,
+                'use_hpo': False
             },
             {
                 'name': 'ensemble_only',
                 'description': 'Ensemble model only',
                 'use_multi_metric': False,
                 'use_transfer_learning': False,
-                'use_ensemble': True
+                'use_ensemble': True,
+                'use_hpo': False
             }
         ]
+        
+        # Add HPO configuration if enabled
+        if self.use_hpo:
+            configurations.append({
+                'name': 'hpo_only',
+                'description': 'Hyperparameter optimization only',
+                'use_multi_metric': False,
+                'use_transfer_learning': False,
+                'use_ensemble': False,
+                'use_hpo': True
+            })
         
         ablation_results = {}
         
@@ -483,11 +536,16 @@ class ModelSelectionTester:
                 }, f, indent=4)
                 
             logger.info(f"Configuration '{config['name']}' selected model from fold {best_model_info.get('fold', -1)}")
-            metrics = best_model_info['metrics']
-            logger.info(f"Metrics - Sharpe: {metrics['sharpe_ratio']:.4f}, "
-                       f"PnL: ${metrics['pnl']:.2f}, "
-                       f"Win Rate: {metrics['win_rate']*100:.2f}%, "
-                       f"Max Drawdown: {metrics['max_drawdown']*100:.2f}%")
+            metrics = best_model_info.get('metrics', {})
+            
+            # Ensure metrics are not None and have default values if keys are missing
+            if metrics is None:
+                metrics = {}
+                
+            logger.info(f"Metrics - Sharpe: {metrics.get('sharpe_ratio', 0.0):.4f}, "
+                       f"PnL: ${metrics.get('pnl', 0.0):.2f}, "
+                       f"Win Rate: {metrics.get('win_rate', 0.0)*100:.2f}%, "
+                       f"Max Drawdown: {metrics.get('max_drawdown', 0.0)*100:.2f}%")
         
         self.ablation_results = ablation_results
         return ablation_results
@@ -514,17 +572,41 @@ class ModelSelectionTester:
                 
                 if is_final:
                     metrics = result_dict['final_backtest']
+                    return [
+                        metrics.get('sharpe_ratio', 0.0),
+                        metrics.get('pnl', 0.0),
+                        metrics.get('win_rate', 0.0) * 100,
+                        metrics.get('max_drawdown', 0.0) * 100
+                    ]
                 else:
-                    metrics = result_dict['best_model_info']['metrics']
+                    # Check if we have CV report in the new format (dictionary with dataframe)
+                    if 'cv_report' in result_dict and isinstance(result_dict['cv_report'], dict) and 'dataframe' in result_dict['cv_report']:
+                        cv_df = result_dict['cv_report']['dataframe']
+                        if not cv_df.empty:
+                            # Calculate average metrics across all folds
+                            return [
+                                cv_df['sharpe_ratio'].mean(),
+                                cv_df['pnl'].mean(),
+                                cv_df['win_rate'].mean() * 100,
+                                cv_df['max_drawdown'].mean() * 100
+                            ]
+                    
+                    # Fall back to best_model_info if CV report is not available or empty
+                    if 'best_model_info' in result_dict and 'metrics' in result_dict['best_model_info']:
+                        metrics = result_dict['best_model_info']['metrics']
+                        return [
+                            metrics.get('sharpe_ratio', 0.0),
+                            metrics.get('pnl', 0.0),
+                            metrics.get('win_rate', 0.0) * 100,
+                            metrics.get('max_drawdown', 0.0) * 100
+                        ]
                 
-                return [
-                    metrics.get('sharpe_ratio', 0.0),
-                    metrics.get('pnl', 0.0),
-                    metrics.get('win_rate', 0.0) * 100,
-                    metrics.get('max_drawdown', 0.0) * 100
-                ]
-            except KeyError as e:
-                logger.error(f"KeyError extracting metrics: {str(e)}")
+                # If we get here, we couldn't find metrics
+                logger.warning(f"Could not find metrics in result_dict: {result_dict.keys()}")
+                return [0.0, 0.0, 0.0, 0.0]  # Default values
+                
+            except Exception as e:
+                logger.error(f"Error extracting metrics: {str(e)}")
                 return [0.0, 0.0, 0.0, 0.0]  # Default values for error case
         
         # Add original approach metrics
@@ -673,50 +755,338 @@ class ModelSelectionTester:
         
         # If we have CV report, visualize fold performance
         if 'cv_report' in self.enhanced_results:
-            try:
-                self._visualize_cv_performance(self.enhanced_results['cv_report'])
-            except Exception as e:
-                logger.error(f"Error visualizing CV performance: {str(e)}")
-                # Create a simple error visualization
+            # Pass the CV report to the visualization method
+            # The method now handles different input types
+            self._visualize_cv_performance(self.enhanced_results['cv_report'])
+    
+    def run_hpo_approach(self):
+        """Run the hyperparameter optimization approach."""
+        logger.info("===== Running HPO Approach =====")
+        
+        if not self.use_hpo:
+            logger.warning("HPO is not enabled. Skipping HPO approach.")
+            return {'error': 'HPO not enabled'}
+        
+        try:
+            # Create a copy of the workflow for HPO approach
+            workflow = deepcopy(self.base_workflow)
+            
+            # Check if we have training data
+            if not hasattr(workflow, 'train_data') or workflow.train_data is None:
+                logger.info("Fetching training data...")
+                workflow.fetch_data()
+            
+            # Run hyperparameter optimization
+            logger.info("Running hyperparameter optimization")
+            best_hpo_params = workflow.perform_hyperparameter_optimization()
+            
+            # Run cross-validation with optimized hyperparameters
+            logger.info("Running cross-validation with optimized hyperparameters")
+            workflow.perform_cross_validation()
+            
+            # Select best model
+            logger.info("Selecting best model using HPO results")
+            best_model_info = workflow.select_best_model()
+            
+            # Train final model with advanced techniques
+            logger.info("Training final model with optimized hyperparameters")
+            workflow.train_final_model(use_transfer_learning=True, use_ensemble=True)
+            
+            # Run final backtest
+            logger.info("Running final backtest with HPO model")
+            final_results = workflow.evaluate_final_model()
+            logger.info(f"HPO approach final backtest results: Sharpe={final_results['sharpe_ratio']:.4f}, PnL=${final_results['pnl']:.2f}")
+            
+            # Store results
+            self.hpo_results = {
+                'best_hpo_params': best_hpo_params,
+                'best_model_info': best_model_info,
+                'final_backtest': final_results
+            }
+            
+            # Save results
+            with open(self.results_dir / "hpo_approach_results.json", 'w') as f:
+                json.dump({
+                    'best_hpo_params': best_hpo_params,
+                    'best_model_info': {
+                        k: v if not isinstance(v, np.ndarray) else v.tolist()
+                        for k, v in best_model_info.items() if k != 'model'
+                    },
+                    'final_metrics': final_results
+                }, f, indent=4)
+                
+            logger.info(f"HPO approach selected model with parameters: {json.dumps(best_hpo_params, indent=2)}")
+            metrics = best_model_info.get('metrics', {})
+            
+            # Ensure metrics are not None and have default values if keys are missing
+            if metrics is None:
+                metrics = {}
+                
+            logger.info(f"Metrics - Sharpe: {metrics.get('sharpe_ratio', 0.0):.4f}, "
+                       f"PnL: ${metrics.get('pnl', 0.0):.2f}, "
+                       f"Win Rate: {metrics.get('win_rate', 0.0)*100:.2f}%, "
+                       f"Max Drawdown: {metrics.get('max_drawdown', 0.0)*100:.2f}%")
+            
+            return self.hpo_results
+            
+        except Exception as e:
+            logger.error(f"Error in HPO approach: {str(e)}")
+            logger.exception("Exception details:")
+            self.hpo_results = {
+                'error': str(e)
+            }
+            return self.hpo_results
+    
+    def _visualize_cv_performance(self, cv_report):
+        """Create visualizations of cross-validation fold performance."""
+        # Handle different input types
+        if isinstance(cv_report, dict) and 'dataframe' in cv_report:
+            # New format: dictionary with 'dataframe' key
+            cv_df = cv_report['dataframe']
+            logger.info(f"Using dataframe from cv_report dictionary, shape: {cv_df.shape if not cv_df.empty else 'empty'}")
+        elif isinstance(cv_report, pd.DataFrame):
+            # Direct DataFrame input
+            cv_df = cv_report
+            logger.info(f"Using direct DataFrame input, shape: {cv_df.shape if not cv_df.empty else 'empty'}")
+        else:
+            # If we have best_model_info, create a simple DataFrame from it
+            if hasattr(self, 'enhanced_results') and 'best_model_info' in self.enhanced_results:
+                logger.info("Creating DataFrame from best_model_info")
+                best_info = self.enhanced_results['best_model_info']
+                metrics = best_info.get('metrics', {})
+                if metrics:
+                    cv_df = pd.DataFrame([{
+                        'fold': best_info.get('fold', 0),
+                        'model_config': 'Config 0',
+                        'sharpe_ratio': metrics.get('sharpe_ratio', 0.0),
+                        'pnl': metrics.get('pnl', 0.0),
+                        'win_rate': metrics.get('win_rate', 0.0),
+                        'max_drawdown': metrics.get('max_drawdown', 0.0)
+                    }])
+                else:
+                    cv_df = pd.DataFrame()
+            else:
+                # String or other type - create error visualization
+                logger.error(f"Cannot visualize CV performance: cv_report is not a DataFrame but {type(cv_report)}")
                 plt.figure(figsize=(10, 6))
-                plt.text(0.5, 0.5, f"CV Visualization Error:\n{str(e)}",
+                plt.text(0.5, 0.5, f"CV Visualization Error:\nExpected DataFrame but got {type(cv_report)}",
                         ha='center', va='center', fontsize=12, color='red')
                 plt.axis('off')
                 
                 chart_path = self.results_dir / "cv_visualization_error.png"
                 plt.savefig(chart_path)
                 logger.info(f"Saved error information to {chart_path}")
-    
-    def _visualize_cv_performance(self, cv_report):
-        """Create visualizations of cross-validation fold performance."""
+                return
+        
+        # Check if DataFrame is empty
+        if cv_df is None or cv_df.empty:
+            # Create a simple fallback visualization with the comparison data
+            logger.warning("CV DataFrame is empty, creating fallback visualization from comparison data")
+            
+            # Try to create a synthetic DataFrame from the results we have
+            try:
+                # First check if we have any results from the approaches
+                synthetic_rows = []
+                
+                # Check original results
+                if hasattr(self, 'original_results') and 'best_model_info' in self.original_results:
+                    metrics = self.original_results['best_model_info'].get('metrics', {})
+                    if metrics and isinstance(metrics, dict):
+                        synthetic_rows.append({
+                            'fold': self.original_results['best_model_info'].get('fold', 0),
+                            'model_config': 'Original',
+                            'sharpe_ratio': metrics.get('sharpe_ratio', 0.0),
+                            'pnl': metrics.get('pnl', 0.0),
+                            'win_rate': metrics.get('win_rate', 0.0),
+                            'max_drawdown': metrics.get('max_drawdown', 0.0)
+                        })
+                
+                # Check enhanced results
+                if hasattr(self, 'enhanced_results') and 'best_model_info' in self.enhanced_results:
+                    metrics = self.enhanced_results['best_model_info'].get('metrics', {})
+                    if metrics and isinstance(metrics, dict):
+                        synthetic_rows.append({
+                            'fold': self.enhanced_results['best_model_info'].get('fold', 0),
+                            'model_config': 'Enhanced',
+                            'sharpe_ratio': metrics.get('sharpe_ratio', 0.0),
+                            'pnl': metrics.get('pnl', 0.0),
+                            'win_rate': metrics.get('win_rate', 0.0),
+                            'max_drawdown': metrics.get('max_drawdown', 0.0)
+                        })
+                
+                # Check HPO results
+                if hasattr(self, 'hpo_results') and 'best_model_info' in self.hpo_results:
+                    metrics = self.hpo_results['best_model_info'].get('metrics', {})
+                    if metrics and isinstance(metrics, dict):
+                        synthetic_rows.append({
+                            'fold': self.hpo_results['best_model_info'].get('fold', 0),
+                            'model_config': 'HPO',
+                            'sharpe_ratio': metrics.get('sharpe_ratio', 0.0),
+                            'pnl': metrics.get('pnl', 0.0),
+                            'win_rate': metrics.get('win_rate', 0.0),
+                            'max_drawdown': metrics.get('max_drawdown', 0.0)
+                        })
+                
+                # Check ablation results
+                if hasattr(self, 'ablation_results'):
+                    for config_name, result in self.ablation_results.items():
+                        if 'best_model_info' in result:
+                            metrics = result['best_model_info'].get('metrics', {})
+                            if metrics and isinstance(metrics, dict):
+                                synthetic_rows.append({
+                                    'fold': result['best_model_info'].get('fold', 0),
+                                    'model_config': config_name.replace('_', ' ').title(),
+                                    'sharpe_ratio': metrics.get('sharpe_ratio', 0.0),
+                                    'pnl': metrics.get('pnl', 0.0),
+                                    'win_rate': metrics.get('win_rate', 0.0),
+                                    'max_drawdown': metrics.get('max_drawdown', 0.0)
+                                })
+                
+                # If we have synthetic data, use it
+                if synthetic_rows:
+                    logger.info(f"Created synthetic CV DataFrame with {len(synthetic_rows)} rows")
+                    cv_df = pd.DataFrame(synthetic_rows)
+                    
+                    # Create a simple bar chart visualization
+                    plt.figure(figsize=(14, 8))
+                    
+                    metrics_to_plot = ['sharpe_ratio', 'pnl', 'win_rate', 'max_drawdown']
+                    titles = ['Sharpe Ratio', 'PnL ($)', 'Win Rate', 'Max Drawdown']
+                    
+                    for i, (metric, title) in enumerate(zip(metrics_to_plot, titles)):
+                        plt.subplot(2, 2, i+1)
+                        plt.bar(cv_df['model_config'], cv_df[metric])
+                        plt.title(f'{title} by Approach')
+                        plt.xticks(rotation=45)
+                        plt.tight_layout()
+                    
+                    chart_path = self.results_dir / "cv_performance_synthetic.png"
+                    plt.savefig(chart_path)
+                    logger.info(f"Saved synthetic CV visualization to {chart_path}")
+                    
+                    # Continue with the regular visualization using this synthetic data
+                    # Don't return here, let it proceed with the regular visualization
+                else:
+                    # Try to use the comparison data if available
+                    if hasattr(self, 'comparison_df') and not self.comparison_df.empty:
+                        plt.figure(figsize=(14, 8))
+                        
+                        # Plot CV metrics from comparison data
+                        metrics = ['CV Sharpe', 'CV PnL ($)', 'CV Win Rate (%)', 'CV Max Drawdown (%)']
+                        approaches = self.comparison_df.index.tolist()
+                        
+                        for i, metric in enumerate(metrics):
+                            plt.subplot(2, 2, i+1)
+                            values = self.comparison_df[metric].values
+                            
+                            # Skip % Improvement row if present
+                            if 'Improvement' in approaches:
+                                values = values[:-1]
+                                plot_approaches = [a for a in approaches if 'Improvement' not in a]
+                            else:
+                                plot_approaches = approaches
+                            
+                            plt.bar(plot_approaches, values)
+                            plt.title(f'{metric} by Approach')
+                            plt.xticks(rotation=45)
+                            plt.tight_layout()
+                        
+                        chart_path = self.results_dir / "cv_performance_fallback.png"
+                        plt.savefig(chart_path)
+                        logger.info(f"Saved fallback CV visualization to {chart_path}")
+                        return
+                    else:
+                        # Try to create a visualization from the comparison report
+                        try:
+                            # Read the comparison CSV if it exists
+                            comparison_path = self.results_dir / "approach_comparison.csv"
+                            if comparison_path.exists():
+                                logger.info(f"Reading comparison data from {comparison_path}")
+                                self.comparison_df = pd.read_csv(comparison_path, index_col=0)
+                                
+                                # Create a simple bar chart visualization
+                                plt.figure(figsize=(14, 8))
+                                
+                                # Plot CV metrics from comparison data
+                                metrics = ['CV Sharpe', 'CV PnL ($)', 'CV Win Rate (%)', 'CV Max Drawdown (%)']
+                                approaches = self.comparison_df.index.tolist()
+                                
+                                for i, metric in enumerate(metrics):
+                                    plt.subplot(2, 2, i+1)
+                                    values = self.comparison_df[metric].values
+                                    
+                                    # Skip % Improvement row if present
+                                    if 'Improvement' in ' '.join(approaches) or '% Improvement' in ' '.join(approaches):
+                                        values = values[:-1]
+                                        plot_approaches = [a for a in approaches if 'Improvement' not in a]
+                                    else:
+                                        plot_approaches = approaches
+                                    
+                                    plt.bar(plot_approaches, values)
+                                    plt.title(f'{metric} by Approach')
+                                    plt.xticks(rotation=45)
+                                    plt.tight_layout()
+                                
+                                chart_path = self.results_dir / "cv_performance_fallback.png"
+                                plt.savefig(chart_path)
+                                logger.info(f"Saved fallback CV visualization from comparison CSV to {chart_path}")
+                                return
+                            else:
+                                logger.warning(f"Comparison file not found at {comparison_path}")
+                        except Exception as e:
+                            logger.error(f"Error creating fallback visualization: {str(e)}")
+                        
+                        # If all else fails, show error
+                        logger.error("Cannot visualize CV performance: DataFrame is empty and no comparison data available")
+                        plt.figure(figsize=(10, 6))
+                        plt.text(0.5, 0.5, "CV Visualization Error:\nNo CV data available for visualization",
+                                ha='center', va='center', fontsize=12, color='red')
+                        plt.axis('off')
+                        
+                        chart_path = self.results_dir / "cv_visualization_error.png"
+                        plt.savefig(chart_path)
+                        logger.info(f"Saved error information to {chart_path}")
+                        return
+            except Exception as e:
+                logger.error(f"Error creating synthetic visualization: {str(e)}")
+                # Continue with regular fallback methods
+        
         # Filter for key metrics
         metrics_to_plot = ['sharpe_ratio', 'pnl', 'win_rate', 'max_drawdown']
         
+        # Create heatmap visualization
         plt.figure(figsize=(16, 12))
         
         for i, metric in enumerate(metrics_to_plot):
             plt.subplot(2, 2, i+1)
             
-            # Extract data for this metric across folds
-            metric_data = cv_report.pivot(index='fold', columns='model_config', values=metric)
-            
-            # Plot as heatmap
-            im = plt.imshow(metric_data.values, cmap='viridis', aspect='auto')
-            
-            # Add colorbar
-            plt.colorbar(im, label=metric)
-            
-            # Add labels
-            plt.title(f'Cross-Validation Performance: {metric}')
-            plt.xlabel('Model Configuration')
-            plt.ylabel('Fold')
-            
-            # Set ticks
-            plt.xticks(range(len(metric_data.columns)), 
-                      [f"Config {i}" for i in range(len(metric_data.columns))], 
-                      rotation=45)
-            plt.yticks(range(len(metric_data.index)), metric_data.index)
-            
+            try:
+                # Extract data for this metric across folds
+                metric_data = cv_df.pivot(index='fold', columns='model_config', values=metric)
+                
+                # Plot as heatmap
+                im = plt.imshow(metric_data.values, cmap='viridis', aspect='auto')
+                
+                # Add colorbar
+                plt.colorbar(im, label=metric)
+                
+                # Add labels
+                plt.title(f'Cross-Validation Performance: {metric}')
+                plt.xlabel('Model Configuration')
+                plt.ylabel('Fold')
+                
+                # Set ticks
+                plt.xticks(range(len(metric_data.columns)),
+                          [f"Config {i}" for i in range(len(metric_data.columns))],
+                          rotation=45)
+                plt.yticks(range(len(metric_data.index)), metric_data.index)
+            except Exception as e:
+                # Handle visualization errors for individual metrics
+                logger.error(f"Error creating heatmap for {metric}: {str(e)}")
+                plt.text(0.5, 0.5, f"Error visualizing {metric}:\n{str(e)}",
+                        ha='center', va='center', fontsize=10, color='red')
+                plt.title(f'Cross-Validation Performance: {metric} (ERROR)')
+        
         plt.tight_layout()
         chart_path = self.results_dir / "cv_performance_heatmap.png"
         plt.savefig(chart_path)
@@ -725,32 +1095,46 @@ class ModelSelectionTester:
         # Create parallel coordinates plot for multi-dimensional analysis
         plt.figure(figsize=(12, 6))
         
-        # Prepare data - normalize each metric to [0,1] range for comparison
-        normalized_data = pd.DataFrame()
-        
-        for metric in metrics_to_plot:
-            if metric == 'max_drawdown':
-                # Invert max_drawdown so higher is better (consistent with other metrics)
-                normalized_data[metric] = 1 - (cv_report[metric] - cv_report[metric].min()) / \
-                                         (cv_report[metric].max() - cv_report[metric].min())
-            else:
-                normalized_data[metric] = (cv_report[metric] - cv_report[metric].min()) / \
-                                         (cv_report[metric].max() - cv_report[metric].min())
-        
-        # Add fold and config columns
-        normalized_data['fold'] = cv_report['fold']
-        normalized_data['config'] = cv_report['model_config']
-        
-        # Plot parallel coordinates
-        pd.plotting.parallel_coordinates(normalized_data, 'config', colormap='viridis')
-        
-        plt.title('Multi-Metric Performance by Model Configuration')
-        plt.grid(True)
-        plt.tight_layout()
-        
-        chart_path = self.results_dir / "multi_metric_parallel_plot.png"
-        plt.savefig(chart_path)
-        logger.info(f"Saved multi-metric parallel coordinates plot to {chart_path}")
+        try:
+            # Prepare data - normalize each metric to [0,1] range for comparison
+            normalized_data = pd.DataFrame()
+            
+            for metric in metrics_to_plot:
+                if cv_df[metric].max() == cv_df[metric].min():
+                    # Handle case where all values are the same
+                    normalized_data[metric] = 0.5  # Set to middle value
+                elif metric == 'max_drawdown':
+                    # Invert max_drawdown so higher is better (consistent with other metrics)
+                    normalized_data[metric] = 1 - (cv_df[metric] - cv_df[metric].min()) / \
+                                             (cv_df[metric].max() - cv_df[metric].min())
+                else:
+                    normalized_data[metric] = (cv_df[metric] - cv_df[metric].min()) / \
+                                             (cv_df[metric].max() - cv_df[metric].min())
+            
+            # Add fold and config columns
+            normalized_data['fold'] = cv_df['fold']
+            normalized_data['config'] = cv_df['model_config']
+            
+            # Plot parallel coordinates
+            pd.plotting.parallel_coordinates(normalized_data, 'config', colormap='viridis')
+            
+            plt.title('Multi-Metric Performance by Model Configuration')
+            plt.grid(True)
+            plt.tight_layout()
+            
+            chart_path = self.results_dir / "multi_metric_parallel_plot.png"
+            plt.savefig(chart_path)
+            logger.info(f"Saved multi-metric parallel coordinates plot to {chart_path}")
+        except Exception as e:
+            logger.error(f"Error creating parallel coordinates plot: {str(e)}")
+            plt.text(0.5, 0.5, f"Error creating parallel coordinates plot:\n{str(e)}",
+                    ha='center', va='center', fontsize=12, color='red')
+            plt.title('Multi-Metric Performance (ERROR)')
+            plt.tight_layout()
+            
+            chart_path = self.results_dir / "multi_metric_parallel_plot_error.png"
+            plt.savefig(chart_path)
+            logger.info(f"Saved error information to {chart_path}")
         
     def _create_minimal_sample_data(self):
         """Create a minimal sample DataFrame for testing when data fetching fails."""
@@ -821,6 +1205,21 @@ class ModelSelectionTester:
                 logger.error(f"Exception in enhanced approach: {str(e)}")
                 logger.exception("Exception details:")
                 results_summary['enhanced'] = {'status': 'exception', 'error': str(e)}
+            
+            # Run HPO approach if enabled
+            if self.use_hpo:
+                logger.info("Step 3: Running HPO approach")
+                try:
+                    hpo_results = self.run_hpo_approach()
+                    if 'error' in hpo_results:
+                        logger.warning(f"HPO approach encountered errors: {hpo_results['error']}")
+                        results_summary['hpo'] = {'status': 'error', 'error': hpo_results['error']}
+                    else:
+                        results_summary['hpo'] = {'status': 'success'}
+                except Exception as e:
+                    logger.error(f"Exception in HPO approach: {str(e)}")
+                    logger.exception("Exception details:")
+                    results_summary['hpo'] = {'status': 'exception', 'error': str(e)}
             
             # Run ablation study
             logger.info("Step 3: Running ablation study")
@@ -943,19 +1342,22 @@ def create_sample_data(data_path):
 def main():
     """Main function to run the test."""
     try:
-        # Default config and data paths
-        config_path = "config/backtesting_config.json"
-        data_path = "data/processed_market_data.csv"
+        # Parse command line arguments
+        import argparse
+        parser = argparse.ArgumentParser(description='Test model selection improvements')
+        parser.add_argument('--config', type=str, default='config/backtesting_config.json', help='Path to configuration file')
+        parser.add_argument('--data', type=str, default='data/processed_market_data.csv', help='Path to market data file')
+        parser.add_argument('--hpo', action='store_true', help='Enable hyperparameter optimization')
+        args = parser.parse_args()
         
         # Create sample data if needed
-        if not create_sample_data(data_path):
+        if not create_sample_data(args.data):
             logger.error("Failed to create or verify sample data, cannot proceed with test")
             return None
             
         # Create tester
-        logger.info(f"Initializing tester with config: {config_path} and data: {data_path}")
-        tester = ModelSelectionTester(config_path, data_path)
-        
+        logger.info(f"Initializing tester with config: {args.config} and data: {args.data}, HPO: {args.hpo}")
+        tester = ModelSelectionTester(args.config, args.data, use_hpo=args.hpo)
         
         # Run the complete test
         logger.info("Starting complete test...")

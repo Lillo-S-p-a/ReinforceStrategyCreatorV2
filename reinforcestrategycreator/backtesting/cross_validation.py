@@ -2,7 +2,7 @@
 Cross-validation module for backtesting.
 
 This module provides functionality for performing time-series cross-validation
-for backtesting reinforcement learning trading strategies.
+and hyperparameter optimization for backtesting reinforcement learning trading strategies.
 """
 
 import os
@@ -11,11 +11,12 @@ import pandas as pd
 import numpy as np
 import ray
 import time
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 from reinforcestrategycreator.trading_environment import TradingEnv as TradingEnvironment
 from reinforcestrategycreator.rl_agent import StrategyAgent as RLAgent
 from reinforcestrategycreator.backtesting.evaluation import MetricsCalculator
+from reinforcestrategycreator.backtesting.hyperparameter_optimization import HyperparameterOptimizer
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -30,12 +31,15 @@ class CrossValidator:
     results.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  train_data: pd.DataFrame,
                  config: Dict[str, Any],
                  cv_folds: int = 5,
                  models_dir: str = "models",
-                 random_seed: int = 42) -> None:
+                 random_seed: int = 42,
+                 use_hpo: bool = False,
+                 hpo_num_samples: int = 10,
+                 hpo_max_concurrent_trials: int = 4) -> None:
         """
         Initialize the cross-validator.
         
@@ -45,21 +49,40 @@ class CrossValidator:
             cv_folds: Number of cross-validation folds
             models_dir: Directory to save models
             random_seed: Random seed for reproducibility
+            use_hpo: Whether to use hyperparameter optimization
+            hpo_num_samples: Number of hyperparameter configurations to try
+            hpo_max_concurrent_trials: Maximum number of concurrent trials
         """
         self.train_data = train_data
         self.config = config
         self.cv_folds = cv_folds
         self.models_dir = models_dir
         self.random_seed = random_seed
+        self.use_hpo = use_hpo
+        self.hpo_num_samples = hpo_num_samples
+        self.hpo_max_concurrent_trials = hpo_max_concurrent_trials
         
         # Initialize containers for results
         self.cv_results = []
+        self.hpo_results = None
+        self.best_hpo_params = None
         
         # Create models directory if it doesn't exist
         os.makedirs(self.models_dir, exist_ok=True)
         
         # Initialize metrics calculator
         self.metrics_calculator = MetricsCalculator()
+        
+        # Initialize hyperparameter optimizer if needed
+        if self.use_hpo:
+            self.hyperparameter_optimizer = HyperparameterOptimizer(
+                train_data=self.train_data,
+                config=self.config,
+                models_dir=os.path.join(self.models_dir, "hpo"),
+                random_seed=self.random_seed,
+                num_samples=self.hpo_num_samples,
+                max_concurrent_trials=self.hpo_max_concurrent_trials
+            )
     
     @ray.remote
     def _process_fold_remote(fold, train_data_full, fold_size, cv_folds, config, models_dir, random_seed):
@@ -427,12 +450,63 @@ class CrossValidator:
     def select_best_model(self) -> Dict[str, Any]:
         """
         Select best model configuration using multiple metrics.
+        If HPO was used, incorporate those results.
         
         Returns:
             Dictionary containing best parameters and model path
         """
-        logger.info("Selecting best model from CV results using enhanced multi-metric approach")
+        logger.info("Selecting best model using enhanced multi-metric approach")
         
+        # If HPO was used, prioritize those results
+        if self.use_hpo and self.best_hpo_params:
+            logger.info("Using best hyperparameters from HPO")
+            best_params = self.best_hpo_params
+            
+            # Extract metrics from HPO results if available
+            metrics = {
+                "sharpe_ratio": 0.0,
+                "pnl": 0.0,
+                "win_rate": 0.0,
+                "max_drawdown": 0.0
+            }
+            
+            if self.hpo_results and len(self.hpo_results) > 0:
+                try:
+                    # Find the best trial based on combined score
+                    best_trial = max(self.hpo_results.values(), key=lambda x: x.get("combined_score", 0))
+                    
+                    # Log the best trial metrics for debugging
+                    logger.info(f"Best HPO trial metrics: {best_trial}")
+                    
+                    # Extract metrics, ensuring we have values
+                    if isinstance(best_trial, dict):
+                        metrics = {
+                            "sharpe_ratio": best_trial.get("sharpe_ratio", 0.0),
+                            "pnl": best_trial.get("pnl", 0.0),
+                            "win_rate": best_trial.get("win_rate", 0.0),
+                            "max_drawdown": best_trial.get("max_drawdown", 0.0)
+                        }
+                        
+                        # If we have a score but no metrics, try to extract from other fields
+                        if all(v == 0.0 for v in metrics.values()) and "score" in best_trial:
+                            metrics["sharpe_ratio"] = best_trial.get("score", 0.0)
+                            
+                        # Log the extracted metrics
+                        logger.info(f"Extracted HPO metrics: {metrics}")
+                    else:
+                        logger.warning(f"Best trial is not a dictionary: {type(best_trial)}")
+                except Exception as e:
+                    logger.error(f"Error extracting metrics from HPO results: {e}")
+            
+            return {
+                "params": best_params,
+                "metrics": metrics,
+                "model_path": best_params.get("model_path", ""),
+                "fold": -1,  # No fold for HPO
+                "source": "hpo"
+            }
+        
+        # Otherwise, use CV results
         if not self.cv_results:
             raise ValueError("No CV results available. Run perform_cross_validation() first.")
         
@@ -459,18 +533,25 @@ class CrossValidator:
                 best_score = -float('inf')
                 best_result = None
                 
+                # Get metric weights from config
+                weights = self.config.get("cross_validation", {}).get("metric_weights", {
+                    "sharpe_ratio": 0.4,
+                    "pnl": 0.3,
+                    "win_rate": 0.2,
+                    "max_drawdown": 0.1
+                })
+                
                 for result in qualified_models:
                     metrics = result["val_metrics"]
                     # Combined score with weights for different metrics
-                    # This formula can be tuned based on trading objectives
                     initial_balance = self.config.get("initial_balance", 10000)
                     pnl_pct = metrics["pnl"] / initial_balance if initial_balance > 0 else 0
                     
                     score = (
-                        0.4 * metrics["sharpe_ratio"] +
-                        0.3 * pnl_pct +
-                        0.2 * metrics["win_rate"] -
-                        0.1 * metrics["max_drawdown"]
+                        weights["sharpe_ratio"] * metrics["sharpe_ratio"] +
+                        weights["pnl"] * pnl_pct +
+                        weights["win_rate"] * metrics["win_rate"] -
+                        weights["max_drawdown"] * metrics["max_drawdown"]
                     )
                     
                     if score > best_score:
@@ -494,6 +575,10 @@ class CrossValidator:
             
             # Extract parameters from the best fold
             fold_num = best_result.get("fold", -1)
+            
+            # Log the best fold number and metrics for debugging
+            logger.info(f"Selected best fold: {fold_num} with metrics: {best_result['val_metrics']}")
+            
             best_params = {
                 "learning_rate": self.config.get("learning_rate", 0.001),
                 "gamma": self.config.get("gamma", 0.99),
@@ -506,12 +591,18 @@ class CrossValidator:
                 "fold": fold_num,  # Store which fold was best
             }
             
-            return {
+            # Create the result dictionary with explicit metrics
+            result = {
                 "params": best_params,
                 "model_path": best_result["model_path"],
                 "metrics": best_result["val_metrics"],
                 "fold": fold_num
             }
+            
+            # Log the final result for debugging
+            logger.info(f"Returning best model info: {result}")
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error selecting best model: {e}", exc_info=True)
@@ -572,6 +663,95 @@ class CrossValidator:
         
         return report
         
+    def generate_cv_dataframe(self) -> pd.DataFrame:
+        """
+        Generate a DataFrame representation of cross-validation results for visualization.
+        
+        Returns:
+            DataFrame containing CV results with columns for fold, model_config, and metrics
+        """
+        # Create list to hold rows for DataFrame
+        rows = []
+        
+        # Check if we have CV results
+        if not self.cv_results:
+            logger.warning("No CV results available for DataFrame generation")
+            
+            # If we have HPO results, try to create a DataFrame from those
+            if self.use_hpo and self.hpo_results and len(self.hpo_results) > 0:
+                logger.info("Attempting to create DataFrame from HPO results")
+                try:
+                    for trial_id, trial_result in self.hpo_results.items():
+                        # Extract metrics, ensuring we handle None values
+                        if not isinstance(trial_result, dict):
+                            continue
+                            
+                        # Create a row for this trial
+                        row = {
+                            'fold': int(trial_id.split('_')[-1]) if '_' in trial_id else 0,
+                            'model_config': f"HPO {trial_id}",
+                            'sharpe_ratio': trial_result.get("sharpe_ratio", trial_result.get("score", 0.0)),
+                            'pnl': trial_result.get("pnl", 0.0),
+                            'win_rate': trial_result.get("win_rate", 0.0),
+                            'max_drawdown': trial_result.get("max_drawdown", 0.0)
+                        }
+                        rows.append(row)
+                        
+                    if rows:
+                        df = pd.DataFrame(rows)
+                        logger.info(f"Generated CV DataFrame from HPO results with shape: {df.shape}")
+                        return df
+                except Exception as e:
+                    logger.error(f"Error creating DataFrame from HPO results: {e}")
+            
+            # Return empty DataFrame with expected columns if no data available
+            return pd.DataFrame(columns=['fold', 'model_config', 'sharpe_ratio', 'pnl', 'win_rate', 'max_drawdown'])
+        
+        # Process each fold result from CV
+        for fold, result in enumerate(self.cv_results):
+            if "error" in result:
+                continue
+                
+            # Extract metrics, ensuring we handle None values
+            metrics = result.get("val_metrics", {})
+            if metrics is None:
+                metrics = {}
+                
+            # Log the metrics for debugging
+            logger.info(f"Fold {fold} metrics for DataFrame: {metrics}")
+            
+            # Create a row for this fold
+            row = {
+                'fold': fold,
+                'model_config': f"Config {fold}",  # Default config name
+                'sharpe_ratio': metrics.get("sharpe_ratio", 0.0),
+                'pnl': metrics.get("pnl", 0.0),
+                'win_rate': metrics.get("win_rate", 0.0),
+                'max_drawdown': metrics.get("max_drawdown", 0.0)
+            }
+            
+            rows.append(row)
+        
+        # If we have no valid rows, create a dummy row to avoid empty DataFrame
+        if not rows:
+            logger.warning("No valid fold results found, creating dummy row")
+            rows.append({
+                'fold': 0,
+                'model_config': 'Default',
+                'sharpe_ratio': 0.0,
+                'pnl': 0.0,
+                'win_rate': 0.0,
+                'max_drawdown': 0.0
+            })
+            
+        # Create DataFrame
+        df = pd.DataFrame(rows)
+        
+        # Log the DataFrame shape for debugging
+        logger.info(f"Generated CV DataFrame with shape: {df.shape}")
+        
+        return df
+        
     def get_cv_results(self) -> List[Dict[str, Any]]:
         """
         Get cross-validation results.
@@ -580,3 +760,45 @@ class CrossValidator:
             List of dictionaries containing results for each fold
         """
         return self.cv_results
+        
+    def run_hyperparameter_optimization(self) -> Dict[str, Any]:
+        """
+        Run hyperparameter optimization.
+        
+        Returns:
+            Dictionary containing best hyperparameters
+        """
+        if not self.use_hpo:
+            logger.warning("HPO is not enabled. Set use_hpo=True when initializing CrossValidator.")
+            return {}
+        
+        logger.info("Running hyperparameter optimization")
+        
+        # Run HPO
+        self.best_hpo_params = self.hyperparameter_optimizer.optimize_hyperparameters()
+        
+        # Store HPO results
+        self.hpo_results = self.hyperparameter_optimizer.get_hpo_results()
+        
+        # Generate HPO report
+        hpo_report = self.hyperparameter_optimizer.generate_hpo_report()
+        logger.info(f"\n{hpo_report}")
+        
+        return self.best_hpo_params
+    
+    def get_hpo_results(self) -> Dict[str, Any]:
+        """
+        Get hyperparameter optimization results.
+        
+        Returns:
+            Dictionary containing HPO results
+        """
+        if not self.use_hpo:
+            logger.warning("HPO is not enabled. Set use_hpo=True when initializing CrossValidator.")
+            return {}
+        
+        if self.hpo_results is None:
+            logger.warning("No HPO results available. Run run_hyperparameter_optimization() first.")
+            return {}
+        
+        return self.hpo_results
