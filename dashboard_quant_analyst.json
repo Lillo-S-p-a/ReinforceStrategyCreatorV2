@@ -1,0 +1,206 @@
+{
+  "title": "Quantitative Strategy Performance & Risk Analysis",
+  "description": "Dashboard for Quant Analysts to monitor financial performance, risk, and strategy validity.",
+  "layout_type": "ordered",
+  "template_variables": [
+    {
+      "name": "test_run_id",
+      "prefix": "test_run_id",
+      "default": "*"
+    },
+    {
+      "name": "asset",
+      "prefix": "asset",
+      "default": "*"
+    },
+    {
+      "name": "model_type",
+      "prefix": "model_type",
+      "default": "*"
+    },
+    {
+      "name": "approach_name",
+      "prefix": "approach_name",
+      "default": "*"
+    }
+  ],
+  "widgets": [
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 1: Riepilogo Performance Finanziaria Chiave (Approach: $approach_name)",
+        "widgets": [
+          {
+            "definition": {
+              "title": "PnL Finale",
+              "type": "query_value",
+              "requests": [{"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name}", "aggregator": "last", "conditional_formats": [{"comparator": ">", "value": 0, "palette": "green_on_white"}, {"comparator": "<", "value": 0, "palette": "red_on_white"}]}],
+              "autoscale": true, "precision": 2
+            }
+          },
+          {
+            "definition": {
+              "title": "Sharpe Ratio Finale",
+              "type": "query_value",
+              "requests": [{"q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name}", "aggregator": "last"}],
+              "autoscale": true, "precision": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Max Drawdown Finale (%)",
+              "type": "query_value",
+              "requests": [{"q": "avg:final.max_drawdown{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} * 100", "aggregator": "last", "conditional_formats": [{"comparator": ">", "value": 20, "palette": "red_on_white"}, {"comparator": "<=", "value": 10, "palette": "green_on_white"}]}],
+              "autoscale": true, "precision": 2
+            }
+          },
+          {
+            "definition": {
+              "title": "Win Rate Finale (%)",
+              "type": "query_value",
+              "requests": [{"q": "avg:final.win_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} * 100", "aggregator": "last"}],
+              "autoscale": true, "precision": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 2: Analisi Temporale delle Performance (Approach: $approach_name)",
+        "widgets": [
+          {
+            "definition": {"title": "Trend PnL Finale", "type": "timeseries", "requests": [{"q": "avg:final.pnl{asset:$asset, model_type:$model_type, approach_name:$approach_name} by {test_run_id}", "display_type": "line"}], "show_legend": true}
+          },
+          {
+            "definition": {"title": "Trend Sharpe Ratio Finale", "type": "timeseries", "requests": [{"q": "avg:final.sharpe_ratio{asset:$asset, model_type:$model_type, approach_name:$approach_name} by {test_run_id}", "display_type": "line"}], "show_legend": true}
+          },
+          {
+            "definition": {"title": "Trend Max Drawdown Finale (%)", "type": "timeseries", "requests": [{"q": "avg:final.max_drawdown{asset:$asset, model_type:$model_type, approach_name:$approach_name} by {test_run_id}", "display_type": "line"}], "show_legend": true, "yaxis": {"label": "%"}}
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 3: Confronto Strategie (Original vs Enhanced vs HPO)",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Confronto Performance Finanziarie per Approach", "type": "query_table",
+              "requests": [
+                {"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}", "alias": "PnL ($)", "aggregator": "avg"},
+                {"q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}", "alias": "Sharpe Ratio", "aggregator": "avg"},
+                {"q": "avg:final.max_drawdown{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}", "alias": "Max Drawdown (%)", "aggregator": "avg"},
+                {"q": "avg:final.win_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}", "alias": "Win Rate (%)", "aggregator": "avg"}
+              ], "has_search_bar": "auto"
+            }
+          },
+          {
+            "definition": {"title": "PnL Finale per Approach", "type": "bar_chart", "requests": [{"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}", "style": {"palette": "dog_classic"}}]}
+          },
+          {
+            "definition": {"title": "Sharpe Ratio Finale per Approach", "type": "bar_chart", "requests": [{"q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}", "style": {"palette": "dog_classic"}}]}
+          },
+          {
+            "definition": {
+              "title": "% Miglioramento Metriche Chiave (vs Original)", "type": "query_table",
+              "requests": [
+                {"q": "avg:comparison.improvement.final_pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type}", "alias": "% Impr. PnL", "aggregator": "avg"},
+                {"q": "avg:comparison.improvement.final_sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type}", "alias": "% Impr. Sharpe", "aggregator": "avg"},
+                {"q": "avg:comparison.improvement.final_max_drawdown{test_run_id:$test_run_id, asset:$asset, model_type:$model_type}", "alias": "% Impr. Max Drawdown", "aggregator": "avg"}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 4: Analisi di Stabilità e Rischio (CV - Approach: $approach_name)",
+        "widgets": [
+          {
+            "definition": {"title": "Distribuzione PnL per Fold CV", "type": "distribution", "requests": [{"q": "avg:cv.fold_detail.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {cv_model_config}", "style": {"palette": "dog_classic"}}], "show_legend": true}
+          },
+          {
+            "definition": {"title": "Distribuzione Sharpe Ratio per Fold CV", "type": "distribution", "requests": [{"q": "avg:cv.fold_detail.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {cv_model_config}", "style": {"palette": "dog_classic"}}], "show_legend": true}
+          },
+          {
+            "definition": {"title": "Stabilità PnL CV (Dev.Std. tra Fold)", "type": "timeseries", "requests": [{"q": "avg:cv.all_folds.pnl.std{asset:$asset, model_type:$model_type, approach_name:$approach_name} by {test_run_id}", "display_type": "line"}], "show_legend": true}
+          },
+          {
+            "definition": {"title": "Stabilità Sharpe Ratio CV (Dev.Std. tra Fold)", "type": "timeseries", "requests": [{"q": "avg:cv.all_folds.sharpe_ratio.std{asset:$asset, model_type:$model_type, approach_name:$approach_name} by {test_run_id}", "display_type": "line"}], "show_legend": true}
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 5: Analisi Correlazioni Metriche Finanziarie (Final Backtest)",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Correlazione: Sharpe Ratio vs PnL", "type": "scatterplot",
+              "requests": {
+                "x": {"q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name, test_run_id}", "aggregator": "avg"},
+                "y": {"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name, test_run_id}", "aggregator": "avg"}
+              },
+              "color_by_groups": ["approach_name"]
+            }
+          },
+          {
+            "definition": {
+              "title": "Correlazione: PnL vs Max Drawdown", "type": "scatterplot",
+              "requests": {
+                "x": {"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name, test_run_id}", "aggregator": "avg"},
+                "y": {"q": "avg:final.max_drawdown{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name, test_run_id}", "aggregator": "avg"}
+              },
+              "color_by_groups": ["approach_name"], "yaxis": {"label": "Max Drawdown (%)"}
+            }
+          },
+          {
+            "definition": {
+              "title": "Correlazione: Win Rate vs Sharpe Ratio", "type": "scatterplot",
+              "requests": {
+                "x": {"q": "avg:final.win_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name, test_run_id}", "aggregator": "avg"},
+                "y": {"q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name, test_run_id}", "aggregator": "avg"}
+              },
+              "color_by_groups": ["approach_name"], "xaxis": {"label": "Win Rate (%)"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 6: Dettagli Configurazione Rilevante (Approach: $approach_name)",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Configurazione Rilevante", "type": "query_table",
+              "requests": [
+                {"q": "avg:model.config.learning_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {approach_name}", "alias": "LR", "aggregator": "avg"},
+                {"q": "avg:config.metric_weights.sharpe_ratio{test_run_id:$test_run_id} by {test_run_id}", "alias": "CV Sharpe Weight", "aggregator": "last"},
+                {"q": "avg:data.split.test_ratio{test_run_id:$test_run_id} by {test_run_id}", "alias": "Test Ratio", "aggregator": "last"},
+                {"q": "avg:data.split.cv_folds{test_run_id:$test_run_id} by {test_run_id}", "alias": "CV Folds", "aggregator": "last"}
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "notify_list": [],
+  "reflow_type": "auto"
+}
