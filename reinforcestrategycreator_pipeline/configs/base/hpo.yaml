@@ -1,0 +1,263 @@
+# Hyperparameter Optimization Configuration
+
+# Default HPO settings
+default:
+  # Number of trials to run
+  num_trials: 20
+  
+  # Maximum concurrent trials (null for auto)
+  max_concurrent_trials: 4
+  
+  # Search algorithm: "random", "optuna", "bayesopt"
+  search_algorithm: "optuna"
+  
+  # Scheduler: "asha", "pbt", null
+  scheduler: "asha"
+  
+  # Resources per trial
+  resources_per_trial:
+    cpu: 1
+    gpu: 0
+  
+  # Ray configuration
+  ray_config:
+    num_cpus: null  # Auto-detect
+    num_gpus: null  # Auto-detect
+    include_dashboard: false
+    _temp_dir: "/tmp/ray"
+
+# Model-specific search spaces
+search_spaces:
+  # PPO model hyperparameters
+  ppo:
+    learning_rate:
+      type: "loguniform"
+      low: 0.00001
+      high: 0.01
+    
+    n_steps:
+      type: "choice"
+      values: [128, 256, 512, 1024, 2048]
+    
+    batch_size:
+      type: "choice"
+      values: [32, 64, 128, 256]
+    
+    n_epochs:
+      type: "randint"
+      low: 3
+      high: 30
+    
+    gamma:
+      type: "uniform"
+      low: 0.9
+      high: 0.999
+    
+    gae_lambda:
+      type: "uniform"
+      low: 0.9
+      high: 1.0
+    
+    clip_range:
+      type: "uniform"
+      low: 0.1
+      high: 0.4
+    
+    ent_coef:
+      type: "loguniform"
+      low: 0.00001
+      high: 0.1
+    
+    vf_coef:
+      type: "uniform"
+      low: 0.1
+      high: 1.0
+    
+    max_grad_norm:
+      type: "uniform"
+      low: 0.3
+      high: 5.0
+  
+  # DQN model hyperparameters
+  dqn:
+    learning_rate:
+      type: "loguniform"
+      low: 0.00001
+      high: 0.01
+    
+    buffer_size:
+      type: "choice"
+      values: [10000, 50000, 100000, 500000, 1000000]
+    
+    learning_starts:
+      type: "choice"
+      values: [1000, 5000, 10000, 50000]
+    
+    batch_size:
+      type: "choice"
+      values: [32, 64, 128, 256]
+    
+    tau:
+      type: "uniform"
+      low: 0.001
+      high: 0.1
+    
+    gamma:
+      type: "uniform"
+      low: 0.9
+      high: 0.999
+    
+    train_freq:
+      type: "choice"
+      values: [1, 4, 8, 16]
+    
+    gradient_steps:
+      type: "choice"
+      values: [1, 2, 4, 8]
+    
+    target_update_interval:
+      type: "choice"
+      values: [1000, 5000, 10000, 20000]
+    
+    exploration_fraction:
+      type: "uniform"
+      low: 0.05
+      high: 0.5
+    
+    exploration_initial_eps:
+      type: "uniform"
+      low: 0.5
+      high: 1.0
+    
+    exploration_final_eps:
+      type: "uniform"
+      low: 0.01
+      high: 0.1
+  
+  # A2C model hyperparameters
+  a2c:
+    learning_rate:
+      type: "loguniform"
+      low: 0.00001
+      high: 0.01
+    
+    n_steps:
+      type: "choice"
+      values: [5, 8, 16, 32, 64, 128]
+    
+    gamma:
+      type: "uniform"
+      low: 0.9
+      high: 0.999
+    
+    gae_lambda:
+      type: "uniform"
+      low: 0.9
+      high: 1.0
+    
+    ent_coef:
+      type: "loguniform"
+      low: 0.00001
+      high: 0.1
+    
+    vf_coef:
+      type: "uniform"
+      low: 0.1
+      high: 1.0
+    
+    max_grad_norm:
+      type: "uniform"
+      low: 0.3
+      high: 5.0
+    
+    rms_prop_eps:
+      type: "loguniform"
+      low: 0.00001
+      high: 0.001
+    
+    use_rms_prop:
+      type: "choice"
+      values: [true, false]
+    
+    use_sde:
+      type: "choice"
+      values: [true, false]
+    
+    normalize_advantage:
+      type: "choice"
+      values: [true, false]
+
+# Parameter mappings for different model types
+# Maps HPO parameter names to model config paths
+param_mappings:
+  ppo:
+    learning_rate: "hyperparameters.learning_rate"
+    n_steps: "hyperparameters.n_steps"
+    batch_size: "hyperparameters.batch_size"
+    n_epochs: "hyperparameters.n_epochs"
+    gamma: "hyperparameters.gamma"
+    gae_lambda: "hyperparameters.gae_lambda"
+    clip_range: "hyperparameters.clip_range"
+    ent_coef: "hyperparameters.ent_coef"
+    vf_coef: "hyperparameters.vf_coef"
+    max_grad_norm: "hyperparameters.max_grad_norm"
+  
+  dqn:
+    learning_rate: "hyperparameters.learning_rate"
+    buffer_size: "hyperparameters.buffer_size"
+    learning_starts: "hyperparameters.learning_starts"
+    batch_size: "hyperparameters.batch_size"
+    tau: "hyperparameters.tau"
+    gamma: "hyperparameters.gamma"
+    train_freq: "hyperparameters.train_freq"
+    gradient_steps: "hyperparameters.gradient_steps"
+    target_update_interval: "hyperparameters.target_update_interval"
+    exploration_fraction: "hyperparameters.exploration_fraction"
+    exploration_initial_eps: "hyperparameters.exploration_initial_eps"
+    exploration_final_eps: "hyperparameters.exploration_final_eps"
+  
+  a2c:
+    learning_rate: "hyperparameters.learning_rate"
+    n_steps: "hyperparameters.n_steps"
+    gamma: "hyperparameters.gamma"
+    gae_lambda: "hyperparameters.gae_lambda"
+    ent_coef: "hyperparameters.ent_coef"
+    vf_coef: "hyperparameters.vf_coef"
+    max_grad_norm: "hyperparameters.max_grad_norm"
+    rms_prop_eps: "hyperparameters.rms_prop_eps"
+    use_rms_prop: "hyperparameters.use_rms_prop"
+    use_sde: "hyperparameters.use_sde"
+    normalize_advantage: "hyperparameters.normalize_advantage"
+
+# HPO experiment presets
+experiments:
+  # Quick test run
+  quick_test:
+    num_trials: 5
+    max_concurrent_trials: 2
+    search_algorithm: "random"
+    scheduler: null
+  
+  # Standard optimization
+  standard:
+    num_trials: 50
+    max_concurrent_trials: 4
+    search_algorithm: "optuna"
+    scheduler: "asha"
+  
+  # Extensive search
+  extensive:
+    num_trials: 200
+    max_concurrent_trials: 8
+    search_algorithm: "optuna"
+    scheduler: "pbt"
+  
+  # Production optimization
+  production:
+    num_trials: 100
+    max_concurrent_trials: 16
+    search_algorithm: "optuna"
+    scheduler: "asha"
+    resources_per_trial:
+      cpu: 2
+      gpu: 0

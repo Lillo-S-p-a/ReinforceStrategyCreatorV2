@@ -1,0 +1,99 @@
+# Production environment overrides
+environment: "production"
+
+# Data configuration for production
+data:
+  # Use full historical data
+  start_date: "2020-01-01"
+  end_date: "2023-12-31"
+  
+  # Full symbol list
+  symbols:
+    - "AAPL"
+    - "GOOGL"
+    - "MSFT"
+    - "AMZN"
+    - "TSLA"
+    - "META"
+    - "NVDA"
+    - "JPM"
+    - "V"
+    - "JNJ"
+  
+  # Strict validation
+  validation_enabled: true
+  validation_rules:
+    min_data_points: 500
+    max_missing_ratio: 0.05
+    check_duplicates: true
+    check_outliers: true
+
+# Model configuration for production
+model:
+  # Full model architecture
+  hyperparameters:
+    hidden_layers: [512, 256, 128, 64]
+    dropout_rate: 0.3  # More regularization
+  
+  # Enable checkpointing
+  save_frequency: 5
+  checkpoint_dir: "./checkpoints/prod"
+
+# Training configuration for production
+training:
+  episodes: 200  # Full training
+  batch_size: 64
+  learning_rate: 0.0005  # More conservative learning
+  replay_buffer_size: 50000
+  early_stopping_patience: 20
+  use_tensorboard: true
+  log_dir: "./logs/prod"
+
+# Evaluation configuration for production
+evaluation:
+  test_episodes: 20
+  save_results: true
+  results_dir: "./results/prod"
+  generate_plots: true
+  # Comprehensive metrics
+  metrics:
+    - "sharpe_ratio"
+    - "total_return"
+    - "max_drawdown"
+    - "win_rate"
+    - "profit_factor"
+    - "calmar_ratio"
+    - "sortino_ratio"
+    - "var_95"
+    - "cvar_95"
+
+# Deployment configuration for production
+deployment:
+  mode: "live"  # Live trading
+  api_endpoint: "${PROD_TRADING_API_ENDPOINT}"
+  api_key: "${PROD_TRADING_API_KEY}"
+  # Conservative settings
+  max_positions: 10
+  position_size: 0.05  # 5% per position
+  risk_limit: 0.01  # 1% risk per trade
+  update_frequency: "1h"
+
+# Monitoring configuration for production
+monitoring:
+  enabled: true
+  datadog_api_key: "${DATADOG_API_KEY}"
+  datadog_app_key: "${DATADOG_APP_KEY}"
+  log_level: "WARNING"
+  metrics_prefix: "model_pipeline.prod"
+  # Strict alert thresholds
+  alert_thresholds:
+    sharpe_ratio_min: 1.0
+    max_drawdown_max: 0.10
+    error_rate_max: 0.01
+    latency_p99_max: 1000  # ms
+
+# Production artifact store (could be S3 or similar)
+artifact_store: "${PROD_ARTIFACT_STORE:./artifacts/prod}"
+
+# Ensure reproducibility
+random_seed: 42

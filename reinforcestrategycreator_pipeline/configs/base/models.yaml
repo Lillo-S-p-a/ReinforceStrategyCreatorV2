@@ -1,0 +1,110 @@
+# Model configuration templates
+
+# DQN (Deep Q-Network) configuration
+dqn:
+  model_type: "DQN"
+  hyperparameters:
+    # Network architecture
+    hidden_layers: [256, 128, 64]
+    activation: "relu"
+    dropout_rate: 0.2
+    
+    # DQN specific
+    double_dqn: true
+    dueling_dqn: false
+    prioritized_replay: true
+    
+    # Memory
+    memory_size: 10000
+    prioritized_replay_alpha: 0.6
+    prioritized_replay_beta: 0.4
+    
+    # Training
+    update_frequency: 4
+    target_update_frequency: 100
+
+# PPO (Proximal Policy Optimization) configuration
+ppo:
+  model_type: "PPO"
+  hyperparameters:
+    # Network architecture
+    policy_layers: [256, 128]
+    value_layers: [256, 128]
+    activation: "tanh"
+    
+    # PPO specific
+    clip_range: 0.2
+    value_coefficient: 0.5
+    entropy_coefficient: 0.01
+    max_grad_norm: 0.5
+    
+    # Training
+    n_steps: 2048
+    n_epochs: 10
+    gae_lambda: 0.95
+
+# A2C (Advantage Actor-Critic) configuration
+a2c:
+  model_type: "A2C"
+  hyperparameters:
+    # Network architecture
+    shared_layers: [256, 128]
+    policy_head_layers: [64]
+    value_head_layers: [64]
+    activation: "relu"
+    
+    # A2C specific
+    value_coefficient: 0.5
+    entropy_coefficient: 0.01
+    max_grad_norm: 0.5
+    
+    # Training
+    n_steps: 5
+    use_rms_prop: true
+    rms_prop_eps: 1e-5
+
+# Rainbow DQN configuration
+rainbow:
+  model_type: "Rainbow"
+  hyperparameters:
+    # Network architecture
+    hidden_layers: [512, 256, 128]
+    activation: "relu"
+    
+    # Rainbow components
+    double_dqn: true
+    dueling_dqn: true
+    prioritized_replay: true
+    n_step_learning: true
+    distributional_dqn: true
+    noisy_nets: true
+    
+    # Specific parameters
+    n_steps: 3
+    num_atoms: 51
+    v_min: -10
+    v_max: 10
+    
+    # Memory
+    memory_size: 100000
+    prioritized_replay_alpha: 0.6
+    prioritized_replay_beta: 0.4
+
+# SAC (Soft Actor-Critic) configuration
+sac:
+  model_type: "SAC"
+  hyperparameters:
+    # Network architecture
+    actor_layers: [256, 256]
+    critic_layers: [256, 256]
+    activation: "relu"
+    
+    # SAC specific
+    alpha: 0.2  # Temperature parameter
+    automatic_entropy_tuning: true
+    target_entropy: "auto"
+    
+    # Training
+    tau: 0.005  # Soft update coefficient
+    gradient_steps: 1
+    learning_starts: 1000

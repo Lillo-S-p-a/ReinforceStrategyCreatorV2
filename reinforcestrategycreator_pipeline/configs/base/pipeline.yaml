@@ -1,0 +1,98 @@
+# Base pipeline configuration
+name: "reinforcement_learning_trading_pipeline"
+version: "1.0.0"
+environment: "development"
+
+# Data configuration
+data:
+  source_type: "api"
+  api_endpoint: "https://api.example.com/data"
+  api_key: "${DATA_API_KEY}"
+  symbols:
+    - "AAPL"
+    - "GOOGL"
+    - "MSFT"
+    - "AMZN"
+  start_date: "2020-01-01"
+  end_date: "2023-12-31"
+  cache_enabled: true
+  cache_dir: "./cache/data"
+  validation_enabled: true
+
+# Model configuration
+model:
+  model_type: "DQN"
+  hyperparameters:
+    hidden_layers: [256, 128, 64]
+    activation: "relu"
+    dropout_rate: 0.2
+  checkpoint_dir: "./checkpoints"
+  save_frequency: 10
+  load_checkpoint: null
+
+# Training configuration
+training:
+  episodes: 100
+  batch_size: 32
+  learning_rate: 0.001
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.995
+  replay_buffer_size: 10000
+  target_update_frequency: 100
+  validation_split: 0.2
+  early_stopping_patience: 10
+  use_tensorboard: true
+  log_dir: "./logs"
+
+# Evaluation configuration
+evaluation:
+  metrics:
+    - "sharpe_ratio"
+    - "total_return"
+    - "max_drawdown"
+    - "win_rate"
+    - "profit_factor"
+  benchmark_symbols:
+    - "SPY"
+  test_episodes: 10
+  save_results: true
+  results_dir: "./results"
+  generate_plots: true
+
+# Deployment configuration
+deployment:
+  mode: "paper_trading"
+  api_endpoint: "${TRADING_API_ENDPOINT}"
+  api_key: "${TRADING_API_KEY}"
+  max_positions: 10
+  position_size: 0.1
+  risk_limit: 0.02
+  update_frequency: "1h"
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  datadog_api_key: "${DATADOG_API_KEY}"
+  datadog_app_key: "${DATADOG_APP_KEY}"
+  metrics_prefix: "model_pipeline"
+  log_level: "INFO"
+  alert_thresholds:
+    sharpe_ratio_min: 0.5
+    max_drawdown_max: 0.2
+    error_rate_max: 0.05
+
+# Artifact storage configuration
+artifact_store:
+  type: "local"  # Options: local, s3, gcs, azure
+  root_path: "./artifacts"
+  versioning_enabled: true
+  metadata_backend: "json"  # Options: json, sqlite, postgres
+  cleanup_policy:
+    enabled: false
+    max_versions_per_artifact: 10
+    max_age_days: 90
+
+# Random seed for reproducibility
+random_seed: 42

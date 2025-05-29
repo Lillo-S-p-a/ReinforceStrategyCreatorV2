@@ -1,0 +1,122 @@
+# Base deployment configuration
+# This file defines default deployment settings that can be overridden by environment-specific configs
+
+deployment:
+  # Default deployment strategy
+  strategy: rolling
+  
+  # Default resource requirements
+  resources:
+    cpu: "2 cores"
+    memory: "4GB"
+    gpu: "optional"
+  
+  # Health check configuration
+  health_check:
+    enabled: true
+    endpoint: "/health"
+    interval: 30  # seconds
+    timeout: 5    # seconds
+    retries: 3
+  
+  # Rollback configuration
+  rollback:
+    enabled: true
+    automatic: false  # Manual rollback by default
+    failure_threshold: 0.5  # Rollback if >50% of health checks fail
+  
+  # Package configuration
+  package:
+    include_dependencies: true
+    compression: "gzip"
+    checksum_validation: true
+  
+  # Deployment validation
+  validation:
+    pre_deployment:
+      - check_model_exists
+      - validate_resources
+      - check_environment_ready
+    post_deployment:
+      - health_check
+      - smoke_test
+      - metrics_validation
+
+# Environment-specific defaults
+environments:
+  development:
+    replicas: 1
+    strategy: direct
+    resources:
+      cpu: "1 core"
+      memory: "2GB"
+    rollback:
+      automatic: false
+  
+  staging:
+    replicas: 2
+    strategy: rolling
+    resources:
+      cpu: "2 cores"
+      memory: "4GB"
+    rollback:
+      automatic: true
+      failure_threshold: 0.3
+  
+  production:
+    replicas: 3
+    strategy: blue_green
+    resources:
+      cpu: "4 cores"
+      memory: "8GB"
+      gpu: "recommended"
+    rollback:
+      automatic: true
+      failure_threshold: 0.1
+    validation:
+      pre_deployment:
+        - check_model_exists
+        - validate_resources
+        - check_environment_ready
+        - backup_current_deployment
+      post_deployment:
+        - health_check
+        - smoke_test
+        - metrics_validation
+        - performance_test
+
+# Model-specific deployment configurations
+model_configs:
+  # Example configuration for specific model types
+  ppo:
+    resources:
+      memory: "6GB"
+      gpu: "required"
+  
+  dqn:
+    resources:
+      memory: "4GB"
+      gpu: "optional"
+  
+  a2c:
+    resources:
+      memory: "4GB"
+      gpu: "optional"
+
+# Deployment strategies configuration
+strategies:
+  rolling:
+    max_surge: 1
+    max_unavailable: 1
+    wait_between_batches: 30  # seconds
+  
+  blue_green:
+    switch_timeout: 300  # seconds
+    validation_period: 60  # seconds
+    auto_promote: false
+  
+  canary:
+    initial_percentage: 10
+    increment: 20
+    interval: 300  # seconds
+    success_threshold: 0.95

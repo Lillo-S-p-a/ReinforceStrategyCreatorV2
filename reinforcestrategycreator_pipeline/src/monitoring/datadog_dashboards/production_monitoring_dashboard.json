@@ -1,0 +1,391 @@
+{
+  "title": "Model Pipeline - Production Monitoring",
+  "description": "Comprehensive dashboard for monitoring ML models in production, including performance metrics, drift detection, and system health",
+  "widgets": [
+    {
+      "id": 1,
+      "definition": {
+        "title": "Model Performance Overview",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 2,
+            "definition": {
+              "title": "Model Accuracy",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.model_drift_accuracy{$model_version,$environment}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "dog_classic",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "1"
+              },
+              "markers": [
+                {
+                  "value": "y = 0.9",
+                  "display_type": "error dashed",
+                  "label": "Target Accuracy"
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          },
+          {
+            "id": 3,
+            "definition": {
+              "title": "Prediction Confidence",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.model_drift_confidence{$model_version,$environment}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "1"
+              },
+              "markers": [
+                {
+                  "value": "y = 0.7",
+                  "display_type": "warning dashed",
+                  "label": "Min Confidence Threshold"
+                }
+              ]
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "id": 4,
+      "definition": {
+        "title": "Data Drift Detection",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 5,
+            "definition": {
+              "title": "Data Drift Score (PSI)",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.data_drift_score{$model_version,$environment,drift_method:psi}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "warm",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "1"
+              },
+              "markers": [
+                {
+                  "value": "y = 0.2",
+                  "display_type": "error dashed",
+                  "label": "Drift Threshold"
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          },
+          {
+            "id": 6,
+            "definition": {
+              "title": "Data Drift Alerts",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "event_stream",
+              "query": "event_type:data_drift_detected",
+              "event_size": "s"
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 4,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "id": 7,
+      "definition": {
+        "title": "Model Drift Detection",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 8,
+            "definition": {
+              "title": "Performance Metrics",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.model_drift_f1_score{$model_version,$environment}",
+                  "aggregator": "last"
+                }
+              ],
+              "precision": 3,
+              "text_align": "left",
+              "custom_unit": "",
+              "conditional_formats": [
+                {
+                  "comparator": ">",
+                  "value": 0.8,
+                  "palette": "white_on_green"
+                },
+                {
+                  "comparator": ">=",
+                  "value": 0.6,
+                  "palette": "white_on_yellow"
+                },
+                {
+                  "comparator": "<",
+                  "value": 0.6,
+                  "palette": "white_on_red"
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 9,
+            "definition": {
+              "title": "Model Drift Alerts",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "event_stream",
+              "query": "event_type:model_drift_detected",
+              "event_size": "s"
+            },
+            "layout": {
+              "x": 3,
+              "y": 0,
+              "width": 9,
+              "height": 3
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 8,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "id": 10,
+      "definition": {
+        "title": "System Health Metrics",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 11,
+            "definition": {
+              "title": "Request Latency (p95)",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "p95:model_pipeline.request_latency{$model_version,$environment}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "purple",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "units": {
+                  "family": "time",
+                  "scale_factor": 1000,
+                  "name": "millisecond",
+                  "short_name": "ms"
+                }
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "id": 12,
+            "definition": {
+              "title": "Error Rate",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "sum:model_pipeline.errors{$model_version,$environment}.as_rate()",
+                  "display_type": "bars",
+                  "style": {
+                    "palette": "dog_classic",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ]
+            },
+            "layout": {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "id": 13,
+            "definition": {
+              "title": "Request Volume",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "sum:model_pipeline.requests{$model_version,$environment}.as_count()",
+                  "display_type": "area",
+                  "style": {
+                    "palette": "cool",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ]
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 12,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "id": 14,
+      "definition": {
+        "title": "Alert Summary",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "manage_status",
+        "summary_type": "monitors",
+        "display_format": "countsAndList",
+        "color_preference": "text",
+        "hide_zero_counts": true,
+        "show_last_triggered": true,
+        "query": "tag:(model_pipeline AND production)",
+        "sort": "status,asc",
+        "count": 50,
+        "start": 0
+      },
+      "layout": {
+        "x": 0,
+        "y": 16,
+        "width": 12,
+        "height": 4
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "model_version",
+      "default": "*",
+      "prefix": "model_version"
+    },
+    {
+      "name": "environment",
+      "default": "production",
+      "prefix": "environment"
+    }
+  ],
+  "layout_type": "ordered",
+  "is_read_only": false,
+  "notify_list": [],
+  "reflow_type": "fixed"
+}

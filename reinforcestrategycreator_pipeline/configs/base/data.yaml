@@ -1,0 +1,58 @@
+# Data configuration template
+data:
+  # Data source configuration
+  source_type: "api"  # Options: csv, api, database
+  
+  # CSV source configuration
+  source_path: null  # Path to CSV file (if source_type is csv)
+  
+  # API source configuration
+  api_endpoint: "${DATA_API_ENDPOINT:https://api.example.com/data}"
+  api_key: "${DATA_API_KEY}"
+  
+  # Database source configuration (future)
+  db_connection_string: "${DATABASE_URL}"
+  
+  # Data selection
+  symbols:
+    - "AAPL"
+    - "GOOGL"
+    - "MSFT"
+    - "AMZN"
+    - "TSLA"
+  
+  # Time range
+  start_date: "2020-01-01"
+  end_date: "2023-12-31"
+  
+  # Data frequency
+  frequency: "1d"  # Options: 1m, 5m, 15m, 30m, 1h, 1d
+  
+  # Caching configuration
+  cache_enabled: true
+  cache_dir: "./cache/data"
+  cache_ttl_hours: 24  # Cache time-to-live in hours
+  
+  # Data validation
+  validation_enabled: true
+  validation_rules:
+    min_data_points: 100
+    max_missing_ratio: 0.1
+    check_duplicates: true
+    check_outliers: true
+  
+  # Feature engineering
+  features:
+    technical_indicators:
+      - "SMA_20"
+      - "SMA_50"
+      - "RSI_14"
+      - "MACD"
+      - "BB_20"
+    price_features:
+      - "returns"
+      - "log_returns"
+      - "volatility"
+    volume_features:
+      - "volume_sma"
+      - "volume_ratio"

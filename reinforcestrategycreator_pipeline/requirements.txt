@@ -1,0 +1,27 @@
+# Core dependencies
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+numpy>=1.21.0
+pandas>=1.3.0
+
+# Hyperparameter optimization dependencies
+ray[tune]>=2.9.0  # Ray Tune for HPO
+optuna>=3.5.0  # Alternative HPO library (optional)
+
+# Visualization dependencies
+matplotlib>=3.5.0  # For plots and charts
+seaborn>=0.12.0  # For enhanced plots
+plotly>=5.18.0  # For interactive visualizations (optional)
+
+# Reporting dependencies
+jinja2>=3.1.0  # For report templating
+markdown>=3.5.0  # For markdown processing
+pdfkit>=1.0.0  # For PDF generation (optional, requires wkhtmltopdf)
+
+# Monitoring dependencies (optional)
+datadog>=0.47.0  # For Datadog integration
+
+# Documentation dependencies
+Sphinx>=4.0.0
+sphinx-rtd-theme>=1.0.0
+sphinx-autodoc-typehints>=1.10.0

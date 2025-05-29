@@ -1,0 +1,72 @@
+# Staging environment overrides
+environment: "staging"
+
+# Data configuration for staging
+data:
+  # Use recent 2 years of data
+  start_date: "2022-01-01"
+  end_date: "2023-12-31"
+  
+  # Test with more symbols
+  symbols:
+    - "AAPL"
+    - "GOOGL"
+    - "MSFT"
+    - "AMZN"
+    - "TSLA"
+    - "META"
+    - "NVDA"
+
+# Model configuration for staging
+model:
+  # Use full model architecture
+  hyperparameters:
+    hidden_layers: [256, 128, 64]
+
+# Training configuration for staging
+training:
+  episodes: 50  # More episodes than dev, less than prod
+  batch_size: 32
+  replay_buffer_size: 5000
+  use_tensorboard: true
+  log_dir: "./logs/staging"
+
+# Evaluation configuration for staging
+evaluation:
+  test_episodes: 5
+  generate_plots: true
+  results_dir: "./results/staging"
+  # Additional metrics for staging
+  metrics:
+    - "sharpe_ratio"
+    - "total_return"
+    - "max_drawdown"
+    - "win_rate"
+    - "profit_factor"
+    - "calmar_ratio"
+
+# Deployment configuration for staging
+deployment:
+  mode: "paper_trading"
+  # Use staging API endpoints
+  api_endpoint: "${STAGING_TRADING_API_ENDPOINT}"
+  api_key: "${STAGING_TRADING_API_KEY}"
+  # More conservative settings
+  max_positions: 5
+  position_size: 0.05
+  risk_limit: 0.01
+
+# Monitoring configuration for staging
+monitoring:
+  enabled: true
+  log_level: "INFO"
+  # Staging-specific metrics prefix
+  metrics_prefix: "model_pipeline.staging"
+  # More sensitive alert thresholds
+  alert_thresholds:
+    sharpe_ratio_min: 0.7
+    max_drawdown_max: 0.15
+    error_rate_max: 0.02
+
+# Staging artifact store
+artifact_store: "./artifacts/staging"
