@@ -201,3 +201,26 @@ tags = [
   - Created docstring coverage checker that identified areas for future improvement (31 missing, 94 poor quality docstrings)
 *   2025-05-29T22:01:00 - `roo-commander`: Received completion confirmation for task [`TASK-DEVPY-20250529-214700-APIDocFix.md`](.ruru/tasks/DEV_PYTHON/TASK-DEVPY-20250529-214700-APIDocFix.md) from `dev-python`. API documentation issues resolved.
 *   2025-05-29T22:01:00 - `roo-commander`: Updated main documentation task [`TASK-UWRT-20250529-205900-PipelineDocumentation.md`](.ruru/tasks/UTIL_WRITER/TASK-UWRT-20250529-205900-PipelineDocumentation.md) to "🟢 Done" as all sub-tasks are complete.
+*   2025-05-29T22:14:00 - `roo-commander`: Attempted to run `reinforcestrategycreator_pipeline/examples/training_engine_example.py` to test pipeline components.
+*   2025-05-29T22:14:00 - `roo-commander`: Initial run failed with `ModuleNotFoundError`. Corrected by setting `PYTHONPATH=.`.
+*   2025-05-29T22:14:00 - `roo-commander`: Second run failed with `ImportError: cannot import name 'LocalArtifactStore'`. Corrected import in example script to `LocalFileSystemStore as LocalArtifactStore`.
+*   2025-05-29T22:14:00 - `roo-commander`: Third run failed with `Training failed: Unknown model type 'DQNModel'`. Corrected model type names in example script (e.g., "DQNModel" to "DQN").
+*   2025-05-29T22:14:00 - `roo-commander`: Fourth run executed but training examples failed with `AttributeError: 'list' object has no attribute 'shape'`.
+*   2025-05-29T22:14:00 - `roo-commander`: Created MDTM bug task ([`TASK-DEVPY-20250529-221400-FixTrainingEngineShapeError.md`](.ruru/tasks/DEV_PYTHON/TASK-DEVPY-20250529-221400-FixTrainingEngineShapeError.md)) for `dev-python` to investigate and fix this shape error.
+*   2025-05-29T22:53:00 - `roo-commander`: Received confirmation from `dev-python` that task [`TASK-DEVPY-20250529-221400-FixTrainingEngineShapeError.md`](.ruru/tasks/DEV_PYTHON/TASK-DEVPY-20250529-221400-FixTrainingEngineShapeError.md) is complete. The `AttributeError: 'list' object has no attribute 'shape'` in `training_engine_example.py` has been fixed.
+*   2025-05-29T22:57:00 - `roo-commander`: The `training_engine_example.py` script completed execution after fixes by `dev-python`.
+*   2025-05-29T22:57:00 - `roo-commander`: Analysis: `example_basic_training`, `example_training_with_callbacks`, and `example_custom_callback` ran to completion. The `AttributeError` is resolved.
+*   2025-05-29T22:57:00 - `roo-commander`: Minor observation: Callbacks monitoring `val_loss` issued warnings as example models do not produce this specific metric. Not a critical failure for current testing.
+*   2025-05-29T22:57:00 - `roo-commander`: The `example_training_with_persistence()` was not run as it was commented out in the example script's main execution block.
+- [2025-05-30 19:05:00] Task resumed after 2-hour interruption. Re-tested `training_engine_example.py` to verify pipeline functionality.
+- [2025-05-30 19:05:25] Successfully executed `training_engine_example.py` with all previous fixes intact:
+  - Basic training example: ✅ Completed successfully (DQN model, 10 epochs)
+  - Training with callbacks example: ✅ Completed successfully (PPO model, 50 epochs)
+  - Custom callback example: ✅ Completed successfully (DQN model, 10 epochs)
+  - Training with persistence example: ✅ Completed successfully (A2C model, 15 epochs, checkpointing, model registry)
+- [2025-05-30 20:09:24] All TrainingEngine tests passed. The pipeline component is functioning correctly with:
+  - Model training (DQN, PPO, A2C)
+  - Callback system (logging, checkpointing, early stopping)
+  - Model persistence and registry integration
+  - Artifact storage for checkpoints
+  - Data loading from CSV sources

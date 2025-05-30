@@ -1,0 +1,5 @@
+{
+  "batch_size": 64,
+  "learning_rate": 2.3925224490869167e-05,
+  "n_steps": 64
+}

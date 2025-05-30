@@ -463,13 +463,19 @@ class A2C(ModelBase):
         
         # Update shared weights
         for key in self.network["shared_weights"]:
+            # Ensure weights are numpy arrays (they might be lists after loading from checkpoint)
+            if isinstance(self.network["shared_weights"][key], list):
+                self.network["shared_weights"][key] = np.array(self.network["shared_weights"][key])
             gradient = np.random.randn(*self.network["shared_weights"][key].shape) * total_loss * 0.01
             
             if self.use_rms_prop:
                 # RMSprop update
                 opt_key = f"shared_{key}"
+                # Ensure square_avg is a numpy array
+                if isinstance(self.optimizer_state[opt_key]["square_avg"], list):
+                    self.optimizer_state[opt_key]["square_avg"] = np.array(self.optimizer_state[opt_key]["square_avg"])
                 self.optimizer_state[opt_key]["square_avg"] = (
-                    0.99 * self.optimizer_state[opt_key]["square_avg"] + 
+                    0.99 * self.optimizer_state[opt_key]["square_avg"] +
                     0.01 * gradient ** 2
                 )
                 self.network["shared_weights"][key] -= (
@@ -482,12 +488,18 @@ class A2C(ModelBase):
         
         # Update policy head
         for key in self.network["policy_head_weights"]:
+            # Ensure weights are numpy arrays (they might be lists after loading from checkpoint)
+            if isinstance(self.network["policy_head_weights"][key], list):
+                self.network["policy_head_weights"][key] = np.array(self.network["policy_head_weights"][key])
             gradient = np.random.randn(*self.network["policy_head_weights"][key].shape) * actor_loss * 0.01
             
             if self.use_rms_prop:
                 opt_key = f"policy_{key}"
+                # Ensure square_avg is a numpy array
+                if isinstance(self.optimizer_state[opt_key]["square_avg"], list):
+                    self.optimizer_state[opt_key]["square_avg"] = np.array(self.optimizer_state[opt_key]["square_avg"])
                 self.optimizer_state[opt_key]["square_avg"] = (
-                    0.99 * self.optimizer_state[opt_key]["square_avg"] + 
+                    0.99 * self.optimizer_state[opt_key]["square_avg"] +
                     0.01 * gradient ** 2
                 )
                 self.network["policy_head_weights"][key] -= (
@@ -499,12 +511,18 @@ class A2C(ModelBase):
         
         # Update value head
         for key in self.network["value_head_weights"]:
+            # Ensure weights are numpy arrays (they might be lists after loading from checkpoint)
+            if isinstance(self.network["value_head_weights"][key], list):
+                self.network["value_head_weights"][key] = np.array(self.network["value_head_weights"][key])
             gradient = np.random.randn(*self.network["value_head_weights"][key].shape) * critic_loss * 0.01
             
             if self.use_rms_prop:
                 opt_key = f"value_{key}"
+                # Ensure square_avg is a numpy array
+                if isinstance(self.optimizer_state[opt_key]["square_avg"], list):
+                    self.optimizer_state[opt_key]["square_avg"] = np.array(self.optimizer_state[opt_key]["square_avg"])
                 self.optimizer_state[opt_key]["square_avg"] = (
-                    0.99 * self.optimizer_state[opt_key]["square_avg"] + 
+                    0.99 * self.optimizer_state[opt_key]["square_avg"] +
                     0.01 * gradient ** 2
                 )
                 self.network["value_head_weights"][key] -= (
@@ -592,7 +610,8 @@ class A2C(ModelBase):
             for component in ["shared_weights", "policy_head_weights", "value_head_weights"]:
                 if component in state["network"]:
                     state["network"][component] = {
-                        k: v.tolist() for k, v in state["network"][component].items()
+                        k: v.tolist() if isinstance(v, np.ndarray) else v
+                        for k, v in state["network"][component].items()
                     }
         
         if state["optimizer_state"]:

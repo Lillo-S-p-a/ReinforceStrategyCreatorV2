@@ -1,6 +1,8 @@
 """Model factory for creating model instances."""
 
 from typing import Any, Dict, Optional, Type
+from enum import Enum
+from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
 import importlib
 import inspect
 from pathlib import Path
@@ -20,31 +22,50 @@ class ModelFactory:
     def __init__(self):
         """Initialize the model factory."""
         self._registry: Dict[str, Type[ModelBase]] = {}
+        # Get a logger instance for ModelFactory
+        self.logger = get_logger(self.__class__.__name__)
         self._register_builtin_models()
     
     def _register_builtin_models(self) -> None:
         """Register built-in model implementations."""
-        # Import and register built-in models from implementations module
+        self.logger.info("Starting registration of built-in models...")
         implementations_path = Path(__file__).parent / "implementations"
-        if implementations_path.exists():
-            for model_file in implementations_path.glob("*.py"):
-                if model_file.name.startswith("_"):
-                    continue
+        self.logger.info(f"Looking for models in: {implementations_path.resolve()}")
+
+        if not implementations_path.exists():
+            self.logger.warning(f"Implementations directory not found: {implementations_path.resolve()}")
+            return
+
+        found_model_files = False
+        for model_file in implementations_path.glob("*.py"):
+            found_model_files = True
+            self.logger.debug(f"Processing model file: {model_file.name}")
+            if model_file.name.startswith("_"):
+                self.logger.debug(f"Skipping private file: {model_file.name}")
+                continue
                 
-                module_name = f".implementations.{model_file.stem}"
-                try:
-                    module = importlib.import_module(module_name, package="src.models")
-                    
-                    # Find all ModelBase subclasses in the module
-                    for name, obj in inspect.getmembers(module):
-                        if (inspect.isclass(obj) and 
-                            issubclass(obj, ModelBase) and 
-                            obj is not ModelBase):
-                            # Register using the class name or a specific model_type attribute
-                            model_type = getattr(obj, "model_type", name)
-                            self.register_model(model_type, obj)
-                except ImportError as e:
-                    print(f"Warning: Could not import {module_name}: {e}")
+            # This block should be at the same indentation level as the 'if' on line 42
+            module_name = f".implementations.{model_file.stem}"
+            self.logger.debug(f"Attempting to import module: {module_name} with package reinforcestrategycreator_pipeline.src.models")
+            try:
+                # Ensure the package name matches the actual top-level package visible in sys.path
+                module = importlib.import_module(module_name, package="reinforcestrategycreator_pipeline.src.models")
+                self.logger.debug(f"Successfully imported module: {module_name}")
+                
+                found_classes_in_module = False
+                for name, obj in inspect.getmembers(module):
+                    if inspect.isclass(obj) and issubclass(obj, ModelBase) and obj is not ModelBase:
+                        found_classes_in_module = True
+                        model_type_attr = getattr(obj, "model_type", name) # Use class name as fallback
+                        self.logger.info(f"Registering model: type='{model_type_attr}', class='{obj.__name__}' from module {module_name}")
+                        self.register_model(model_type_attr, obj)
+                if not found_classes_in_module:
+                    self.logger.debug(f"No ModelBase subclasses found in {module_name}")
+
+            except ImportError as e:
+                self.logger.error(f"Failed to import module {module_name}: {e}", exc_info=True)
+            except Exception as e: # Catch other potential errors during registration
+                self.logger.error(f"Error processing module {module_name}: {e}", exc_info=True)
     
     def register_model(self, model_type: str, model_class: Type[ModelBase]) -> None:
         """Register a model class with the factory.
@@ -169,8 +190,17 @@ class ModelFactory:
         if "model_type" not in config:
             raise ValueError("Configuration must contain 'model_type' key")
         
-        model_type = config["model_type"]
-        return self.create_model(model_type, config)
+        model_type_value = config["model_type"]
+        
+        # Ensure model_type is a string (get value if it's an Enum)
+        if isinstance(model_type_value, Enum):
+            model_type_str = model_type_value.value
+        elif isinstance(model_type_value, str):
+            model_type_str = model_type_value
+        else:
+            raise ValueError(f"Invalid model_type format: {type(model_type_value)}. Expected string or Enum.")
+            
+        return self.create_model(model_type_str, config)
     
     def __repr__(self) -> str:
         """String representation of the factory."""

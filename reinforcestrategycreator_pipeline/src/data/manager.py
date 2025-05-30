@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type, Union
 import pandas as pd
+from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
 
 from artifact_store.base import ArtifactStore, ArtifactType
 from config.manager import ConfigManager
@@ -39,6 +40,7 @@ class DataManager:
         """
         self.config_manager = config_manager
         self.artifact_store = artifact_store
+        self.logger = get_logger(self.__class__.__name__) # Add logger
         
         # Get data configuration
         pipeline_config = config_manager.get_config()
@@ -94,6 +96,7 @@ class DataManager:
         
         # Register it
         self.data_sources[source_id] = source
+        self.logger.info(f"Registered data source '{source_id}'. Current sources: {list(self.data_sources.keys())}")
         
         # Track lineage
         self._track_lineage(source_id, "register", {
@@ -124,14 +127,18 @@ class DataManager:
         Raises:
             ValueError: If source is not registered
         """
+        self.logger.info(f"Attempting to load data for source_id: '{source_id}'. Registered sources: {list(self.data_sources.keys())}")
         # Check if loading specific version from artifact store
         if version:
+            self.logger.debug(f"Loading version '{version}' for source_id '{source_id}'.")
             return self._load_version(source_id, version)
         
         # Check if source is registered
         if source_id not in self.data_sources:
+            self.logger.error(f"Data source '{source_id}' not found in registered sources: {list(self.data_sources.keys())}")
             raise ValueError(f"Data source not registered: {source_id}")
         
+        self.logger.debug(f"Source '{source_id}' found in registry.")
         # Determine if we should use cache
         use_cache = self.cache_enabled if use_cache is None else use_cache
         

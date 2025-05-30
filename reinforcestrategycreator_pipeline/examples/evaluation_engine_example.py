@@ -20,8 +20,9 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.config.manager import ConfigManager
 from src.models.registry import ModelRegistry
 from src.data.manager import DataManager
-from src.artifact_store.local_adapter import LocalArtifactStore
+from src.artifact_store.local_adapter import LocalFileSystemStore as LocalArtifactStore
 from src.evaluation import EvaluationEngine
+from src.models.base import ModelBase
 
 
 # Configure logging
@@ -70,11 +71,11 @@ def main():
         config_dir="configs",
         environment="development"
     )
+    config_manager.load_config()
     
     # Initialize artifact store
     artifact_store = LocalArtifactStore(
-        base_path="./artifacts",
-        config={}
+        root_path="./artifacts"
     )
     
     # Initialize data manager
@@ -117,34 +118,42 @@ def main():
     factory = get_factory()
     
     # Register a mock model type for demonstration
-    class MockModel:
+    class MockModel(ModelBase):
         def __init__(self, config):
-            self.config = config
-            self.model_type = "mock_model"
+            super().__init__(config)
             self.is_trained = True
+            self.model_state = {"weights": np.random.randn(10, 10)}
         
-        def get_hyperparameters(self):
-            return {"learning_rate": 0.001, "batch_size": 32}
-        
-        def get_metadata(self):
-            return {"training_episodes": 1000}
-        
-        def save(self, path):
-            # Mock save
-            (path / "model.pkl").touch()
-            import json
-            with open(path / "config.json", "w") as f:
-                json.dump(self.config, f)
-        
-        def load(self, path):
-            # Mock load
+        def build(self, input_shape, output_shape):
+            """Mock build method."""
             pass
+        
+        def train(self, train_data, validation_data=None, **kwargs):
+            """Mock train method."""
+            return {"loss": 0.1, "accuracy": 0.95}
+        
+        def predict(self, data, **kwargs):
+            """Mock predict method."""
+            # Return random actions for demonstration
+            return np.random.randint(0, 4, size=len(data))
+        
+        def evaluate(self, test_data, **kwargs):
+            """Mock evaluate method."""
+            return {"test_loss": 0.15, "test_accuracy": 0.92}
+        
+        def get_model_state(self):
+            """Get model state for serialization."""
+            return self.model_state
+        
+        def set_model_state(self, state):
+            """Set model state from deserialization."""
+            self.model_state = state
     
     # Register the mock model type
-    factory.register_model_type("mock_model", MockModel)
+    factory.register_model("mock_model", MockModel)
     
     # Create and register model
-    mock_model = MockModel({"name": "test_model"})
+    mock_model = MockModel({"name": "test_model", "model_type": "mock_model"})
     model_id = model_registry.register_model(
         model=mock_model,
         model_name="demo_model",
@@ -190,7 +199,7 @@ def main():
             ],
             compare_benchmarks=True,
             save_results=True,
-            report_formats=["json", "markdown", "html"],
+            report_formats=["markdown", "html"],
             evaluation_name="Demo Model Evaluation",
             tags=["demo", "example", "benchmark_comparison"]
         )

@@ -323,7 +323,7 @@ Based on the evaluation results:
 2. Risk-adjusted performance (Sharpe ratio) is {{ formatted_metrics.sharpe_ratio }}.
 3. Maximum drawdown observed was {{ formatted_metrics.max_drawdown }}.
 {% if benchmarks %}
-4. Compared to benchmarks, the model {{ 'outperforms' if relative_performance and relative_performance.values()|first.percentage_difference > 0 else 'underperforms' }} in terms of returns.
+4. Compared to benchmarks, the model {{ 'outperforms' if relative_performance and (relative_performance.values()|list)[0]['percentage_difference'] > 0 else 'underperforms' }} in terms of returns.
 {% endif %}
 
 ---

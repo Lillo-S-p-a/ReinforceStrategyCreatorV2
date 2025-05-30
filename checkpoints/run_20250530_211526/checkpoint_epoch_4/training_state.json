@@ -1,0 +1,34 @@
+{
+  "epoch": 4,
+  "metrics": {
+    "epoch": 4,
+    "episode_rewards": -10.864022152372137,
+    "episode_lengths": 30.0,
+    "losses": 0.8442346915430271,
+    "epsilon_values": 0.6057704364907278,
+    "loss": 1.0058886588556506,
+    "val_mean_episode_reward": 3.6474163111795783,
+    "val_std_episode_reward": 6.413116485987051,
+    "val_mean_episode_length": 68.0,
+    "val_min_episode_reward": -2.8002782393821395,
+    "val_max_episode_reward": 19.84881168004389
+  },
+  "training_config": {
+    "episodes": 100,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "gamma": 0.99,
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.01,
+    "epsilon_decay": 0.995,
+    "replay_buffer_size": 10000,
+    "target_update_frequency": 100,
+    "validation_split": 0.2,
+    "early_stopping_patience": 10,
+    "use_tensorboard": true,
+    "log_dir": "./logs"
+  },
+  "checkpoint_time": "2025-05-30T21:20:00.675255",
+  "best_value": Infinity,
+  "monitor": "loss"
+}

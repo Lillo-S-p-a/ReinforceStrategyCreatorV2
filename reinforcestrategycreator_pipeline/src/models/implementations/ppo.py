@@ -487,11 +487,17 @@ class PPO(ModelBase):
         
         # Update policy network
         for key in self.policy_network["weights"]:
+            # Ensure weights are numpy arrays (they might be lists after loading from checkpoint)
+            if isinstance(self.policy_network["weights"][key], list):
+                self.policy_network["weights"][key] = np.array(self.policy_network["weights"][key])
             gradient_sim = np.random.randn(*self.policy_network["weights"][key].shape)
             self.policy_network["weights"][key] -= learning_rate * gradient_sim * total_loss * 0.01
         
         # Update value network
         for key in self.value_network["weights"]:
+            # Ensure weights are numpy arrays (they might be lists after loading from checkpoint)
+            if isinstance(self.value_network["weights"][key], list):
+                self.value_network["weights"][key] = np.array(self.value_network["weights"][key])
             gradient_sim = np.random.randn(*self.value_network["weights"][key].shape)
             self.value_network["weights"][key] -= learning_rate * gradient_sim * losses["value_loss"] * 0.01
     

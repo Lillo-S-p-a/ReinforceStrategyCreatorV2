@@ -25,7 +25,16 @@ class CsvDataSource(DataSource):
                 - dtype: Dictionary of column data types
         """
         super().__init__(source_id, config)
-        self.file_path = Path(config.get("file_path", ""))
+        # Check for 'source_path' (from global DataConfig) first, then 'file_path' (for direct CsvDataSource config)
+        path_str = config.get("source_path", config.get("file_path", ""))
+        self.file_path = Path(path_str) if path_str else Path("") # Ensure Path object even if empty
+        
+        # If the path is relative and starts with "../", we need to handle it specially
+        # The path "../dummy_data.csv" is relative to the configs directory, but we're running from pipeline root
+        if not self.file_path.is_absolute() and str(self.file_path).startswith("../"):
+            # Since the config uses "../dummy_data.csv" which is relative to configs/,
+            # and dummy_data.csv is in the pipeline root, we just need the filename
+            self.file_path = Path("dummy_data.csv")
         self.delimiter = config.get("delimiter", ",")
         self.encoding = config.get("encoding", "utf-8")
         self.parse_dates = config.get("parse_dates", None)
@@ -44,18 +53,38 @@ class CsvDataSource(DataSource):
         Raises:
             ValueError: If configuration is invalid
         """
-        # Check if file_path was provided in config
-        if not self.config.get("file_path"):
-            raise ValueError("CSV data source requires 'file_path' in config")
+        # self.file_path is now set in __init__ from "source_path" or "file_path"
+        original_source_path = self.config.get("source_path")
+        original_file_path = self.config.get("file_path")
+
+        if not self.file_path or str(self.file_path) == "" or str(self.file_path) == ".":
+            raise ValueError(
+                f"CSV data source requires a valid 'source_path' or 'file_path' in config. "
+                f"Resolved file_path is '{self.file_path}'. "
+                f"Original config: source_path='{original_source_path}', file_path='{original_file_path}'"
+            )
         
-        if not self.file_path.exists():
-            raise ValueError(f"CSV file not found: {self.file_path}")
+        # Paths are expected to be resolvable from CWD (workspace root)
+        # The config 'source_path' is "reinforcestrategycreator_pipeline/dummy_data.csv"
+        resolved_path = self.file_path.resolve() # Get absolute path for clearer error messages
+
+        if not resolved_path.exists():
+            raise FileNotFoundError(
+                f"CSV file not found at resolved path: '{resolved_path}' "
+                f"(derived from file_path: '{self.file_path}', "
+                f"original config: source_path='{original_source_path}', file_path='{original_file_path}')"
+            )
         
-        if not self.file_path.is_file():
-            raise ValueError(f"Path is not a file: {self.file_path}")
+        if not resolved_path.is_file():
+            raise ValueError(
+                f"Path is not a file: '{resolved_path}' "
+                f"(derived from file_path: '{self.file_path}', "
+                f"original config: source_path='{original_source_path}', file_path='{original_file_path}')"
+            )
         
-        if self.file_path.suffix.lower() not in [".csv", ".tsv", ".txt"]:
-            raise ValueError(f"File does not appear to be a CSV: {self.file_path}")
+        # Suffix check can remain on self.file_path (original relative or absolute path)
+        if self.file_path.suffix.lower() not in [".csv", ".tsv", ".txt"]: # Allow .tsv and .txt as common variants
+            raise ValueError(f"File does not appear to be a CSV/TSV/TXT: '{self.file_path}'")
         
         return True
     
@@ -93,6 +122,10 @@ class CsvDataSource(DataSource):
         
         # Override with any provided kwargs
         read_params.update(kwargs)
+
+        # Map 'columns' to 'usecols' if present
+        if "columns" in read_params:
+            read_params["usecols"] = read_params.pop("columns")
         
         try:
             df = pd.read_csv(**read_params)

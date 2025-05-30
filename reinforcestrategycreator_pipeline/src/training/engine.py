@@ -193,7 +193,9 @@ class TrainingEngine:
             }
             
         except Exception as e:
+            import traceback
             self.logger.error(f"Training failed: {str(e)}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             return {
                 "success": False,
                 "error": str(e),
@@ -222,9 +224,24 @@ class TrainingEngine:
             source_id = data_config.get("source_id")
             if not source_id:
                 raise ValueError("data_config must contain 'source_id' when using DataManager")
-            
+
+            # Register source with DataManager if it's not already registered
+            if source_id not in self.data_manager.data_sources:
+                self.logger.info(f"Data source '{source_id}' not found in DataManager, attempting to register.")
+                source_type = data_config.get("source_type")
+                if not source_type:
+                    raise ValueError("data_config must also contain 'source_type' for new source registration with DataManager.")
+                # The 'config' for DataManager.register_source should be the specific settings for that source.
+                # data_config itself (which is the 'data' section from pipeline.yaml) contains these.
+                self.data_manager.register_source(source_id, source_type, data_config)
+                self.logger.info(f"Data source '{source_id}' of type '{source_type}' registered with DataManager.")
+            else:
+                self.logger.info(f"Data source '{source_id}' already registered with DataManager.")
+
             # Load data
+            self.logger.info(f"Loading data for source_id '{source_id}' using DataManager.")
             data = self.data_manager.load_data(source_id, **data_config.get("params", {}))
+            self.logger.info(f"Data loaded via DataManager for source_id '{source_id}'. Shape: {data.shape if hasattr(data, 'shape') else 'N/A'}")
             
             # Split into train/validation
             if validation_split > 0:
@@ -348,9 +365,33 @@ class TrainingEngine:
                 verbose=0  # We handle logging via callbacks
             )
             
-            # Extract metrics
+            # Extract metrics and handle different return formats
             if isinstance(epoch_metrics, dict):
-                return epoch_metrics
+                # Convert lists to scalar values (e.g., take the last value or mean)
+                processed_metrics = {}
+                for key, value in epoch_metrics.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        # For lists, take the last value as the epoch metric
+                        processed_metrics[key] = float(value[-1])
+                    elif isinstance(value, (int, float)):
+                        processed_metrics[key] = float(value)
+                    elif isinstance(value, np.ndarray):
+                        # For arrays, take the mean or last value
+                        if value.size > 0:
+                            processed_metrics[key] = float(value.mean())
+                        else:
+                            processed_metrics[key] = 0.0
+                    # Skip non-numeric values
+                
+                # Ensure we have at least a loss metric
+                if "loss" not in processed_metrics:
+                    # Try to find a loss-like metric
+                    if "losses" in epoch_metrics and isinstance(epoch_metrics["losses"], list) and len(epoch_metrics["losses"]) > 0:
+                        processed_metrics["loss"] = float(np.mean(epoch_metrics["losses"]))
+                    else:
+                        processed_metrics["loss"] = 0.0
+                
+                return processed_metrics
             else:
                 return {"loss": float(epoch_metrics) if epoch_metrics is not None else 0.0}
         else:
@@ -403,10 +444,22 @@ class TrainingEngine:
         
         # Update other metrics
         for key, value in epoch_logs.items():
-            if key not in ["epoch", "loss", "val_loss"] and isinstance(value, (int, float)):
-                if key not in self.training_history["metrics"]:
-                    self.training_history["metrics"][key] = []
-                self.training_history["metrics"][key].append(value)
+            if key not in ["epoch", "loss", "val_loss"]:
+                # Handle different value types
+                if isinstance(value, (int, float)):
+                    if key not in self.training_history["metrics"]:
+                        self.training_history["metrics"][key] = []
+                    self.training_history["metrics"][key].append(value)
+                elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], (int, float)):
+                    # For lists of numbers, store the last value or mean
+                    if key not in self.training_history["metrics"]:
+                        self.training_history["metrics"][key] = []
+                    self.training_history["metrics"][key].append(float(value[-1]))
+                elif isinstance(value, np.ndarray) and value.size > 0:
+                    # For numpy arrays, store the mean
+                    if key not in self.training_history["metrics"]:
+                        self.training_history["metrics"][key] = []
+                    self.training_history["metrics"][key].append(float(value.mean()))
     
     def _save_final_model(
         self,

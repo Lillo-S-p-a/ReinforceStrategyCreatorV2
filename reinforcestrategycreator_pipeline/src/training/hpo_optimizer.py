@@ -206,10 +206,10 @@ class HPOptimizer:
                     }
                     # Remove None values
                     epoch_metrics = {k: v for k, v in epoch_metrics.items() if v is not None}
-                    tune.report(**epoch_metrics)
+                    tune.report(metrics=epoch_metrics)
             else:
-                # Report failure
-                tune.report(loss=float('inf'), error=result.get("error", "Unknown error"))
+                # Report failure - Ray Tune expects metrics in a specific format
+                tune.report(metrics={"loss": float('inf'), "error": result.get("error", "Unknown error")})
         
         return trainable
     
@@ -322,7 +322,7 @@ class HPOptimizer:
                 scheduler=tune_scheduler,
                 search_alg=search_alg,
                 resources_per_trial=resources_per_trial or {"cpu": 1},
-                local_dir=str(self.results_dir),
+                storage_path=f"file://{self.results_dir.absolute()}",
                 progress_reporter=reporter,
                 verbose=1,
                 stop={"training_iteration": training_config.get("epochs", 100)}
@@ -367,16 +367,20 @@ class HPOptimizer:
             
             # Save to artifact store if available
             if self.artifact_store:
-                artifact_id = self.artifact_store.save_artifact(
+                artifact_metadata = self.artifact_store.save_artifact(
+                    artifact_id=f"hpo_results_{run_name}",
+                    artifact_path=results_file,
                     artifact_type=ArtifactType.REPORT,
-                    data=results,
                     metadata={
                         "type": "hpo_results",
                         "run_name": run_name,
-                        "best_score": self.best_score
-                    }
+                        "best_score": self.best_score,
+                        "best_params": self.best_params,
+                        "num_trials": num_trials
+                    },
+                    tags=["hpo", "optimization", "results"]
                 )
-                results["artifact_id"] = artifact_id
+                results["artifact_id"] = artifact_metadata.artifact_id
             
             self.logger.info(f"HPO completed. Best {metric}: {self.best_score}")
             self.logger.info(f"Best parameters: {self.best_params}")

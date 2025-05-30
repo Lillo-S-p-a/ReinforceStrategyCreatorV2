@@ -32,6 +32,11 @@ class ModelType(str, Enum):
 
 class DataConfig(BaseModel):
     """Configuration for data management."""
+
+    source_id: str = Field(
+        default="default_data_source", # Provide a default ID
+        description="Unique identifier for this data configuration/source"
+    )
     
     source_type: DataSourceType = Field(
         default=DataSourceType.CSV,
@@ -639,6 +644,11 @@ class PipelineConfig(BaseModel):
     random_seed: int = Field(
         default=42,
         description="Random seed for reproducibility"
+    )
+
+    pipelines: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Definitions of executable pipelines and their stages"
     )
     
     @field_validator("name")

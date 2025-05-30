@@ -5,9 +5,11 @@ environment: "development"
 
 # Data configuration
 data:
-  source_type: "api"
-  api_endpoint: "https://api.example.com/data"
-  api_key: "${DATA_API_KEY}"
+  source_id: "dummy_csv_data" # Added source_id
+  source_type: "csv"
+  source_path: "../dummy_data.csv" # Path relative to configs directory
+  # api_endpoint: "https://api.example.com/data" # Commented out
+  # api_key: "${DATA_API_KEY}" # Commented out
   symbols:
     - "AAPL"
     - "GOOGL"
@@ -18,6 +20,8 @@ data:
   cache_enabled: true
   cache_dir: "./cache/data"
   validation_enabled: true
+  transformation:
+    add_technical_indicators: false
 
 # Model configuration
 model:
@@ -54,12 +58,14 @@ evaluation:
     - "max_drawdown"
     - "win_rate"
     - "profit_factor"
+    - "pnl_percentage"
   benchmark_symbols:
     - "SPY"
   test_episodes: 10
   save_results: true
   results_dir: "./results"
   generate_plots: true
+  report_formats: ["html", "markdown"]  # Changed from default ["json", "markdown"] to supported formats
 
 # Deployment configuration
 deployment:

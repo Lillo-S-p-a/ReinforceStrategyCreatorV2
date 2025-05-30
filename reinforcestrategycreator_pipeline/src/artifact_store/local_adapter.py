@@ -7,8 +7,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import tempfile
 import os
+import numpy as np
 
 from .base import ArtifactStore, ArtifactMetadata, ArtifactType
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles NumPy types."""
+    
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 
 class LocalFileSystemStore(ArtifactStore):
@@ -129,7 +143,7 @@ class LocalFileSystemStore(ArtifactStore):
         # Save metadata
         metadata_path = self._get_metadata_path(artifact_id, version)
         with open(metadata_path, 'w') as f:
-            json.dump(artifact_metadata.to_dict(), f, indent=2)
+            json.dump(artifact_metadata.to_dict(), f, indent=2, cls=NumpyEncoder)
         
         # Update latest version
         self._update_latest_version(artifact_id, version)

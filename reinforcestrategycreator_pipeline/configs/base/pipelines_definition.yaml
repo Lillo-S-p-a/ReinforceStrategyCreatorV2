@@ -1,0 +1,22 @@
+pipelines:
+  full_cycle_pipeline:
+    stages:
+      - name: "DataIngestion"
+        module: "reinforcestrategycreator_pipeline.src.pipeline.stages.data_ingestion"
+        class: "DataIngestionStage"
+        config: {} # Will use global 'data' config from pipeline.yaml by default or specific overrides here
+
+      - name: "FeatureEngineering"
+        module: "reinforcestrategycreator_pipeline.src.pipeline.stages.feature_engineering"
+        class: "FeatureEngineeringStage"
+        config: {} # Will use global 'data.transformation' config or defaults
+
+      - name: "Training"
+        module: "reinforcestrategycreator_pipeline.src.pipeline.stages.training"
+        class: "TrainingStage"
+        config: {} # Will use global 'model' and 'training' config
+
+      - name: "Evaluation"
+        module: "reinforcestrategycreator_pipeline.src.pipeline.stages.evaluation"
+        class: "EvaluationStage"
+        config: {} # Will use global 'evaluation' config

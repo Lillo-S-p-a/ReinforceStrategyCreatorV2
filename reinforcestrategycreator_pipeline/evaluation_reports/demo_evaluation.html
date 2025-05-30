@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Model Evaluation</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        
+        h1 {
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        .section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .info-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .info-card h3 {
+            margin-top: 0;
+            color: #3498db;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .positive {
+            color: #27ae60;
+        }
+        
+        .negative {
+            color: #e74c3c;
+        }
+        
+        .visualization {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .visualization img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        
+        @media print {
+            body {
+                background-color: white;
+            }
+            .section {
+                box-shadow: none;
+                border: 1px solid #ddd;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Demo Model Evaluation</h1>
+    
+    <div class="section">
+        <p><strong>Evaluation ID:</strong> eval_model_demo_model_874b9f4a_20250530_201558</p>
+        <p><strong>Generated:</strong> 2025-05-30T20:15:58.641789</p>
+    </div>
+    
+    <div class="section">
+        <h2>Executive Summary</h2>
+        <p>This report presents the evaluation results for model <strong>model_demo_model_874b9f4a</strong> (version v_20250530_201558).</p>
+        
+        <div class="info-grid">
+            <div class="info-card">
+                <h3>Returns</h3>
+                <p class="metric-value positive">
+                    4.24%
+                </p>
+            </div>
+            <div class="info-card">
+                <h3>Sharpe Ratio</h3>
+                <p class="metric-value">1.5505</p>
+            </div>
+            <div class="info-card">
+                <h3>Max Drawdown</h3>
+                <p class="metric-value negative">0.2799</p>
+            </div>
+            <div class="info-card">
+                <h3>Win Rate</h3>
+                <p class="metric-value">N/A</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>Model Information</h2>
+        <table>
+            <tr>
+                <th>Property</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>Model ID</td>
+                <td>model_demo_model_874b9f4a</td>
+            </tr>
+            <tr>
+                <td>Version</td>
+                <td>v_20250530_201558</td>
+            </tr>
+            <tr>
+                <td>Type</td>
+                <td>mock_model</td>
+            </tr>
+            
+        </table>
+    </div>
+    
+    <div class="section">
+        <h2>Performance Metrics</h2>
+        <table>
+            <tr>
+                <th>Metric</th>
+                <th>Value</th>
+            </tr>
+            
+            <tr>
+                <td>Pnl</td>
+                <td class="metric-value">424.24</td>
+            </tr>
+            
+            <tr>
+                <td>Pnl Percentage</td>
+                <td class="metric-value">4.24%</td>
+            </tr>
+            
+            <tr>
+                <td>Sharpe Ratio</td>
+                <td class="metric-value">1.5505</td>
+            </tr>
+            
+            <tr>
+                <td>Sortino Ratio</td>
+                <td class="metric-value">0.4033</td>
+            </tr>
+            
+            <tr>
+                <td>Max Drawdown</td>
+                <td class="metric-value">0.2799</td>
+            </tr>
+            
+            <tr>
+                <td>Calmar Ratio</td>
+                <td class="metric-value">0.1522</td>
+            </tr>
+            
+            <tr>
+                <td>Volatility</td>
+                <td class="metric-value">0.3065</td>
+            </tr>
+            
+            <tr>
+                <td>Trades Count</td>
+                <td class="metric-value">65</td>
+            </tr>
+            
+        </table>
+    </div>
+    
+    
+    <div class="section">
+        <h2>Benchmark Comparison</h2>
+        <table>
+            <tr>
+                <th>Strategy</th>
+                <th>PnL %</th>
+                <th>Sharpe Ratio</th>
+                <th>Max Drawdown</th>
+                <th>Win Rate</th>
+                <th>Trades</th>
+            </tr>
+            
+            <tr>
+                <td>Buy And Hold</td>
+                <td>4.14%</td>
+                <td>0.2202</td>
+                <td>0.2799</td>
+                <td>100.0%</td>
+                <td>1</td>
+            </tr>
+            
+            <tr>
+                <td>Simple Moving Average</td>
+                <td>-3.37%</td>
+                <td>-0.1449</td>
+                <td>0.2227</td>
+                <td>33.3%</td>
+                <td>3</td>
+            </tr>
+            
+            <tr>
+                <td>Random</td>
+                <td>-1.51%</td>
+                <td>0.0051</td>
+                <td>0.2967</td>
+                <td>50.0%</td>
+                <td>8</td>
+            </tr>
+            
+        </table>
+    </div>
+    
+    
+    
+    <div class="section">
+        <h2>Visualizations</h2>
+        
+        <div class="visualization">
+            <h3>Cumulative Returns</h3>
+            <img src="/tmp/eval_model_demo_model_874b9f4a_20250530_201558/visualizations/cumulative_returns.png" alt="cumulative_returns">
+        </div>
+        
+        <div class="visualization">
+            <h3>Drawdown</h3>
+            <img src="/tmp/eval_model_demo_model_874b9f4a_20250530_201558/visualizations/drawdown.png" alt="drawdown">
+        </div>
+        
+        <div class="visualization">
+            <h3>Metrics Comparison</h3>
+            <img src="/tmp/eval_model_demo_model_874b9f4a_20250530_201558/visualizations/metrics_comparison.png" alt="metrics_comparison">
+        </div>
+        
+        <div class="visualization">
+            <h3>Performance Dashboard</h3>
+            <img src="/tmp/eval_model_demo_model_874b9f4a_20250530_201558/visualizations/performance_dashboard.png" alt="performance_dashboard">
+        </div>
+        
+    </div>
+    
+    
+    <div class="footer">
+        <p>Report generated automatically by the Model Evaluation Pipeline</p>
+        <p>2025-05-30T20:15:58.641789</p>
+    </div>
+</body>
+</html>

@@ -10,7 +10,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.training import TrainingEngine, HPOptimizer
 from src.models.factory import ModelFactory
 from src.models.registry import ModelRegistry
-from src.artifact_store.local_adapter import LocalArtifactStore
+from src.artifact_store.local_adapter import LocalFileSystemStore as LocalArtifactStore
 from src.data.manager import DataManager
 from src.config.loader import ConfigLoader
 
@@ -50,7 +50,7 @@ def example_basic_hpo():
     
     # Initialize components
     model_factory = ModelFactory()
-    artifact_store = LocalArtifactStore(base_path="./artifacts")
+    artifact_store = LocalArtifactStore(root_path="./artifacts")
     
     training_engine = TrainingEngine(
         model_factory=model_factory,
@@ -66,7 +66,7 @@ def example_basic_hpo():
     
     # Define configurations
     model_config = {
-        "type": "ppo",
+        "model_type": "PPO",
         "name": "trading_ppo",
         "hyperparameters": {
             "learning_rate": 0.001,  # Will be overridden by HPO
@@ -78,6 +78,7 @@ def example_basic_hpo():
     data_config = create_sample_data()
     
     training_config = {
+        "model_type": "DQN",  # Add model type
         "epochs": 5,  # Short for demo
         "batch_size": 32,
         "validation_split": 0.2
@@ -130,7 +131,7 @@ def example_advanced_hpo():
     # Initialize components with registry
     model_factory = ModelFactory()
     model_registry = ModelRegistry(storage_backend=LocalArtifactStore("./model_registry"))
-    artifact_store = LocalArtifactStore(base_path="./artifacts")
+    artifact_store = LocalArtifactStore(root_path="./artifacts")
     
     training_engine = TrainingEngine(
         model_factory=model_factory,

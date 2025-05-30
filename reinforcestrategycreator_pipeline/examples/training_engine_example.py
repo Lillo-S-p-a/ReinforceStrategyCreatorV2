@@ -20,7 +20,7 @@ from src.training import (
 )
 from src.models.factory import get_factory
 from src.models.registry import ModelRegistry
-from src.artifact_store.local_adapter import LocalArtifactStore
+from src.artifact_store.local_adapter import LocalFileSystemStore as LocalArtifactStore
 from src.data.manager import DataManager
 from src.config.manager import ConfigManager
 
@@ -55,7 +55,7 @@ def example_basic_training():
     
     # Model configuration
     model_config = {
-        "model_type": "DQNModel",  # Assuming this is registered
+        "model_type": "DQN",  # Assuming this is registered
         "name": "example_model",
         "hyperparameters": {
             "learning_rate": 0.001,
@@ -136,7 +136,7 @@ def example_training_with_callbacks():
     
     # Model configuration
     model_config = {
-        "model_type": "PPOModel",
+        "model_type": "PPO",
         "name": "example_ppo_model",
         "hyperparameters": {
             "learning_rate": 0.0003,
@@ -183,7 +183,7 @@ def example_training_with_persistence():
     print("\n=== Training with Persistence Example ===")
     
     # Set up artifact store and model registry
-    artifact_store = LocalArtifactStore(base_path="./artifacts")
+    artifact_store = LocalArtifactStore(root_path="./artifacts")
     model_registry = ModelRegistry(artifact_store)
     
     # Set up data manager
@@ -191,6 +191,7 @@ def example_training_with_persistence():
         config_dir="./configs",
         environment="development"
     )
+    config_manager.load_config()  # Load the configuration
     data_manager = DataManager(
         config_manager=config_manager,
         artifact_store=artifact_store
@@ -216,7 +217,7 @@ def example_training_with_persistence():
     
     # Model configuration
     model_config = {
-        "model_type": "A2CModel",
+        "model_type": "A2C",
         "name": "production_model",
         "hyperparameters": {
             "learning_rate": 0.0007,
@@ -286,7 +287,7 @@ def example_resume_training():
     
     # Model config (must match checkpoint)
     model_config = {
-        "model_type": "PPOModel",
+        "model_type": "PPO",
         "name": "example_ppo_model"
     }
     
@@ -360,7 +361,7 @@ def example_custom_callback():
     
     # Train with custom callback
     result = engine.train(
-        model_config={"model_type": "DQNModel", "name": "threshold_model"},
+        model_config={"model_type": "DQN", "name": "threshold_model"},
         data_config={"train_data": create_sample_data(500, 5)},
         training_config={"epochs": 50, "batch_size": 32},
         callbacks=callbacks
@@ -376,7 +377,7 @@ if __name__ == "__main__":
     print("Training Engine Examples")
     print("=" * 50)
     
-    # Note: These examples assume that model types like "DQNModel", "PPOModel", etc.
+    # Note: These examples assume that model types like "DQN", "PPO", etc.
     # are registered with the model factory. In a real scenario, you would need
     # to ensure these models are implemented and registered.
     
@@ -384,22 +385,34 @@ if __name__ == "__main__":
         # Basic training
         example_basic_training()
     except Exception as e:
+        import traceback
         print(f"Basic training example failed: {e}")
+        traceback.print_exc()
     
     try:
         # Training with callbacks
         example_training_with_callbacks()
     except Exception as e:
+        import traceback
         print(f"Callbacks example failed: {e}")
+        traceback.print_exc()
     
     try:
         # Custom callback
         example_custom_callback()
     except Exception as e:
+        import traceback
         print(f"Custom callback example failed: {e}")
+        traceback.print_exc()
     
-    # Note: The persistence and resume examples would require additional setup
-    # (data files, existing checkpoints) to run successfully
+    try:
+        # Training with persistence
+        example_training_with_persistence()
+    except Exception as e:
+        print(f"Persistence example failed: {e}")
+    
+    # Note: The resume example would require additional setup
+    # (existing checkpoints) to run successfully
     
     print("\n" + "=" * 50)
     print("Examples completed!")

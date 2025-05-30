@@ -34,18 +34,65 @@ class DataIngestionStage(PipelineStage):
                 - sample_size: Optional sample size for large datasets
         """
         super().__init__(name, config or {})
-        self.source_path = Path(self.config.get("source_path", ""))
-        self.source_type = self.config.get("source_type", "csv").lower()
-        self.validation_rules = self.config.get("validation_rules", {})
-        self.sample_size = self.config.get("sample_size")
+        # These will be properly initialized in setup() using context
+        self.source_path: Optional[Path] = None
+        self.source_type: str = "csv" # Default, will be overridden in setup
+        self.validation_rules = self.config.get("validation_rules", {}) # Stage-specific overrides
+        self.sample_size = self.config.get("sample_size") # Stage-specific overrides
         
     def setup(self, context: PipelineContext) -> None:
         """Set up the data ingestion stage."""
         self.logger.info(f"Setting up {self.name} stage")
-        
-        # Validate source path exists
-        if not self.source_path.exists():
-            raise FileNotFoundError(f"Data source not found: {self.source_path}")
+
+        # Get ConfigManager from context to access global configurations
+        config_manager = context.get("config_manager")
+        if not config_manager:
+            self.logger.warning("ConfigManager not found in context. Using stage-specific config only for data source.")
+            # Fallback to existing logic if no ConfigManager in context (though it should be)
+            self.source_path_str = self.config.get("source_path", "")
+            self.source_type = self.config.get("source_type", "csv").lower()
+        else:
+            global_pipeline_config = config_manager.get_config() # Gets the PipelineConfig object
+            global_data_config = global_pipeline_config.data   # Access the DataConfig model
+
+            # Prioritize stage-specific config, then global, then default for source_type
+            self.source_type = self.config.get("source_type", global_data_config.source_type.value).lower()
+            
+            # Prioritize stage-specific config, then global for source_path
+            # Note: global_data_config.source_path might be None if source_type is API
+            self.source_path_str = self.config.get("source_path", global_data_config.source_path)
+
+        if self.source_path_str:
+            self.source_path = Path(self.source_path_str)
+        else:
+            self.source_path = None
+
+        # Validate source path exists if type is CSV
+        if self.source_type == "csv":
+            if not self.source_path:
+                raise ValueError(f"Source type is CSV but no source_path is configured.")
+            
+            # Resolve relative paths based on ConfigManager's loader base_path
+            if not self.source_path.is_absolute() and config_manager and hasattr(config_manager, 'loader'):
+                # If path is relative, resolve it relative to the config file's location
+                self.logger.info(f"ConfigManager loader base_path: {config_manager.loader.base_path}")
+                self.logger.info(f"Source path (relative): {self.source_path}")
+                resolved_source_path = (config_manager.loader.base_path / self.source_path).resolve()
+                self.logger.info(f"Resolved source path: {resolved_source_path}")
+            else:
+                # If path is absolute or no ConfigManager, use as-is
+                resolved_source_path = self.source_path.resolve()
+            if not resolved_source_path.exists():
+                raise FileNotFoundError(f"Data source CSV file not found: {resolved_source_path} (original: {self.source_path})")
+            # Store the resolved path for use in loading
+            self.resolved_source_path = resolved_source_path
+        elif self.source_type == "api":
+            # Check if we have config_manager and can access global config
+            if config_manager:
+                global_pipeline_config = config_manager.get_config()
+                global_data_config = global_pipeline_config.data
+                if not global_data_config.api_endpoint:
+                    raise ValueError("Source type is API but no api_endpoint is configured in global data config.")
             
         # Get artifact store from context if available
         self.artifact_store = context.get("artifact_store")
@@ -107,10 +154,12 @@ class DataIngestionStage(PipelineStage):
         
     def _load_data(self) -> pd.DataFrame:
         """Load data from the specified source."""
-        self.logger.info(f"Loading data from {self.source_path} (type: {self.source_type})")
+        # Use resolved path for CSV files
+        load_path = getattr(self, 'resolved_source_path', self.source_path)
+        self.logger.info(f"Loading data from {load_path} (type: {self.source_type})")
         
         if self.source_type == "csv":
-            data = pd.read_csv(self.source_path)
+            data = pd.read_csv(load_path)
         elif self.source_type == "json":
             data = pd.read_json(self.source_path)
         elif self.source_type == "parquet":

@@ -81,14 +81,14 @@ class ModelBase(ABC):
         """
         pass
     
-    def save(self, path: Union[str, Path]) -> Dict[str, Any]:
+    def save(self, path: Union[str, Path]) -> str:
         """Save the model to disk.
         
         Args:
             path: Path to save the model
             
         Returns:
-            Dictionary containing save metadata
+            String path to the saved checkpoint directory
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
@@ -110,12 +110,8 @@ class ModelBase(ABC):
         with open(metadata_path, "w") as f:
             json.dump(self.metadata, f, indent=2)
         
-        return {
-            "model_path": str(model_path),
-            "config_path": str(config_path),
-            "metadata_path": str(metadata_path),
-            "saved_at": self.metadata["saved_at"]
-        }
+        # Return the checkpoint directory path as a string
+        return str(path)
     
     def load(self, path: Union[str, Path]) -> None:
         """Load the model from disk.

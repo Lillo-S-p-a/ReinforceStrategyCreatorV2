@@ -79,8 +79,8 @@ class EvaluationEngine:
             config=report_config or {}
         )
         
-        # Default report formats
-        self.report_formats = ["json", "markdown", "html"]
+        # Default report formats - removed "json" as it's not supported by ReportGenerator
+        self.report_formats = ["markdown", "html"]
     
     def evaluate(
         self,

@@ -1,11 +1,18 @@
-from typing import List, Dict, Any, Type
+from typing import List, Dict, Any, Type, Optional
 import importlib
+from pathlib import Path
 
 from reinforcestrategycreator_pipeline.src.pipeline.stage import PipelineStage
 from reinforcestrategycreator_pipeline.src.pipeline.executor import PipelineExecutor, PipelineExecutionError
 from reinforcestrategycreator_pipeline.src.pipeline.context import PipelineContext
-from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager # Assumes Task 1.2 completed
-from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger # Changed import
+from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
+from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
+# Imports for ArtifactStore
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactStore
+from reinforcestrategycreator_pipeline.src.artifact_store.local_adapter import LocalFileSystemStore
+# from reinforcestrategycreator_pipeline.src.artifact_store.s3_adapter import S3ArtifactStore # Example if S3 needed
+from reinforcestrategycreator_pipeline.src.config.models import ArtifactStoreConfig, ArtifactStoreType
+
 
 class ModelPipelineError(Exception):
     """Custom exception for ModelPipeline errors.
@@ -42,8 +49,55 @@ class ModelPipeline:
         self.stages: List[PipelineStage] = []
         self.executor: PipelineExecutor | None = None
         self.context: PipelineContext = PipelineContext.get_instance()
+        self.context.set("config_manager", self.config_manager) # Make ConfigManager available to stages
+        
+        self.artifact_store_instance: Optional[ArtifactStore] = None
+        self._initialize_artifact_store()
+        if self.artifact_store_instance:
+            self.context.set("artifact_store", self.artifact_store_instance)
 
         self._load_pipeline_definition()
+
+    def _initialize_artifact_store(self) -> None:
+        """Initializes the artifact store based on configuration."""
+        self.logger.info("Initializing ArtifactStore...")
+        try:
+            pipeline_cfg = self.config_manager.get_config()
+            # The field in PipelineConfig is artifact_store, which should be an ArtifactStoreConfig object
+            # due to Pydantic validation (especially the @field_validator for it).
+            artifact_store_cfg_obj = pipeline_cfg.artifact_store
+            
+            if not artifact_store_cfg_obj or not isinstance(artifact_store_cfg_obj, ArtifactStoreConfig):
+                self.logger.warning(
+                    f"No valid 'artifact_store' configuration (ArtifactStoreConfig object) found in PipelineConfig. "
+                    f"Type found: {type(artifact_store_cfg_obj)}. ArtifactStore will not be available."
+                )
+                return
+
+            store_type = artifact_store_cfg_obj.type # This is an Enum: ArtifactStoreType
+            root_path = artifact_store_cfg_obj.root_path
+
+            self.logger.info(f"ArtifactStore type from config: {store_type}, root_path: {root_path}")
+
+            if store_type == ArtifactStoreType.LOCAL:
+                self.artifact_store_instance = LocalFileSystemStore(root_path=Path(root_path))
+                self.logger.info(f"LocalFileSystemStore initialized with root_path: {root_path}")
+            # elif store_type == ArtifactStoreType.S3:
+            #     # Assuming S3ArtifactStore takes s3_bucket, s3_prefix etc. from artifact_store_cfg_obj.s3_config
+            #     s3_config = artifact_store_cfg_obj.s3_config # This field would need to be added to ArtifactStoreConfig
+            #     if not s3_config:
+            #         raise ModelPipelineError("S3 artifact store selected but no s3_config provided.")
+            #     self.artifact_store_instance = S3ArtifactStore(**s3_config.model_dump())
+            #     self.logger.info(f"S3ArtifactStore initialized.")
+            else:
+                self.logger.error(f"Unsupported artifact_store type: {store_type}")
+                raise ModelPipelineError(f"Unsupported artifact_store type: {store_type}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to initialize ArtifactStore: {e}", exc_info=True)
+            # Decide if this is critical or if pipeline can run without artifact store
+            # For now, let it proceed without, stages will check for self.artifact_store
+            self.artifact_store_instance = None
 
     def _load_pipeline_definition(self) -> None:
         """Load the pipeline definition from the configuration, including its stages.
@@ -72,9 +126,11 @@ class ModelPipeline:
             #         class: "FeatureEngineeringStage"
             #         config: { ... }
             
-            pipeline_configs = self.config_manager.get_config('pipelines')
-            if not pipeline_configs:
-                raise ModelPipelineError("No 'pipelines' section found in the configuration.")
+            full_config = self.config_manager.get_config() # Get the PipelineConfig object
+            pipeline_configs = full_config.pipelines      # Access the 'pipelines' attribute
+            
+            if not pipeline_configs: # This will now be a dict from Pydantic, check if it's empty or if the key exists
+                raise ModelPipelineError("The 'pipelines' attribute in PipelineConfig is empty or not found.")
 
             pipeline_def = pipeline_configs.get(self.pipeline_name)
             if not pipeline_def:

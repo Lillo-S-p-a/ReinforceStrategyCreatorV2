@@ -116,22 +116,32 @@ class DQN(ModelBase):
         self.output_shape = output_shape
         self.n_actions = output_shape[0] if len(output_shape) > 0 else output_shape
         
-        # In a real implementation, you would build neural networks here
-        # For this demo, we'll use simple dictionaries to simulate Q-values
+        # Initialize networks with proper structure
+        self._initialize_networks(input_shape, output_shape)
+        
+        # Copy weights to target network
+        self._update_target_network()
+    
+    def _initialize_networks(self, input_shape: Tuple[int, ...], output_shape: Tuple[int, ...]) -> None:
+        """Initialize Q-network and target network structures.
+        
+        Args:
+            input_shape: Shape of state input
+            output_shape: Shape of action output
+        """
+        # Initialize Q-network
         self.q_network = {
             "weights": self._initialize_weights(input_shape, output_shape),
             "input_shape": input_shape,
             "output_shape": output_shape
         }
         
+        # Initialize target network
         self.target_network = {
             "weights": self._initialize_weights(input_shape, output_shape),
             "input_shape": input_shape,
             "output_shape": output_shape
         }
-        
-        # Copy weights to target network
-        self._update_target_network()
     
     def _initialize_weights(self, input_shape: Tuple[int, ...], 
                           output_shape: Tuple[int, ...]) -> Dict[str, np.ndarray]:
@@ -180,8 +190,25 @@ class DQN(ModelBase):
         Returns:
             Q-values for all actions
         """
-        # Simplified forward pass
+        # Ensure network has proper structure
+        if not network or "weights" not in network:
+            raise ValueError("Network structure is invalid or not initialized")
+        
         weights = network["weights"]
+        
+        # Validate weights structure
+        if not isinstance(weights, dict):
+            raise ValueError("Network weights must be a dictionary")
+        
+        # Check if required weight keys exist
+        for i in range(len(self.hidden_layers)):
+            if f"W{i}" not in weights or f"b{i}" not in weights:
+                raise KeyError(f"Missing weight key W{i} or b{i} in network weights. Available keys: {list(weights.keys())}")
+        
+        if "W_out" not in weights or "b_out" not in weights:
+            raise KeyError(f"Missing output layer weights. Available keys: {list(weights.keys())}")
+        
+        # Simplified forward pass
         x = state.flatten()
         
         # Hidden layers
@@ -241,7 +268,7 @@ class DQN(ModelBase):
             q_values = self.predict(state)
             return np.argmax(q_values)
     
-    def train(self, train_data: Any, validation_data: Optional[Any] = None, 
+    def train(self, train_data: Any, validation_data: Optional[Any] = None,
               **kwargs) -> Dict[str, Any]:
         """Train the DQN model.
         
@@ -253,6 +280,18 @@ class DQN(ModelBase):
         Returns:
             Training history and metrics
         """
+        # Ensure model is built
+        if self.q_network is None or self.target_network is None:
+            raise ValueError("Model must be built before training. Call build() first.")
+        
+        # Check and reinitialize if weights are missing
+        if "weights" not in self.q_network or not self.q_network["weights"]:
+            print("WARNING: Q-network weights were not properly initialized. Reinitializing...")
+            if hasattr(self, 'input_shape') and hasattr(self, 'output_shape'):
+                self._initialize_networks(self.input_shape, self.output_shape)
+            else:
+                raise ValueError("Cannot reinitialize networks: input_shape and output_shape not set")
+        
         # Extract training parameters
         episodes = kwargs.get("episodes", 100)
         batch_size = kwargs.get("batch_size", 32)
@@ -364,11 +403,25 @@ class DQN(ModelBase):
         # Simulate weight update (in reality, you'd use gradient descent)
         # This is a very simplified simulation
         error = targets - current_q_selected
+        
+        # Ensure q_network and weights exist before updating
+        if self.q_network is None or "weights" not in self.q_network:
+            raise ValueError("Q-network is not properly initialized")
+        
+        # Create a copy of keys to avoid dictionary modification during iteration
+        weight_keys = list(self.q_network["weights"].keys())
+        
         for i in range(batch_size):
             # Simulate gradient update effect
             adjustment = learning_rate * error[i] * 0.01
-            for key in self.q_network["weights"]:
-                self.q_network["weights"][key] += np.random.randn(*self.q_network["weights"][key].shape) * adjustment
+            for key in weight_keys:
+                if key in self.q_network["weights"]:
+                    # Ensure weights are numpy arrays (they might be lists after loading from checkpoint)
+                    if isinstance(self.q_network["weights"][key], list):
+                        self.q_network["weights"][key] = np.array(self.q_network["weights"][key])
+                    
+                    # Apply random gradient update
+                    self.q_network["weights"][key] += np.random.randn(*self.q_network["weights"][key].shape) * adjustment
         
         return float(loss)
     
@@ -425,9 +478,12 @@ class DQN(ModelBase):
         Returns:
             Dictionary containing model state
         """
+        # Create deep copies of networks to avoid modifying the original
+        import copy
+        
         state = {
-            "q_network": self.q_network,
-            "target_network": self.target_network,
+            "q_network": copy.deepcopy(self.q_network) if self.q_network else None,
+            "target_network": copy.deepcopy(self.target_network) if self.target_network else None,
             "steps": self.steps,
             "episodes": self.episodes,
             "training_history": self.training_history,
@@ -437,14 +493,31 @@ class DQN(ModelBase):
         }
         
         # Convert numpy arrays to lists for JSON serialization
-        if state["q_network"]:
-            state["q_network"]["weights"] = {
-                k: v.tolist() for k, v in state["q_network"]["weights"].items()
-            }
-        if state["target_network"]:
-            state["target_network"]["weights"] = {
-                k: v.tolist() for k, v in state["target_network"]["weights"].items()
-            }
+        if state["q_network"] and "weights" in state["q_network"]:
+            weights_dict = {}
+            for k, v in state["q_network"]["weights"].items():
+                # Handle both numpy arrays and lists
+                if isinstance(v, np.ndarray):
+                    weights_dict[k] = v.tolist()
+                elif isinstance(v, list):
+                    weights_dict[k] = v
+                else:
+                    # For any other type, try to convert to list
+                    weights_dict[k] = list(v)
+            state["q_network"]["weights"] = weights_dict
+        
+        if state["target_network"] and "weights" in state["target_network"]:
+            weights_dict = {}
+            for k, v in state["target_network"]["weights"].items():
+                # Handle both numpy arrays and lists
+                if isinstance(v, np.ndarray):
+                    weights_dict[k] = v.tolist()
+                elif isinstance(v, list):
+                    weights_dict[k] = v
+                else:
+                    # For any other type, try to convert to list
+                    weights_dict[k] = list(v)
+            state["target_network"]["weights"] = weights_dict
         
         return state
     
@@ -454,19 +527,47 @@ class DQN(ModelBase):
         Args:
             state: Dictionary containing model state
         """
+        # Restore shapes first
+        if state.get("input_shape"):
+            self.input_shape = tuple(state["input_shape"])
+        if state.get("output_shape"):
+            self.output_shape = tuple(state["output_shape"])
+        if state.get("n_actions") is not None:
+            self.n_actions = state["n_actions"]
+        
         # Restore networks
         self.q_network = state.get("q_network")
         self.target_network = state.get("target_network")
         
-        # Convert lists back to numpy arrays
+        # Ensure networks are properly initialized if they're missing structure
+        if self.q_network is None or self.target_network is None:
+            if hasattr(self, 'input_shape') and hasattr(self, 'output_shape'):
+                self._initialize_networks(self.input_shape, self.output_shape)
+        
+        # Convert lists back to numpy arrays and ensure proper structure
         if self.q_network and "weights" in self.q_network:
-            self.q_network["weights"] = {
-                k: np.array(v) for k, v in self.q_network["weights"].items()
-            }
+            # Ensure weights is a dictionary
+            if isinstance(self.q_network["weights"], dict):
+                self.q_network["weights"] = {
+                    k: np.array(v) if not isinstance(v, np.ndarray) else v
+                    for k, v in self.q_network["weights"].items()
+                }
+            else:
+                # If weights is not a dict, reinitialize
+                if hasattr(self, 'input_shape') and hasattr(self, 'output_shape'):
+                    self.q_network["weights"] = self._initialize_weights(self.input_shape, self.output_shape)
+        
         if self.target_network and "weights" in self.target_network:
-            self.target_network["weights"] = {
-                k: np.array(v) for k, v in self.target_network["weights"].items()
-            }
+            # Ensure weights is a dictionary
+            if isinstance(self.target_network["weights"], dict):
+                self.target_network["weights"] = {
+                    k: np.array(v) if not isinstance(v, np.ndarray) else v
+                    for k, v in self.target_network["weights"].items()
+                }
+            else:
+                # If weights is not a dict, reinitialize
+                if hasattr(self, 'input_shape') and hasattr(self, 'output_shape'):
+                    self.target_network["weights"] = self._initialize_weights(self.input_shape, self.output_shape)
         
         # Restore other attributes
         self.steps = state.get("steps", 0)
@@ -477,9 +578,6 @@ class DQN(ModelBase):
             "losses": [],
             "epsilon_values": []
         })
-        
-        if state.get("input_shape"):
-            self.input_shape = tuple(state["input_shape"])
         if state.get("output_shape"):
             self.output_shape = tuple(state["output_shape"])
         if state.get("n_actions") is not None:
