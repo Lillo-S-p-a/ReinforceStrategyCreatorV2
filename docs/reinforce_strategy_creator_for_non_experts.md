@@ -50,6 +50,7 @@ graph TD
     style G fill:#lightgrey,stroke:#333,stroke-width:2px
     style H fill:#lime,stroke:#333,stroke-width:2px
 ```
+\n
 *(This diagram shows a simplified flow: Market data is fed into the system, processed, and used to train an AI agent. This agent learns by interacting with a simulated market. The result is a trained strategy, which is then rigorously tested.)*
 
 ### 2.3. The Main Parts: Key Components and Their Roles
