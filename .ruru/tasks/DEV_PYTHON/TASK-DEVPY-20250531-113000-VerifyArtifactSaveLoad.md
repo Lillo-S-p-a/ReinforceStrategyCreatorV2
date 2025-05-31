@@ -1,19 +1,20 @@
 +++
 id = "TASK-DEVPY-20250531-113000"
 title = "Verify Model Artifact Saving (TrainingStage) and Loading (EvaluationStage)"
-status = "🟡 To Do"
+status = "⚪ Blocked"
 type = "🧪 Test"
 assigned_to = "dev-python"
 coordinator = "util-writer" # Or roo-commander if preferred for delegation
 created_date = "2025-05-31T11:30:00Z"
-updated_date = "2025-05-31T11:31:31Z"
+updated_date = "2025-05-31T12:12:00Z" # Updated time
 tags = ["python", "pipeline", "artifact-store", "model-persistence", "training-stage", "evaluation-stage"]
 related_docs = [
     "reinforcestrategycreator_pipeline/src/pipeline/stages/training.py",
     "reinforcestrategycreator_pipeline/src/pipeline/stages/evaluation.py",
     "reinforcestrategycreator_pipeline/src/artifact_store/base.py",
     "reinforcestrategycreator_pipeline/src/artifact_store/local_adapter.py",
-    "reinforcestrategycreator_pipeline/src/pipeline/context.py"
+    "reinforcestrategycreator_pipeline/src/pipeline/context.py",
+    "reinforcestrategycreator_pipeline/configs/base/pipeline.yaml"
 ]
 +++
 
@@ -27,6 +28,28 @@ This involves:
 3.  Ensuring the `EvaluationStage` retrieves this `trained_model_artifact_id` from the context.
 4.  Ensuring the `EvaluationStage` uses `self.artifact_store.load_artifact()` with this ID to load the model for evaluation.
 
+**Update (Blocker Info from dev-python & Coordinator):**
+The model artifact was not found in the expected directory (`reinforcestrategycreator_pipeline/artifacts/models/`) after the last pipeline run.
+
+**Artifact Store Configuration (from `reinforcestrategycreator_pipeline/configs/base/pipeline.yaml`):**
+```yaml
+artifact_store:
+  type: "local"
+  root_path: "./artifacts" 
+  # This path is relative to the script execution directory.
+  # When run_main_pipeline.py is executed from reinforcestrategycreator_pipeline/,
+  # this should resolve to reinforcestrategycreator_pipeline/artifacts/
+  versioning_enabled: true
+  metadata_backend: "json"
+  cleanup_policy:
+    enabled: false
+    max_versions_per_artifact: 10
+    max_age_days: 90
+```
+
+**Action Required from Specialist to Unblock:**
+Please re-run `python run_main_pipeline.py` (from the `reinforcestrategycreator_pipeline/` directory) and capture the **full, detailed log output**. This is needed to trace the artifact saving process, including any specific paths logged by `TrainingStage` or `ArtifactStore`, and to identify any silent errors or misconfigurations during the save operation. The previous run completed without errors, so detailed logs are crucial.
+
 ## ✅ Acceptance Criteria
 
 *   The `TrainingStage._save_model_artifact()` method correctly uses `self.artifact_store.save_artifact()` and ensures the returned artifact ID is stored as `trained_model_artifact_id` in the `PipelineContext`.
@@ -35,7 +58,7 @@ This involves:
 *   Logging is added/enhanced in both stages to clearly show:
     *   `TrainingStage`: Path where the temporary model is saved before artifacting, the artifact ID generated, and confirmation of setting it in context.
     *   `EvaluationStage`: The retrieved `trained_model_artifact_id`, and confirmation of successful model loading from the artifact store (or the path it was loaded to).
-*   The physical model artifact exists in the configured artifact store location (e.g., `reinforcestrategycreator_pipeline/artifacts/models/`) after the `TrainingStage` completes.
+*   The physical model artifact exists in the configured artifact store location (`reinforcestrategycreator_pipeline/artifacts/models/`) after the `TrainingStage` completes.
 *   The pipeline runs successfully through the `EvaluationStage` using the loaded model (it may still use simulated metrics for now, but the model loading part must work).
 
 ## 📋 Checklist
@@ -53,8 +76,14 @@ This involves:
         *   Load the model: `loaded_model_path_or_object = self.artifact_store.load_artifact(trained_model_artifact_id)`.
         *   Ensure `self.evaluation_engine` is then configured to use this loaded model (the `EvaluationEngine`'s `load_model_from_artifact_id` or similar method should handle the actual loading via artifact store).
     *   Add detailed logging for retrieving artifact ID and model loading.
-*   [ ] **Verify `reinforcestrategycreator_pipeline/src/evaluation/engine.py`**:
+*   [✅] **Verify `reinforcestrategycreator_pipeline/src/evaluation/engine.py`**:
     *   Ensure `EvaluationEngine.evaluate()` or its model loading mechanism correctly uses `self.artifact_store.load_artifact(model_artifact_id)` if it's responsible for loading.
-*   [ ] **Run Pipeline**: Execute `python run_main_pipeline.py` from the `reinforcestrategycreator_pipeline` directory.
-*   [ ] **Check Logs**: Verify the new logging confirms the artifact ID flow and successful save/load.
-*   [ ] **Check Artifact Store**: Manually inspect the `artifacts/models/` directory (or as configured) to confirm the model artifact file/directory exists and seems reasonable.
+*   [✅] **Run Pipeline**: Execute `python run_main_pipeline.py` from the `reinforcestrategycreator_pipeline` directory.
+*   [ ] **Re-run `run_main_pipeline.py` and capture full log output.** (New step to unblock)
+*   [ ] Analyze logs to trace `artifact_store.save_artifact()` calls in `TrainingStage`. (New step to unblock)
+*   [ ] Identify the actual path used for saving and why it might differ from `reinforcestrategycreator_pipeline/artifacts/models/` or if an error occurred. (New step to unblock)
+*   [ ] Correct any path resolution issues in `LocalFileSystemStore` or `TrainingStage` if the `root_path` is misinterpreted. (New step to unblock)
+*   [ ] Ensure `self.artifact_store.save_artifact()` in `TrainingStage` is correctly storing the model. (New step to unblock)
+*   [⚪] **Check Logs**: Verify the new logging confirms the artifact ID flow and successful save/load. (Blocked: Full log output and artifact store `base_path` configuration needed for verification).
+*   [✅] **Check Artifact Store**: Manually inspect the `artifacts/models/` directory (or as configured) to confirm the model artifact file/directory exists and seems reasonable. (Result: No files found)
+*   [ ] Once unblocked, proceed with original checklist items for verifying context and loading in `EvaluationStage`.
