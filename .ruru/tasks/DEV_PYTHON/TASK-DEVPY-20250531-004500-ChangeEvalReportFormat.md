@@ -1,7 +1,7 @@
 +++
 id = "TASK-DEVPY-20250531-004500"
 title = "Change Evaluation Report Format to Supported Type"
-status = "🟡 To Do"
+status = "🟢 Done"
 type = "🛠️ Refactor"
 assigned_to = "dev-python"
 coordinator = "roo-commander"
