@@ -269,6 +269,9 @@ class TrainingStage(PipelineStage):
                 artifact_path_to_save = model_file_path # Save the .pkl file
                 self.logger.info(f"Model (unknown type/no save method) pickled to: {artifact_path_to_save}")
             
+            self.logger.info(f"Temporary model content saved at: {artifact_path_to_save}")
+            self.logger.info(f"Attempting to save artifact with generated ID: {artifact_id_str}")
+
             # Now, save the entire directory or the specific file using artifact_store
             artifact_metadata_obj = self.artifact_store.save_artifact(
                 artifact_id=artifact_id_str, # Use the generated ID
@@ -284,9 +287,11 @@ class TrainingStage(PipelineStage):
                 tags=["trained_rl_model", str(self.global_model_config.get("model_type"))]
             )
             
-            context.set("trained_model_artifact_id", artifact_metadata_obj.artifact_id)
+            self.trained_model_artifact_id = artifact_metadata_obj.artifact_id # Assign to class attribute
+            context.set("trained_model_artifact_id", self.trained_model_artifact_id)
             context.set("trained_model_version", artifact_metadata_obj.version) # Store version from artifact store
-            self.logger.info(f"Trained RL model saved as artifact: {artifact_metadata_obj.artifact_id}, version: {artifact_metadata_obj.version}")
+            self.logger.info(f"Trained RL model saved as artifact. Artifact ID: {self.trained_model_artifact_id}, Version: {artifact_metadata_obj.version}")
+            self.logger.info(f"Successfully set 'trained_model_artifact_id' in PipelineContext: {self.trained_model_artifact_id}")
 
         except Exception as e:
             self.logger.error(f"Failed to save RL model artifact: {e}", exc_info=True)

@@ -16,7 +16,15 @@ These professionals will find guidance on utilizing the pipeline for developing,
 ### 1.3. High-Level Architecture
 The pipeline follows a modular architecture, orchestrated to manage the end-to-end lifecycle of an RL trading strategy. It begins with configuration loading, followed by the execution of various stages managed by a central orchestrator.
 
-[Mermaid Diagram: Overall System Flow (Illustrating `run_main_pipeline.py` logic: Config loading -> Orchestrator -> Stages) - To be inserted]
+```mermaid
+graph TD
+    A[run_main_pipeline.py] --> B(Load Configuration);
+    B --> C{Orchestrator};
+    C --> D[Stage 1];
+    C --> E[Stage 2];
+    C --> F[...];
+    C --> G[Stage N];
+```
 
 ### 1.4. Key Features
 The ReinforceStrategyCreator Pipeline offers a rich set of features:
@@ -249,7 +257,17 @@ The `run()` method of the `ModelPipeline` orchestrator executes the defined pipe
 3.  The output(s) of a completed stage are typically passed as input(s) to the subsequent stage. The orchestrator manages this data handoff.
 4.  Progress, logs, and any errors are recorded throughout the execution.
 
-[Mermaid Diagram: Pipeline Stage Execution Sequence (Illustrating `ModelPipeline.run()` and stage interactions) - To be inserted]
+```mermaid
+graph TD
+    A[ModelPipeline.run()] --> B{Loop through Stages};
+    B --> C(Stage 1: Execute);
+    C --> D{Output from Stage 1};
+    D --> E(Stage 2: Execute with Input from Stage 1);
+    E --> F{Output from Stage 2};
+    F --> G(...);
+    G --> H(Stage N: Execute with Input from Stage N-1);
+    H --> I{Final Output};
+```
 
 The modular design allows for flexibility in defining different pipelines by simply altering the `pipelines_definition.yaml` file to include, exclude, or reorder stages without changing the core orchestrator logic.
 ## 5. Core Pipeline Stages
@@ -286,7 +304,16 @@ If `data.validation_enabled` is `true`, the stage performs initial validation ch
 
 The goal of this validation is to ensure a baseline level of data quality before it enters the more complex feature engineering and model training stages.
 
-[Mermaid Diagram: Data Ingestion Flow (Sources -> Fetcher -> Cache -> Validator -> Output) - To be inserted]
+```mermaid
+graph LR
+    subgraph DataIngestionStage
+        direction LR
+        A[Data Sources (CSV, API)] --> B(Fetcher);
+        B --> C(Cache);
+        C --> D(Validator);
+        D --> E[Output Data];
+    end
+```
 ### 5.2. Feature Engineering Stage (`FeatureEngineeringStage`)
 Following data ingestion, the `FeatureEngineeringStage` (defined by `reinforcestrategycreator_pipeline.src.pipeline.stages.feature_engineering.FeatureEngineeringStage`) takes the processed market data and enriches it by creating new features. These features are designed to provide more relevant signals to the reinforcement learning model.
 
@@ -313,7 +340,17 @@ A key aspect of a robust pipeline is the ability to easily add custom feature en
 *   Integrate these custom transformations into the pipeline, potentially by registering them or specifying them in the configuration.
 This allows data scientists and quants to experiment with novel features tailored to their specific strategies without modifying the core pipeline code extensively.
 
-[Mermaid Diagram: Feature Engineering Process (Input Data -> Transformation Steps -> Output Features) - To be inserted]
+```mermaid
+graph LR
+    subgraph FeatureEngineeringStage
+        direction LR
+        A[Input Data] --> B{Transformation Step 1};
+        B --> C{Transformation Step 2};
+        C --> D{...};
+        D --> E{Transformation Step N};
+        E --> F[Output Features];
+    end
+```
 ### 5.3. Training Stage (`TrainingStage`)
 The `TrainingStage`, implemented by the class `reinforcestrategycreator_pipeline.src.pipeline.stages.training.TrainingStage`, is at the heart of the pipeline. It takes the feature-enriched data and uses it to train the specified reinforcement learning model.
 
@@ -360,7 +397,17 @@ The pipeline supports Hyperparameter Optimization (HPO) to find the best set of 
     *   Using an algorithm (e.g., Bayesian optimization, random search) to guide the search for optimal hyperparameters.
 *   Configuration for HPO (e.g., search space, number of trials, optimization algorithm) would likely reside in a dedicated HPO section within `pipeline.yaml` or a separate HPO configuration file (e.g., `configs/base/hpo.yaml`).
 
-[Mermaid Diagram: Training Stage Workflow (Data -> Model Init -> Training Loop (with HPO if active) -> Checkpoints -> Trained Model) - To be inserted]
+```mermaid
+graph TD
+    subgraph TrainingStage
+        A[Input Data] --> B(Model Initialization);
+        B --> C{Training Loop};
+        C -- Optional HPO ---> D(Hyperparameter Optimization);
+        D --> C;
+        C --> E(Save Checkpoints);
+        E --> F[Trained Model];
+    end
+```
 ### 5.4. Evaluation Stage (`EvaluationStage`)
 Once a model has been trained, the `EvaluationStage` (class `reinforcestrategycreator_pipeline.src.pipeline.stages.evaluation.EvaluationStage`) is responsible for rigorously assessing its performance on unseen data. This stage provides quantitative insights into the strategy's effectiveness and robustness.
 
@@ -407,7 +454,16 @@ If `evaluation.generate_plots` is enabled, the stage produces various plots to h
 
 These visualizations are often embedded in the generated reports or saved as separate image files. The results, if `evaluation.save_results` is true, are stored in the `evaluation.results_dir`.
 
-[Mermaid Diagram: Evaluation Workflow (Trained Model + Test Data -> Metric Calculation -> Benchmarking -> Report/Plot Generation) - To be inserted]
+```mermaid
+graph TD
+    subgraph EvaluationStage
+        A[Trained Model] --> C{Metric Calculation};
+        B[Test Data] --> C;
+        C --> D(Benchmarking);
+        D --> E(Report Generation);
+        D --> F(Plot Generation);
+    end
+```
 ## 6. Model Management
 
 Effective management of reinforcement learning models is crucial for experimentation, reproducibility, and deployment. The pipeline incorporates components and conventions for handling model implementations and their instantiation.

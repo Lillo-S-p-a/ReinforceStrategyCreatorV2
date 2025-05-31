@@ -171,6 +171,8 @@ class EvaluationStage(PipelineStage):
             # EvaluationEngine.evaluate expects model_id and model_version
             model_artifact_id = context.get("trained_model_artifact_id")
             model_version = context.get("trained_model_version")
+            self.logger.info(f"Retrieved 'trained_model_artifact_id' from context: {model_artifact_id}")
+            self.logger.info(f"Retrieved 'trained_model_version' from context: {model_version}")
             
             # The actual trained model object is also in context, but EvaluationEngine
             # is designed to load from registry/artifact store.
@@ -181,8 +183,8 @@ class EvaluationStage(PipelineStage):
                 # This requires adapting EvaluationEngine or how this stage calls it.
                 # For this iteration, we'll assume model_artifact_id IS set by TrainingStage.
                 # If not, EvaluationEngine.evaluate will fail when trying to load.
-                self.logger.error("trained_model_artifact_id not found in context. EvaluationEngine cannot load the model by ID.")
-                raise ValueError("trained_model_artifact_id is required by EvaluationEngine.")
+                self.logger.error("'trained_model_artifact_id' not found in context. This is critical for EvaluationEngine to load the model.")
+                raise ValueError("'trained_model_artifact_id' is required by EvaluationEngine and was not found in context.")
 
             # Data source for evaluation: use global_data_config's source_id
             # This assumes evaluation uses the same data source definition as training,
@@ -200,7 +202,8 @@ class EvaluationStage(PipelineStage):
             generate_viz_flag = self.global_evaluation_config.get("generate_visualizations", True)
             
             self.logger.info(f"Report formats from config: {report_formats_list}")
-            self.logger.info(f"Calling EvaluationEngine.evaluate() for model_id: {model_artifact_id}, version: {model_version}")
+            self.logger.info(f"EvaluationStage will now call EvaluationEngine.evaluate().")
+            self.logger.info(f"EvaluationEngine is expected to load model with artifact ID: {model_artifact_id} (version: {model_version}) using the artifact_store.")
             
             evaluation_results = self.evaluation_engine.evaluate(
                 model_id=model_artifact_id,
