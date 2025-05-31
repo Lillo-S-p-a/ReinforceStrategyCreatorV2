@@ -9,12 +9,14 @@ sys.path.insert(0, str(project_root))
 
 from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
 from reinforcestrategycreator_pipeline.src.pipeline.orchestrator import ModelPipeline
-from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
+from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger, configure_logging
 
 # Initialize a basic logger for the script itself
 script_logger = get_logger("run_main_pipeline_script")
 
 def main():
+    # Configure logging to DEBUG level for detailed output
+    configure_logging(log_level="DEBUG", enable_json=False) # Using enable_json=False for more readable console output during debug
     script_logger.info("Starting main pipeline execution script...")
     try:
         # Define paths
