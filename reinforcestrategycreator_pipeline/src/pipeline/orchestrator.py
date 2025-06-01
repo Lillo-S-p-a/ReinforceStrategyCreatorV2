@@ -13,6 +13,9 @@ from reinforcestrategycreator_pipeline.src.artifact_store.local_adapter import L
 # from reinforcestrategycreator_pipeline.src.artifact_store.s3_adapter import S3ArtifactStore # Example if S3 needed
 from reinforcestrategycreator_pipeline.src.config.models import ArtifactStoreConfig, ArtifactStoreType
 
+# Import DataManager
+from reinforcestrategycreator_pipeline.src.data.manager import DataManager
+
 
 class ModelPipelineError(Exception):
     """Custom exception for ModelPipeline errors.
@@ -56,7 +59,78 @@ class ModelPipeline:
         if self.artifact_store_instance:
             self.context.set("artifact_store", self.artifact_store_instance)
 
+        self.data_manager_instance: Optional[DataManager] = None
+        self._initialize_data_manager()
+        if self.data_manager_instance:
+            self.context.set("data_manager", self.data_manager_instance)
+            self._register_configured_data_sources()
+
         self._load_pipeline_definition()
+
+    def _initialize_data_manager(self) -> None:
+        """Initializes the DataManager."""
+        self.logger.info("Initializing DataManager...")
+        if not self.artifact_store_instance:
+            self.logger.warning("ArtifactStore not initialized. DataManager might have limited functionality for versioning.")
+        
+        try:
+            # DataManager needs ConfigManager and ArtifactStore
+            self.data_manager_instance = DataManager(
+                config_manager=self.config_manager,
+                artifact_store=self.artifact_store_instance # This can be None
+            )
+            self.logger.info("DataManager initialized successfully.")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize DataManager: {e}", exc_info=True)
+            self.data_manager_instance = None
+
+    def _register_configured_data_sources(self) -> None:
+        """Registers data sources defined in the global configuration with DataManager."""
+        if not self.data_manager_instance:
+            self.logger.warning("DataManager not initialized. Cannot register configured data sources.")
+            return
+
+        self.logger.info("Registering configured data sources with DataManager...")
+        try:
+            pipeline_cfg = self.config_manager.get_config()
+            # Assuming data sources are defined in a list under pipeline_cfg.data_sources
+            # For now, we'll assume the primary data source is defined in pipeline_cfg.data
+            # and we register that one.
+            # If multiple sources were defined in a list like `data_sources: [...]` in YAML,
+            # we would iterate through that list.
+
+            data_config = pipeline_cfg.data # This is a DataConfig object
+            if data_config and data_config.source_id and data_config.source_type:
+                source_id = data_config.source_id
+                source_type = data_config.source_type.value # Get the string value from Enum
+                
+                # Construct the config dict for the specific source type
+                # This needs to align with what each DataSource expects.
+                # For YFinanceDataSource, it expects 'tickers', 'period', 'interval', etc.
+                # These are now part of DataConfig model.
+                source_specific_config = {
+                    key: value for key, value in data_config.model_dump().items()
+                    if key not in ["source_id", "source_type"] and value is not None
+                }
+                # Ensure keys match YFinanceDataSource constructor if that's the type
+                if source_type == "yfinance":
+                    # YFinanceDataSource expects 'tickers', 'period', 'interval', 'start_date', 'end_date'
+                    # These should be directly available in data_config now.
+                    pass # The model_dump should provide these.
+
+                self.logger.info(f"Registering source '{source_id}' of type '{source_type}' with config: {source_specific_config}")
+                self.data_manager_instance.register_source(
+                    source_id=source_id,
+                    source_type=source_type,
+                    config=source_specific_config
+                )
+                self.logger.info(f"Successfully registered data source '{source_id}' with DataManager.")
+            else:
+                self.logger.info("No primary data source (data.source_id, data.source_type) found in global config to register.")
+
+        except Exception as e:
+            self.logger.error(f"Failed to register configured data sources: {e}", exc_info=True)
+
 
     def _initialize_artifact_store(self) -> None:
         """Initializes the artifact store based on configuration."""

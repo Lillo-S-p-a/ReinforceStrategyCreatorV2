@@ -34,7 +34,7 @@ Imagine a factory assembly line. Raw materials go in one end, and a finished pro
 graph TD
     A["Data Sources (Market Data)"] --> B["Data Processing & Preparation"]
     B --> C["AI Training Engine"]
-    C --> D{"AI Agent (The \"Brain\")"}
+    C --> D["AI Agent (The Brain)"]
     D -- "Makes Decisions" --> E["Simulated Market Environment"]
     E -- "Provides Feedback" --> D
     C -- "Produces" --> F["Trained Trading Strategy/Model"]
@@ -44,12 +44,12 @@ graph TD
     %% styling
     style A fill:#f9f,stroke:#333,stroke-width:2px
     style B fill:#ccf,stroke:#333,stroke-width:2px
-    style C fill:#90ee90,stroke:#333,stroke-width:2px   %% #lightgreen -> hex
-    style D fill:#fffe99,stroke:#333,stroke-width:2px   %% #yellow -> hex
-    style E fill:#ffa500,stroke:#333,stroke-width:2px   %% #orange -> hex
-    style F fill:#add8e6,stroke:#333,stroke-width:2px   %% #lightblue -> hex
-    style G fill:#d3d3d3,stroke:#333,stroke-width:2px   %% #lightgrey -> hex
-    style H fill:#32cd32,stroke:#333,stroke-width:2px   %% #lime -> hex
+    style C fill:#90ee90,stroke:#333,stroke-width:2px   %% lightgreen 
+    style D fill:#fffe99,stroke:#333,stroke-width:2px   %% yellow 
+    style E fill:#ffa500,stroke:#333,stroke-width:2px   %% orange 
+    style F fill:#add8e6,stroke:#333,stroke-width:2px   %% lightblue 
+    style G fill:#d3d3d3,stroke:#333,stroke-width:2px   %% lightgrey 
+    style H fill:#32cd32,stroke:#333,stroke-width:2px   %% lime 
 ```
 \n
 *(This diagram shows a simplified flow: Market data is fed into the system, processed, and used to train an AI agent. This agent learns by interacting with a simulated market. The result is a trained strategy, which is then rigorously tested.)*
@@ -84,32 +84,32 @@ Understanding how data moves through the system is key.
 ```mermaid
 graph LR
     subgraph Input
-        DS[External Data Sources (e.g., Stock Exchanges, News Feeds)]
+        DS[External Data Sources e.g. Stock Exchanges, News Feeds]
     end
 
     subgraph ReinforceStrategyCreator System
-        DM[1. Data Manager] --> FE[2. Feature Engineer];
-        FE --> TE[3. AI Training Engine];
-        TE -- Trained Model --> AS[Artifact Store];
-        TE -- Model for Evaluation --> EE[4. Evaluation Engine];
-        AS -- Loads Model/Data --> EE;
-        EE -- Evaluation Results --> AS;
+        DM[Data Manager] --> FE[Feature Engineer]
+        FE --> TE[AI Training Engine]
+        TE -- Trained Model --> AS[Artifact Store]
+        TE -- Model for Evaluation --> EE[Evaluation Engine]
+        AS -- Loads Model/Data --> EE
+        EE -- Evaluation Results --> AS
     end
 
     subgraph Output
         REP[Performance Reports & Deployed Strategies]
     end
 
-    DS --> DM;
-    AS --> REP;
+    DS --> DM
+    AS --> REP
 
     style DS fill:#f9f,stroke:#333,stroke-width:2px
     style DM fill:#ccf,stroke:#333,stroke-width:2px
     style FE fill:#ccf,stroke:#333,stroke-width:2px
-    style TE fill:#lightgreen,stroke:#333,stroke-width:2px
-    style EE fill:#lightgrey,stroke:#333,stroke-width:2px
-    style AS fill:#lightblue,stroke:#333,stroke-width:2px
-    style REP fill:#lime,stroke:#333,stroke-width:2px
+    style TE fill:lightgreen,stroke:#333,stroke-width:2px
+    style EE fill:lightgrey,stroke:#333,stroke-width:2px
+    style AS fill:lightblue,stroke:#333,stroke-width:2px
+    style REP fill:lime,stroke:#333,stroke-width:2px
 ```
 *(This diagram illustrates: External market data enters the Data Manager, is processed by the Feature Engineer, and then used by the AI Training Engine. Trained models and results are stored in the Artifact Store and used by the Evaluation Engine, ultimately leading to performance reports.)*
 

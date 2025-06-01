@@ -107,8 +107,8 @@ class YFinanceDataSource(DataSource):
                 interval=interval_to_load,
                 auto_adjust=auto_adjust_to_load,
                 prepost=prepost_to_load,
-                progress=False, 
-                show_errors=True,
+                progress=False,
+                # show_errors=True, # Removed, yfinance typically shows errors by default
                 group_by='ticker' if isinstance(tickers_to_load, list) and len(tickers_to_load) > 1 else None
             )
 
@@ -164,7 +164,7 @@ class YFinanceDataSource(DataSource):
                 period="5d", 
                 interval="1d",
                 progress=False,
-                show_errors=False,
+                # show_errors=False, # Removed
                 auto_adjust=self.auto_adjust,
                 prepost=self.prepost
             )
@@ -225,8 +225,8 @@ class YFinanceDataSource(DataSource):
                 tickers=sample_tickers_for_test,
                 period="1d",
                 interval="1d",
-                progress=False,
-                show_errors=True
+                progress=False
+                # show_errors=True # Removed
             )
             if not test_data.empty:
                 self.logger.info(f"Connection test successful for {sample_tickers_for_test}.")

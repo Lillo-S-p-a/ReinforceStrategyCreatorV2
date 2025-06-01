@@ -19,6 +19,7 @@ class DataSourceType(str, Enum):
     CSV = "csv"
     API = "api"
     DATABASE = "database"
+    YFINANCE = "yfinance"
 
 
 class ModelType(str, Enum):
@@ -58,9 +59,24 @@ class DataConfig(BaseModel):
         description="API key (supports env var substitution)"
     )
     
-    symbols: List[str] = Field(
+    symbols: Optional[List[str]] = Field( # Made optional
         default_factory=list,
-        description="List of symbols to fetch"
+        description="List of symbols to fetch (used by some sources, not yfinance)"
+    )
+
+    tickers: Optional[Union[str, List[str]]] = Field( # Added for yfinance
+        default=None,
+        description="Ticker(s) for yfinance source (e.g., 'SPY' or ['SPY', 'AAPL'])"
+    )
+
+    period: Optional[str] = Field( # Added for yfinance
+        default=None,
+        description="Data period for yfinance (e.g., '1y', '5d'). Overridden by start_date/end_date."
+    )
+
+    interval: Optional[str] = Field( # Added for yfinance
+        default="1d", # Default to daily as per yfinance_source
+        description="Data interval for yfinance (e.g., '1d', '1wk', '1m')"
     )
     
     start_date: Optional[str] = Field(
@@ -98,16 +114,33 @@ class DataConfig(BaseModel):
         description="Data validation configuration"
     )
     
-    @field_validator("source_path", "api_endpoint")
-    def validate_source(cls, v, info):
-        """Validate that appropriate source is provided."""
+    @field_validator("source_path", "api_endpoint", "tickers", "period", "start_date", "end_date")
+    def validate_source_specific_fields(cls, v, info):
+        """Validate that appropriate fields are provided based on source_type."""
         source_type = info.data.get("source_type")
         field_name = info.field_name
-        
-        if field_name == "source_path" and source_type == DataSourceType.CSV and not v:
-            raise ValueError("source_path required for CSV source")
-        elif field_name == "api_endpoint" and source_type == DataSourceType.API and not v:
-            raise ValueError("api_endpoint required for API source")
+
+        if source_type == DataSourceType.CSV:
+            if field_name == "source_path" and not v:
+                raise ValueError("source_path is required for CSV source_type.")
+        elif source_type == DataSourceType.API:
+            if field_name == "api_endpoint" and not v:
+                raise ValueError("api_endpoint is required for API source_type.")
+        elif source_type == DataSourceType.YFINANCE:
+            # For YFinance, 'tickers' is essential.
+            # 'period' or ('start_date' and 'end_date') should be present.
+            # This validator runs per field, so we check 'tickers' when it's the current field.
+            # A more holistic validation might be needed in a model-level validator if complex interdependencies exist.
+            if field_name == "tickers" and not v:
+                raise ValueError("tickers are required for YFINANCE source_type.")
+            # yfinance library itself handles if period or start/end is missing,
+            # but we can add a basic check if 'period' is None and 'start_date' is also None.
+            if field_name == "period" and v is None and info.data.get("start_date") is None:
+                # This check is a bit tricky in a field validator.
+                # A root validator might be better for cross-field dependencies.
+                # For now, we'll rely on yfinance's own error handling if insufficient period/date info is given.
+                pass
+        # No specific validation for DATABASE type here for these fields.
         return v
 
 
