@@ -195,14 +195,32 @@ class YFinanceDataSource(DataSource):
         """
         Get metadata about the data source.
         """
-        return DataSourceMetadata(
-            source_id=self.source_id,
-            source_type="yfinance", # Consistent type name
-            config=self.config,
-            last_updated=datetime.now().isoformat(), 
-            schema=self.get_schema(),
-            lineage={"operations": self.lineage_entries} # Use the inherited property
-        )
+        # Ensure _metadata is initialized by calling super's get_metadata
+        # if it hasn't been called or if we want to refresh parts of it.
+        # However, YFinanceDataSource might want to set its own source_type.
+        
+        if self._metadata is None:
+            # Initialize basic metadata structure, similar to base class,
+            # but with yfinance specific source_type.
+            # The lineage dictionary will be initialized as empty by DataSourceMetadata.
+            self._metadata = DataSourceMetadata(
+                source_id=self.source_id,
+                source_type="yfinance", # YFinance specific
+                version="1.0.0", # Default version or manage as needed
+                created_at=datetime.now(), # Or a more persistent creation time
+                schema=self.get_schema(),
+                properties=self.config.copy(),
+                # lineage is initialized to {} by default in DataSourceMetadata
+            )
+        else:
+            # If metadata already exists, ensure its schema and properties are up-to-date
+            # and source_type is correct.
+            self._metadata.schema = self.get_schema()
+            self._metadata.properties = self.config.copy()
+            self._metadata.source_type = "yfinance" # Ensure it's set
+
+        # The update_lineage method in the base class will handle the "operations" list.
+        return self._metadata
 
     def test_connection(self) -> bool:
         """

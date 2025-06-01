@@ -187,9 +187,9 @@ Once an AI agent has been trained, we need to evaluate its performance objective
     *   **What it is:** This tells you how much return you're getting for the amount of risk you're taking. A higher Sharpe Ratio is generally better. It considers the strategy's average return compared to a risk-free investment (like a government bond) and divides that by the strategy's volatility (how much its value swings up and down).
     *   **Why it matters:** A strategy might have high returns, but if it's incredibly risky and volatile, it might not be desirable. The Sharpe Ratio helps compare strategies on a risk-adjusted basis.
     *   **Simplified Formula Idea (Conceptual):**
-        ```latex
+        $$
         \text{Sharpe Ratio} \approx \frac{(\text{Strategy Average Return} - \text{Risk-Free Return})}{\text{Strategy Volatility (Risk)}}
-        ```
+        $$
     *   **In Plain English:** "Am I getting paid enough for the rollercoaster ride this strategy takes me on?"
 
 *   **Maximum Drawdown (Max DD):**
