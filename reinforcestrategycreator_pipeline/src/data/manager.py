@@ -14,6 +14,7 @@ from config.manager import ConfigManager
 from .base import DataSource, DataSourceMetadata
 from .csv_source import CsvDataSource
 from .api_source import ApiDataSource
+from .yfinance_source import YFinanceDataSource
 
 
 class DataManager:
@@ -23,6 +24,7 @@ class DataManager:
     SOURCE_TYPES: Dict[str, Type[DataSource]] = {
         "csv": CsvDataSource,
         "api": ApiDataSource,
+        "yfinance": YFinanceDataSource,
     }
     
     def __init__(

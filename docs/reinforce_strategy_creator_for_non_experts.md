@@ -32,23 +32,24 @@ Imagine a factory assembly line. Raw materials go in one end, and a finished pro
 
 ```mermaid
 graph TD
-    A[Data Sources (Market Data)] --> B(Data Processing & Preparation);
-    B --> C(AI Training Engine);
-    C --> D{AI Agent (The "Brain")};
-    D -- Makes Decisions --> E(Simulated Market Environment);
-    E -- Provides Feedback --> D;
-    C -- Produces --> F(Trained Trading Strategy/Model);
-    F --> G(Strategy Evaluation & Testing);
-    G --> H[Performance Reports & Insights];
+    A["Data Sources (Market Data)"] --> B["Data Processing & Preparation"]
+    B --> C["AI Training Engine"]
+    C --> D{"AI Agent (The \"Brain\")"}
+    D -- "Makes Decisions" --> E["Simulated Market Environment"]
+    E -- "Provides Feedback" --> D
+    C -- "Produces" --> F["Trained Trading Strategy/Model"]
+    F --> G["Strategy Evaluation & Testing"]
+    G --> H["Performance Reports & Insights"]
 
+    %% styling
     style A fill:#f9f,stroke:#333,stroke-width:2px
     style B fill:#ccf,stroke:#333,stroke-width:2px
-    style C fill:#lightgreen,stroke:#333,stroke-width:2px
-    style D fill:#yellow,stroke:#333,stroke-width:2px
-    style E fill:#orange,stroke:#333,stroke-width:2px
-    style F fill:#lightblue,stroke:#333,stroke-width:2px
-    style G fill:#lightgrey,stroke:#333,stroke-width:2px
-    style H fill:#lime,stroke:#333,stroke-width:2px
+    style C fill:#90ee90,stroke:#333,stroke-width:2px   %% #lightgreen -> hex
+    style D fill:#fffe99,stroke:#333,stroke-width:2px   %% #yellow -> hex
+    style E fill:#ffa500,stroke:#333,stroke-width:2px   %% #orange -> hex
+    style F fill:#add8e6,stroke:#333,stroke-width:2px   %% #lightblue -> hex
+    style G fill:#d3d3d3,stroke:#333,stroke-width:2px   %% #lightgrey -> hex
+    style H fill:#32cd32,stroke:#333,stroke-width:2px   %% #lime -> hex
 ```
 \n
 *(This diagram shows a simplified flow: Market data is fed into the system, processed, and used to train an AI agent. This agent learns by interacting with a simulated market. The result is a trained strategy, which is then rigorously tested.)*

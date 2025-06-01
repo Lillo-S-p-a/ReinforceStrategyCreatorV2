@@ -5,18 +5,15 @@ environment: "development"
 
 # Data configuration
 data:
-  source_id: "dummy_csv_data" # Added source_id
-  source_type: "csv"
-  source_path: "../dummy_data.csv" # Path relative to configs directory
-  # api_endpoint: "https://api.example.com/data" # Commented out
-  # api_key: "${DATA_API_KEY}" # Commented out
-  symbols:
-    - "AAPL"
-    - "GOOGL"
-    - "MSFT"
-    - "AMZN"
-  start_date: "2020-01-01"
-  end_date: "2023-12-31"
+  source_id: "yfinance_spy"
+  source_type: "yfinance" # Changed from csv to yfinance
+  # source_path is not needed for yfinance type
+  # api_endpoint and api_key are not needed for yfinance type
+  tickers: "SPY" # Configure for SPY ticker
+  period: "1y"   # Fetch last 1 year of data
+  interval: "1d" # Daily interval
+  # start_date and end_date can be used instead of period if needed
+  # symbols list is replaced by tickers for yfinance_source
   cache_enabled: true
   cache_dir: "./cache/data"
   validation_enabled: true
