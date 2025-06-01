@@ -99,6 +99,7 @@ class ArtifactStore(ABC):
     def load_artifact(
         self,
         artifact_id: str,
+        artifact_type: ArtifactType, # Added artifact_type
         version: Optional[str] = None,
         destination_path: Optional[Union[str, Path]] = None
     ) -> Path:
@@ -106,6 +107,7 @@ class ArtifactStore(ABC):
         
         Args:
             artifact_id: Unique identifier for the artifact
+            artifact_type: Type of the artifact to load
             version: Specific version to load (latest if not provided)
             destination_path: Where to save the artifact (temp location if not provided)
             
@@ -118,12 +120,14 @@ class ArtifactStore(ABC):
     def get_artifact_metadata(
         self,
         artifact_id: str,
+        artifact_type: ArtifactType, # Added artifact_type
         version: Optional[str] = None
     ) -> ArtifactMetadata:
         """Get metadata for an artifact.
         
         Args:
             artifact_id: Unique identifier for the artifact
+            artifact_type: Type of the artifact
             version: Specific version (latest if not provided)
             
         Returns:
@@ -134,13 +138,13 @@ class ArtifactStore(ABC):
     @abstractmethod
     def list_artifacts(
         self,
-        artifact_type: Optional[ArtifactType] = None,
+        artifact_type_filter: Optional[ArtifactType] = None, # Renamed for clarity
         tags: Optional[List[str]] = None
     ) -> List[ArtifactMetadata]:
         """List artifacts in the store.
         
         Args:
-            artifact_type: Filter by artifact type
+            artifact_type_filter: Filter by artifact type
             tags: Filter by tags (artifacts must have all specified tags)
             
         Returns:
@@ -149,11 +153,12 @@ class ArtifactStore(ABC):
         pass
     
     @abstractmethod
-    def list_versions(self, artifact_id: str) -> List[str]:
+    def list_versions(self, artifact_id: str, artifact_type: ArtifactType) -> List[str]: # Added artifact_type
         """List all versions of an artifact.
         
         Args:
             artifact_id: Unique identifier for the artifact
+            artifact_type: Type of the artifact
             
         Returns:
             List of version strings, sorted by creation time
@@ -164,12 +169,14 @@ class ArtifactStore(ABC):
     def delete_artifact(
         self,
         artifact_id: str,
+        artifact_type: ArtifactType, # Added artifact_type
         version: Optional[str] = None
     ) -> bool:
         """Delete an artifact from the store.
         
         Args:
             artifact_id: Unique identifier for the artifact
+            artifact_type: Type of the artifact
             version: Specific version to delete (all versions if not provided)
             
         Returns:
@@ -181,12 +188,14 @@ class ArtifactStore(ABC):
     def artifact_exists(
         self,
         artifact_id: str,
+        artifact_type: ArtifactType, # Added artifact_type
         version: Optional[str] = None
     ) -> bool:
         """Check if an artifact exists in the store.
         
         Args:
             artifact_id: Unique identifier for the artifact
+            artifact_type: Type of the artifact
             version: Specific version to check
             
         Returns:

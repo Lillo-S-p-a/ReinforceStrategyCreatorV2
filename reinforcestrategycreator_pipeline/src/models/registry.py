@@ -136,6 +136,7 @@ class ModelRegistry:
         # Load model artifacts from store
         model_path = self.artifact_store.load_artifact(
             artifact_id=model_id,
+            artifact_type=ArtifactType.MODEL,
             version=version,
             destination_path=destination_path
         )
@@ -143,6 +144,7 @@ class ModelRegistry:
         # Get metadata to determine model type
         metadata = self.artifact_store.get_artifact_metadata(
             artifact_id=model_id,
+            artifact_type=ArtifactType.MODEL,
             version=version
         )
         
@@ -179,6 +181,7 @@ class ModelRegistry:
         """
         artifact_metadata = self.artifact_store.get_artifact_metadata(
             artifact_id=model_id,
+            artifact_type=ArtifactType.MODEL,
             version=version
         )
         
@@ -259,7 +262,7 @@ class ModelRegistry:
         Returns:
             List of version metadata dictionaries
         """
-        versions = self.artifact_store.list_versions(model_id)
+        versions = self.artifact_store.list_versions(model_id, ArtifactType.MODEL)
         
         version_metadata = []
         for version in versions:
@@ -335,6 +338,7 @@ class ModelRegistry:
         """
         return self.artifact_store.delete_artifact(
             artifact_id=model_id,
+            artifact_type=ArtifactType.MODEL,
             version=version
         )
     
@@ -354,6 +358,7 @@ class ModelRegistry:
         """
         return self.artifact_store.artifact_exists(
             artifact_id=model_id,
+            artifact_type=ArtifactType.MODEL,
             version=version
         )
     

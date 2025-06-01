@@ -25,3 +25,6 @@ datadog>=0.47.0  # For Datadog integration
 Sphinx>=4.0.0
 sphinx-rtd-theme>=1.0.0
 sphinx-autodoc-typehints>=1.10.0
+
+# Data Source specific libraries
+yfinance>=0.2.0 # For fetching data from Yahoo Finance

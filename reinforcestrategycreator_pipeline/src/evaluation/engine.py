@@ -442,6 +442,7 @@ class EvaluationEngine:
         # Load from artifact store
         eval_path = self.artifact_store.load_artifact(
             artifact_id=evaluation_id,
+            artifact_type=ArtifactType.EVALUATION, # Added artifact_type
             version=version
         )
         

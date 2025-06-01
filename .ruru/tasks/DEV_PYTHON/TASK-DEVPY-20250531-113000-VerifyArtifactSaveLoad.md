@@ -1,12 +1,12 @@
 +++
 id = "TASK-DEVPY-20250531-113000"
 title = "Verify Model Artifact Saving (TrainingStage) and Loading (EvaluationStage)"
-status = "⚪ Blocked"
+status = "🟢 Done"
 type = "🧪 Test"
 assigned_to = "dev-python"
 coordinator = "util-writer" # Or roo-commander if preferred for delegation
 created_date = "2025-05-31T11:30:00Z"
-updated_date = "2025-05-31T12:12:00Z" # Updated time
+updated_date = "2025-06-01T10:26:47Z"
 tags = ["python", "pipeline", "artifact-store", "model-persistence", "training-stage", "evaluation-stage"]
 related_docs = [
     "reinforcestrategycreator_pipeline/src/pipeline/stages/training.py",
@@ -77,13 +77,13 @@ Please re-run `python run_main_pipeline.py` (from the `reinforcestrategycreator_
         *   Ensure `self.evaluation_engine` is then configured to use this loaded model (the `EvaluationEngine`'s `load_model_from_artifact_id` or similar method should handle the actual loading via artifact store).
     *   Add detailed logging for retrieving artifact ID and model loading.
 *   [✅] **Verify `reinforcestrategycreator_pipeline/src/evaluation/engine.py`**:
-    *   Ensure `EvaluationEngine.evaluate()` or its model loading mechanism correctly uses `self.artifact_store.load_artifact(model_artifact_id)` if it's responsible for loading.
-*   [✅] **Run Pipeline**: Execute `python run_main_pipeline.py` from the `reinforcestrategycreator_pipeline` directory.
-*   [ ] **Re-run `run_main_pipeline.py` and capture full log output.** (New step to unblock)
-*   [ ] Analyze logs to trace `artifact_store.save_artifact()` calls in `TrainingStage`. (New step to unblock)
-*   [ ] Identify the actual path used for saving and why it might differ from `reinforcestrategycreator_pipeline/artifacts/models/` or if an error occurred. (New step to unblock)
-*   [ ] Correct any path resolution issues in `LocalFileSystemStore` or `TrainingStage` if the `root_path` is misinterpreted. (New step to unblock)
-*   [ ] Ensure `self.artifact_store.save_artifact()` in `TrainingStage` is correctly storing the model. (New step to unblock)
-*   [⚪] **Check Logs**: Verify the new logging confirms the artifact ID flow and successful save/load. (Blocked: Full log output and artifact store `base_path` configuration needed for verification).
-*   [✅] **Check Artifact Store**: Manually inspect the `artifacts/models/` directory (or as configured) to confirm the model artifact file/directory exists and seems reasonable. (Result: No files found)
-*   [ ] Once unblocked, proceed with original checklist items for verifying context and loading in `EvaluationStage`.
+    *   Ensure `EvaluationEngine.evaluate()` or its model loading mechanism correctly uses `self.artifact_store.load_artifact(model_artifact_id, artifact_type=ArtifactType.MODEL)` if it's responsible for loading.
+    *   [✅] **Run Pipeline**: Execute `python run_main_pipeline.py` from the `reinforcestrategycreator_pipeline` directory.
+    *   [✅] **Re-run `run_main_pipeline.py` and capture full log output.** (New step to unblock)
+    *   [✅] Analyze logs to trace `artifact_store.save_artifact()` calls in `TrainingStage`. (New step to unblock)
+    *   [✅] Identify the actual path used for saving and why it might differ from `reinforcestrategycreator_pipeline/artifacts/models/` or if an error occurred. (Reason: `artifact_type` was not part of the path).
+    *   [✅] Correct any path resolution issues in `LocalFileSystemStore` or `TrainingStage` if the `root_path` is misinterpreted. (Action: Modified `LocalFileSystemStore` to include `artifact_type` in path. Updated `ArtifactStore` interface and callers.)
+    *   [✅] Ensure `self.artifact_store.save_artifact()` in `TrainingStage` is correctly storing the model to the new path structure. (Verified by log analysis of current run)
+    *   [✅] **Check Logs**: Verify the new logging confirms the artifact ID flow and successful save/load to the new path structure. (Logs confirm flow: DQN_20250601102543 saved and retrieved)
+    *   [✅] **Check Artifact Store**: Manually inspect the `artifacts/model/` directory (or as configured, e.g. `artifacts/model/DQN_20250601102543/`) to confirm the model artifact file/directory exists. (Artifact found at `reinforcestrategycreator_pipeline/artifacts/model/DQN_20250601102543/`)
+    *   [✅] Once unblocked, proceed with original checklist items for verifying context and loading in `EvaluationStage`. (All relevant acceptance criteria verified by logs and successful pipeline run)
