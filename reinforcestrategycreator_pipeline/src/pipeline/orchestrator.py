@@ -7,6 +7,7 @@ from reinforcestrategycreator_pipeline.src.pipeline.executor import PipelineExec
 from reinforcestrategycreator_pipeline.src.pipeline.context import PipelineContext
 from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
 from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
+from reinforcestrategycreator_pipeline.src.monitoring.service import MonitoringService, initialize_monitoring_from_pipeline_config # Added
 # Imports for ArtifactStore
 from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactStore
 from reinforcestrategycreator_pipeline.src.artifact_store.local_adapter import LocalFileSystemStore
@@ -15,6 +16,7 @@ from reinforcestrategycreator_pipeline.src.config.models import ArtifactStoreCon
 
 # Import DataManager
 from reinforcestrategycreator_pipeline.src.data.manager import DataManager
+from reinforcestrategycreator_pipeline.src.models.registry import ModelRegistry
 
 
 class ModelPipelineError(Exception):
@@ -59,13 +61,52 @@ class ModelPipeline:
         if self.artifact_store_instance:
             self.context.set("artifact_store", self.artifact_store_instance)
 
+        self.model_registry_instance: Optional[ModelRegistry] = None
+        self._initialize_model_registry()
+        if self.model_registry_instance:
+            self.context.set("model_registry", self.model_registry_instance)
+
         self.data_manager_instance: Optional[DataManager] = None
         self._initialize_data_manager()
         if self.data_manager_instance:
             self.context.set("data_manager", self.data_manager_instance)
             self._register_configured_data_sources()
 
+        self.monitoring_service_instance: Optional[MonitoringService] = None # Added
+        self._initialize_monitoring_service() # Added
+        if self.monitoring_service_instance: # Added
+            self.context.set("monitoring_service", self.monitoring_service_instance) # Added
+ 
         self._load_pipeline_definition()
+ 
+    def _initialize_monitoring_service(self) -> None: # Added
+        """Initializes the MonitoringService.""" # Added
+        self.logger.info("Initializing MonitoringService...") # Added
+        try: # Added
+            pipeline_cfg = self.config_manager.get_config() # Added
+            self.monitoring_service_instance = initialize_monitoring_from_pipeline_config(pipeline_cfg) # Added
+            if self.monitoring_service_instance: # Added
+                self.logger.info("MonitoringService initialized successfully.") # Added
+            else: # Added
+                self.logger.warning("MonitoringService could not be initialized from config (returned None).") # Added
+        except Exception as e: # Added
+            self.logger.error(f"Failed to initialize MonitoringService: {e}", exc_info=True) # Added
+            self.monitoring_service_instance = None # Added
+
+    def _initialize_model_registry(self) -> None:
+        """Initializes the ModelRegistry."""
+        self.logger.info("Initializing ModelRegistry...")
+        if not self.artifact_store_instance:
+            self.logger.error("ArtifactStore not initialized. Cannot initialize ModelRegistry.")
+            self.model_registry_instance = None
+            return
+        
+        try:
+            self.model_registry_instance = ModelRegistry(artifact_store=self.artifact_store_instance)
+            self.logger.info("ModelRegistry initialized successfully.")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize ModelRegistry: {e}", exc_info=True)
+            self.model_registry_instance = None
 
     def _initialize_data_manager(self) -> None:
         """Initializes the DataManager."""

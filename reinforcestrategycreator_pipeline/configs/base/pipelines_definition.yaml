@@ -20,3 +20,8 @@ pipelines:
         module: "reinforcestrategycreator_pipeline.src.pipeline.stages.evaluation"
         class: "EvaluationStage"
         config: {} # Will use global 'evaluation' config
+
+      - name: "Deployment"
+        module: "reinforcestrategycreator_pipeline.src.pipeline.stages.deployment"
+        class: "DeploymentStage"
+        config: {} # Will use global 'deployment' config from pipeline.yaml

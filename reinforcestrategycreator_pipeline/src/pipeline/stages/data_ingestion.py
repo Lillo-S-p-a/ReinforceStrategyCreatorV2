@@ -8,6 +8,7 @@ import json
 from reinforcestrategycreator_pipeline.src.pipeline.stage import PipelineStage
 from reinforcestrategycreator_pipeline.src.pipeline.context import PipelineContext
 from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactType
+from reinforcestrategycreator_pipeline.src.monitoring.service import MonitoringService # Added
 
 
 class DataIngestionStage(PipelineStage):
@@ -41,6 +42,7 @@ class DataIngestionStage(PipelineStage):
         self.sample_size = self.config.get("sample_size") # Stage-specific overrides
         self.data_manager: Optional[Any] = None # To store DataManager instance
         self.source_id_from_config: Optional[str] = None # To store source_id for yfinance
+        self.monitoring_service: Optional[MonitoringService] = None # Added
         
     def setup(self, context: PipelineContext) -> None:
         """Set up the data ingestion stage."""
@@ -98,6 +100,13 @@ class DataIngestionStage(PipelineStage):
 
         # Get artifact store from context if available
         self.artifact_store = context.get("artifact_store")
+
+        # Get monitoring service from context
+        self.monitoring_service = context.get("monitoring_service") # Added
+        if self.monitoring_service: # Added
+            self.logger.info("MonitoringService retrieved from context.") # Added
+        else: # Added
+            self.logger.warning("MonitoringService not found in context. Monitoring will be disabled for this stage.") # Added
         
     def run(self, context: PipelineContext) -> PipelineContext:
         """
@@ -110,6 +119,9 @@ class DataIngestionStage(PipelineStage):
             Updated pipeline context with ingested data
         """
         self.logger.info(f"Running {self.name} stage")
+
+        if self.monitoring_service: # Added
+            self.monitoring_service.log_event(event_type=f"{self.name}.started", description=f"Stage {self.name} started.") # Added
         
         try:
             # Load data based on source type
@@ -121,6 +133,22 @@ class DataIngestionStage(PipelineStage):
             # Log validation results
             if validation_results["errors"]:
                 self.logger.warning(f"Data validation warnings: {validation_results['errors']}")
+                if self.monitoring_service: # Added
+                    self.monitoring_service.log_event( # Added
+                        event_type=f"{self.name}.validation.errors", # Added
+                        description="Data validation encountered errors.", # Added
+                        level="warning", # Added
+                        context={"validation_errors": validation_results["errors"]} # Added
+                    ) # Added
+            if validation_results["warnings"]: # Added
+                self.logger.warning(f"Data validation warnings: {validation_results['warnings']}") # Added
+                if self.monitoring_service: # Added
+                    self.monitoring_service.log_event( # Added
+                        event_type=f"{self.name}.validation.warnings", # Added
+                        description="Data validation encountered warnings.", # Added
+                        level="warning", # Added
+                        context={"validation_warnings": validation_results["warnings"]} # Added
+                    ) # Added
             
             # Store raw data in context
             context.set("raw_data", data)
@@ -136,6 +164,10 @@ class DataIngestionStage(PipelineStage):
                 "validation_passed": len(validation_results["errors"]) == 0
             }
             context.set("data_metadata", metadata)
+
+            if self.monitoring_service: # Added
+                self.monitoring_service.log_metric(f"{self.name}.row_count", metadata['row_count']) # Added
+                self.monitoring_service.log_metric(f"{self.name}.column_count", metadata['column_count']) # Added
             
             # Save as artifact if artifact store is available
             if self.artifact_store:
@@ -143,11 +175,16 @@ class DataIngestionStage(PipelineStage):
             
             self.logger.info(f"Successfully ingested data: {metadata['row_count']} rows, "
                            f"{metadata['column_count']} columns")
+
+            if self.monitoring_service: # Added
+                self.monitoring_service.log_event(event_type=f"{self.name}.completed", description=f"Stage {self.name} completed successfully.", level="info") # Added
             
             return context
             
         except Exception as e:
             self.logger.error(f"Error in data ingestion: {str(e)}")
+            if self.monitoring_service: # Added
+                self.monitoring_service.log_event(event_type=f"{self.name}.failed", description=f"Stage {self.name} failed: {str(e)}", level="error", context={"error_details": str(e)}) # Added
             raise
             
     def teardown(self, context: PipelineContext) -> None:

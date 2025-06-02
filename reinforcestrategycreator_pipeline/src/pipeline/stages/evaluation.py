@@ -15,8 +15,9 @@ from reinforcestrategycreator_pipeline.src.models.registry import ModelRegistry
 from reinforcestrategycreator_pipeline.src.data.manager import DataManager
 from reinforcestrategycreator_pipeline.src.data.csv_source import CsvDataSource
 from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager # For type hinting
-
-
+from reinforcestrategycreator_pipeline.src.monitoring.service import MonitoringService # Added
+ 
+ 
 class EvaluationStage(PipelineStage):
     """
     Stage responsible for evaluating trained models.
@@ -51,6 +52,7 @@ class EvaluationStage(PipelineStage):
         self.data_manager: Optional[DataManager] = None
         self.artifact_store = None # Will be fetched from context
         self.evaluation_engine: Optional[EvaluationEngine] = None
+        self.monitoring_service: Optional[MonitoringService] = None # Added
         
     def setup(self, context: PipelineContext) -> None:
         """Set up the evaluation stage."""
@@ -119,12 +121,24 @@ class EvaluationStage(PipelineStage):
                     resolved_source_path = Path(source_path).resolve() if source_path else None
                 
                 # Prepare the configuration for the data source
+                # Use all relevant fields from global_data_config
                 data_source_config = {
-                    "source_path": str(resolved_source_path) if resolved_source_path else None,
-                    "symbols": self.global_data_config.get("symbols", []),
+                    "source_path": str(resolved_source_path) if resolved_source_path else self.global_data_config.get("source_path"), # Keep resolved path if applicable
+                    "symbols": self.global_data_config.get("symbols", []), # Keep for other source types
+                    "tickers": self.global_data_config.get("tickers"),     # Add tickers
+                    "period": self.global_data_config.get("period"),       # Add period
+                    "interval": self.global_data_config.get("interval"),   # Add interval
                     "start_date": self.global_data_config.get("start_date"),
                     "end_date": self.global_data_config.get("end_date"),
+                    # Add any other fields from DataConfig that might be relevant for other source types
+                    # or that YFinanceDataSource might optionally use from its config.
+                    "cache_enabled": self.global_data_config.get("cache_enabled"),
+                    "auto_adjust": self.global_data_config.get("auto_adjust", True), # Assuming a default if not in DataConfig
+                    "prepost": self.global_data_config.get("prepost", False),       # Assuming a default if not in DataConfig
                 }
+                # Filter out None values to avoid passing them if not set,
+                # allowing DataSource's own defaults to take precedence.
+                data_source_config = {k: v for k, v in data_source_config.items() if v is not None}
                 
                 # Register the data source
                 try:
@@ -150,6 +164,13 @@ class EvaluationStage(PipelineStage):
         # For now, we'll assume TrainingStage puts 'trained_model_artifact_id' and 'trained_model_version'.
         if not context.get("trained_model_artifact_id"):
             self.logger.warning("trained_model_artifact_id not found in context. EvaluationEngine might rely on this.")
+
+        # Get monitoring service from context
+        self.monitoring_service = context.get("monitoring_service") # Added
+        if self.monitoring_service: # Added
+            self.logger.info("MonitoringService retrieved from context.") # Added
+        else: # Added
+            self.logger.warning("MonitoringService not found in context. Monitoring will be disabled for this stage.") # Added
         
     def run(self, context: PipelineContext) -> PipelineContext:
         """
@@ -163,9 +184,12 @@ class EvaluationStage(PipelineStage):
         """
         self.logger.info(f"Running {self.name} stage using RL EvaluationEngine.")
 
+        if self.monitoring_service: # Added
+            self.monitoring_service.log_event(event_type=f"{self.name}.started", description=f"Stage {self.name} started.") # Added
+ 
         if not self.evaluation_engine:
             raise RuntimeError("EvaluationEngine not initialized in EvaluationStage. Call setup() first.")
-
+ 
         try:
             # Get necessary info from context, set by TrainingStage
             # EvaluationEngine.evaluate expects model_id and model_version
@@ -234,13 +258,33 @@ class EvaluationStage(PipelineStage):
                 "metrics_computed": list(evaluation_results.get("metrics", {}).keys()),
             }
             context.set("evaluation_metadata", metadata)
+
+            if self.monitoring_service: # Added
+                computed_metrics = evaluation_results.get("metrics", {}) # Added
+                if computed_metrics: # Added
+                    for metric_name, metric_value in computed_metrics.items(): # Added
+                        if isinstance(metric_value, (int, float, np.number)): # Added
+                             # Convert numpy numbers to native Python types for serialization if needed by service
+                            if isinstance(metric_value, np.number): # Added
+                                metric_value = metric_value.item() # Added
+                            self.monitoring_service.log_metric(f"{self.name}.{metric_name}", metric_value) # Added
+                        elif isinstance(metric_value, dict) and "value" in metric_value and isinstance(metric_value["value"], (int, float, np.number)): # Handle more complex metric structures if any # Added
+                            val_to_log = metric_value["value"] # Added
+                            if isinstance(val_to_log, np.number): # Added
+                                val_to_log = val_to_log.item() # Added
+                            self.monitoring_service.log_metric(f"{self.name}.{metric_name}", val_to_log, tags=metric_value.get("tags")) # Added
             
             self.logger.info(f"Evaluation stage completed. Metrics: {evaluation_results.get('metrics')}")
+
+            if self.monitoring_service: # Added
+                self.monitoring_service.log_event(event_type=f"{self.name}.completed", description=f"Stage {self.name} completed successfully.", level="info") # Added
             
             return context
             
         except Exception as e:
             self.logger.error(f"Error in RL EvaluationStage run: {str(e)}", exc_info=True)
+            if self.monitoring_service: # Added
+                self.monitoring_service.log_event(event_type=f"{self.name}.failed", description=f"Stage {self.name} failed: {str(e)}", level="error", context={"error_details": str(e)}) # Added
             raise
             
     def teardown(self, context: PipelineContext) -> None:
