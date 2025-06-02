@@ -79,6 +79,7 @@ class DeploymentStage(PipelineStage):
         self.logger.info(f"Running stage: {self.name}")
 
         if self.monitoring_service: # Added
+            print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.started'")
             self.monitoring_service.log_event(event_type=f"{self.name}.started", description=f"Stage {self.name} started.") # Added
         
         try: # Added
@@ -88,15 +89,17 @@ class DeploymentStage(PipelineStage):
                 # Potentially update context with an error status
                 context.set_metadata(f"{self.name}_status", "error_no_model_id")
                 if self.monitoring_service: # Added
+                    print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.failed' (no model_id)")
                     self.monitoring_service.log_event(event_type=f"{self.name}.failed", description="No model_artifact_id found.", level="error") # Added
                 return context
- 
+        
             model_registry: Optional[ModelRegistry] = context.get('model_registry')
             if not model_registry:
                 self.logger.error("ModelRegistry not found in PipelineContext.")
                 # Potentially update context with an error status
                 context.set_metadata(f"{self.name}_status", "error_no_model_registry")
                 if self.monitoring_service: # Added
+                    print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.failed' (no model_registry)")
                     self.monitoring_service.log_event(event_type=f"{self.name}.failed", description="ModelRegistry not found.", level="error") # Added
                 return context
             
@@ -111,9 +114,10 @@ class DeploymentStage(PipelineStage):
                 self.logger.error(f"Failed to load model '{self.model_artifact_id}': {e_load}")
                 context.set_metadata(f"{self.name}_status", f"error_model_load_failed: {e_load}")
                 if self.monitoring_service: # Added
+                    print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.model_load.failed'")
                     self.monitoring_service.log_event(event_type=f"{self.name}.model_load.failed", description=f"Failed to load model: {e_load}", level="error", context={"model_id": self.model_artifact_id, "error_details": str(e_load)}) # Added
                 return context
- 
+        
             # --- Paper Trading Logic --- # Indented
             if self.deployment_config and self.deployment_config.mode == "paper_trading": # Indented
                 self.logger.info("Paper trading mode activated.") # Indented
@@ -197,6 +201,7 @@ class DeploymentStage(PipelineStage):
                             self.portfolio["holdings"]["DUMMY_ASSET"] = {"shares": 10, "avg_price": 100.0} # Indented
                             self.logger.info(f"Simulated BUY trade. Portfolio: {self.portfolio}") # Indented
                             if self.monitoring_service: # Added # Indented
+                                print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.paper_trade.executed'") # Added # Indented
                                 self.monitoring_service.log_event( # Added # Indented
                                     event_type=f"{self.name}.paper_trade.executed", # Added # Indented
                                     description="Simulated BUY trade executed for DUMMY_ASSET.", # Added # Indented
@@ -215,9 +220,10 @@ class DeploymentStage(PipelineStage):
                         self.logger.error(f"Error during prediction or trade simulation: {e_sim}") # Indented
                         context.set_metadata(f"{self.name}_status", f"error_prediction_simulation: {e_sim}") # Indented
                         if self.monitoring_service: # Added # Indented
+                            print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.simulation.failed'") # Added # Indented
                             self.monitoring_service.log_event(event_type=f"{self.name}.simulation.failed", description=f"Prediction or trade simulation failed: {e_sim}", level="error", context={"error_details": str(e_sim)}) # Added # Indented
                         # Continue or return context based on severity # Indented
- 
+        
                 else: # Indented
                     self.logger.warning("Model does not have a predict method or no data for paper trading. Skipping simulation loop.") # Indented
  
@@ -231,7 +237,7 @@ class DeploymentStage(PipelineStage):
                     self.monitoring_service.log_metric(f"{self.name}.paper_trading.trade_count", len(self.portfolio.get("trades", []))) # Added # Indented
  
  
-            elif self.deployment_config.get("mode") == "live_trading": # Indented
+            elif self.deployment_config and self.deployment_config.mode == "live_trading": # Indented, Changed .get("mode") to .mode
                 self.logger.warning("Live trading mode is configured but not yet implemented in this stage. Skipping.") # Indented
                 # Placeholder for future live trading integration # Indented
                 # - Connect to broker API # Indented
@@ -239,12 +245,13 @@ class DeploymentStage(PipelineStage):
                 # - Handle real-time data feeds # Indented
             else: # Indented
                 self.logger.warning( # Indented
-                    f"Deployment mode '{self.deployment_config.get('mode')}' is not " # Indented
+                    f"Deployment mode '{self.deployment_config.mode if self.deployment_config else 'N/A'}' is not " # Indented, Changed .get("mode") to .mode
                     f"recognized or not yet implemented for this stage. Skipping." # Indented
                 ) # Indented
             
             context.set_metadata(f"{self.name}_status", "completed") # Indented
             if self.monitoring_service: # Added # Indented
+                print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.completed'") # Added # Indented
                 self.monitoring_service.log_event(event_type=f"{self.name}.completed", description=f"Stage {self.name} completed successfully.", level="info") # Added # Indented
             return context # Indented
         # Added general exception handling for the run method
@@ -252,10 +259,12 @@ class DeploymentStage(PipelineStage):
             self.logger.error(f"Error in {self.name} stage run: {str(e_run)}", exc_info=True) # Added
             context.set_metadata(f"{self.name}_status", f"error_stage_run: {str(e_run)}") # Added
             if self.monitoring_service: # Added
+                print(f"DEBUG_DEPLOYMENT: {self.name} - Calling monitoring_service.log_event for '.failed' (in except e_run)") # Added
                 self.monitoring_service.log_event(event_type=f"{self.name}.failed", description=f"Stage {self.name} failed: {str(e_run)}", level="error", context={"error_details": str(e_run)}) # Added
             # Unlike specific errors above, this might re-raise if it's a critical failure not caught by inner try-excepts
-            raise # Added
- 
+            # Re-raise the original exception to ensure it's propagated
+            raise e_run # Explicitly raise the caught exception object
+        
     def teardown(self, context: PipelineContext) -> None:
         """
         Clean up resources after the deployment stage has executed.

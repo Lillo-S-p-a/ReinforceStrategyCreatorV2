@@ -283,34 +283,49 @@ class DeploymentConfig(BaseModel):
         description="Deployment mode (paper_trading, live)"
     )
     
+    initial_cash: Optional[float] = Field( # Added
+        default=100000.0,
+        description="Initial cash for paper trading."
+    )
+
+    paper_trading_data_source_id: Optional[str] = Field( # Added
+        default=None,
+        description="Data source ID to use for paper trading if not using evaluation output."
+    )
+
+    paper_trading_data_params: Optional[Dict[str, Any]] = Field( # Added
+        default_factory=dict,
+        description="Parameters for loading paper trading data."
+    )
+    
     api_endpoint: Optional[str] = Field(
         default=None,
-        description="Trading API endpoint"
+        description="Trading API endpoint (for live trading)"
     )
     
     api_key: Optional[str] = Field(
         default=None,
-        description="Trading API key"
+        description="Trading API key (for live trading)"
     )
     
     max_positions: int = Field(
         default=10,
-        description="Maximum number of positions"
+        description="Maximum number of positions (for live trading)"
     )
     
     position_size: float = Field(
         default=0.1,
-        description="Position size as fraction of portfolio"
+        description="Position size as fraction of portfolio (for live trading)"
     )
     
     risk_limit: float = Field(
         default=0.02,
-        description="Maximum risk per trade"
+        description="Maximum risk per trade (for live trading)"
     )
     
     update_frequency: str = Field(
         default="1h",
-        description="Model update frequency"
+        description="Model update frequency (for live trading)"
     )
 
 
