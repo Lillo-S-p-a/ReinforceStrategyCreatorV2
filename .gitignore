@@ -13,3 +13,9 @@ logs/
 test_results*
 results_plots/
 *.csv
+
+reinforcestrategycreator_pipeline/checkpoints
+reinforcestrategycreator_pipeline/artifacts
+checkpoints/*
+cache
+artifacts/

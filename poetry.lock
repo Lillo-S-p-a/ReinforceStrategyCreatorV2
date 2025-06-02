@@ -477,6 +477,20 @@ docs = ["ipython", "matplotlib", "numpydoc", "sphinx"]
 tests = ["pytest", "pytest-cov", "pytest-xdist"]
 
 [[package]]
+name = "datadog"
+version = "0.44.0"
+description = "The Datadog Python library"
+optional = false
+python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
+files = [
+    {file = "datadog-0.44.0-py2.py3-none-any.whl", hash = "sha256:57c4878d3a8351f652792cdba78050274789dcc44313adec096e87f9d3ca5992"},
+    {file = "datadog-0.44.0.tar.gz", hash = "sha256:071170f0c7ef22511dbf7f9bd76c4be500ee2d3d52072900a5c87b5495d2c733"},
+]
+
+[package.dependencies]
+requests = ">=2.6.0"
+
+[[package]]
 name = "dm-tree"
 version = "0.1.8"
 description = "Tree is a library for working with nested data structures."
@@ -3812,4 +3826,4 @@ repair = ["scipy (>=1.6.3)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "f3dc4d6021f344fd612274b9dfdcc0578b46c58fa2765e550f90d19821a69420"
+content-hash = "674ce352ceb9784b3d34f92e5a66e6422392824a65360ac5f3ad6cf654f7a762"

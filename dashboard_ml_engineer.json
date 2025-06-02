@@ -1,0 +1,360 @@
+{
+  "title": "ML Model Selection & Training Performance",
+  "description": "Dashboard for ML Engineers to monitor model selection experiments, training performance, and operational health.",
+  "layout_type": "ordered",
+  "template_variables": [
+    {
+      "name": "test_run_id",
+      "prefix": "test_run_id",
+      "default": "*"
+    },
+    {
+      "name": "asset",
+      "prefix": "asset",
+      "default": "*"
+    },
+    {
+      "name": "model_type",
+      "prefix": "model_type",
+      "default": "*"
+    },
+    {
+      "name": "approach_name",
+      "prefix": "approach_name",
+      "default": "*"
+    }
+  ],
+  "widgets": [
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 1: Panoramica Ultimo Test Run / KPI Principali",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Stato Ultimo Test Run (0=OK, 1=Err, 2=Fail)",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "max:test.run.status{test_run_id:$test_run_id, asset:$asset, model_type:$model_type}.rollup(max, 3600)",
+                  "aggregator": "last",
+                  "conditional_formats": [
+                    {
+                      "comparator": "=",
+                      "value": 0,
+                      "palette": "green_on_white"
+                    },
+                    {
+                      "comparator": "=",
+                      "value": 1,
+                      "palette": "yellow_on_white"
+                    },
+                    {
+                      "comparator": "=",
+                      "value": 2,
+                      "palette": "red_on_white"
+                    }
+                  ]
+                }
+              ],
+              "autoscale": true,
+              "precision": 0
+            }
+          },
+          {
+            "definition": {
+              "title": "Durata Ultimo Test Run (secondi)",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "max:test.run.duration_seconds{test_run_id:$test_run_id, asset:$asset, model_type:$model_type}.rollup(max, 3600)",
+                  "aggregator": "last"
+                }
+              ],
+              "autoscale": true,
+              "precision": 2
+            }
+          },
+          {
+            "definition": {
+              "title": "Sharpe Ratio Finale (per Approach)",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:original} by {approach_name}",
+                  "display_type": "line",
+                  "style": {"palette": "dog_classic", "line_type": "solid", "line_width": "normal"}
+                },
+                {
+                  "q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {approach_name}",
+                  "display_type": "line",
+                  "style": {"palette": "dog_classic", "line_type": "solid", "line_width": "normal"}
+                },
+                {
+                  "q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:hpo_final} by {approach_name}",
+                  "display_type": "line",
+                  "style": {"palette": "dog_classic", "line_type": "solid", "line_width": "normal"}
+                }
+              ],
+              "show_legend": true,
+              "legend_layout": "auto",
+              "legend_columns": ["avg", "min", "max", "value", "sum"]
+            }
+          },
+          {
+            "definition": {
+              "title": "PnL Finale (per Approach)",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:original} by {approach_name}", "display_type": "line"},
+                {"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {approach_name}", "display_type": "line"},
+                {"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:hpo_final} by {approach_name}", "display_type": "line"}
+              ],
+              "show_legend": true
+            }
+          },
+          {
+            "definition": {
+              "title": "% Miglioramento Sharpe Ratio Finale (Enhanced vs Original)",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {"q": "avg:comparison.improvement.final_sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type}", "display_type": "line"}
+              ],
+              "show_legend": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 2: Dettaglio Cross-Validation (CV) - Enhanced Approach (approach_name:enhanced)",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Dettaglio CV per Fold (Enhanced)",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {
+                  "q": "avg:cv.fold_detail.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {cv_fold_id, cv_model_config}",
+                  "alias": "Sharpe Ratio",
+                  "aggregator": "avg"
+                },
+                {
+                  "q": "avg:cv.fold_detail.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {cv_fold_id, cv_model_config}",
+                  "alias": "PnL",
+                  "aggregator": "avg"
+                },
+                {
+                  "q": "avg:cv.fold_detail.win_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {cv_fold_id, cv_model_config}",
+                  "alias": "Win Rate",
+                  "aggregator": "avg"
+                },
+                 {
+                  "q": "avg:cv.fold_detail.max_drawdown{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {cv_fold_id, cv_model_config}",
+                  "alias": "Max Drawdown",
+                  "aggregator": "avg"
+                },
+                {
+                  "q": "avg:cv.fold_detail.composite_score{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {cv_fold_id, cv_model_config}",
+                  "alias": "Composite Score",
+                  "aggregator": "avg"
+                }
+              ],
+              "has_search_bar": "auto"
+            }
+          },
+          {
+            "definition": {
+                "title": "Distribuzione Sharpe Ratio CV (Enhanced, per Fold)",
+                "title_align": "left",
+                "type": "distribution",
+                "requests": [
+                    {
+                        "q": "avg:cv.fold_detail.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced} by {cv_model_config}",
+                        "style": {"palette": "dog_classic"}
+                    }
+                ],
+                "show_legend": true
+            }
+          },
+          {
+            "definition": {
+              "title": "Medie Metriche CV (Enhanced)",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {"q": "avg:cv.all_folds.sharpe_ratio.mean{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced}", "display_type": "line"},
+                {"q": "avg:cv.all_folds.pnl.mean{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced}", "display_type": "line"},
+                {"q": "avg:cv.all_folds.composite_score.mean{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:enhanced}", "display_type": "line"}
+              ],
+              "show_legend": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 3: Analisi Ablation Study",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Sharpe Ratio Finale (Ablation Study vs Baseline)",
+              "title_align": "left",
+              "type": "bar_chart",
+              "requests": [
+                {
+                  "q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name}",
+                  "style": {"palette": "dog_classic"}
+                }
+              ]
+            }
+          },
+          {
+            "definition": {
+              "title": "Tabella Risultati Ablation Study",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {"q": "avg:final.sharpe_ratio{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name}", "alias": "Sharpe Ratio", "aggregator": "avg"},
+                {"q": "avg:final.pnl{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name}", "alias": "PnL", "aggregator": "avg"},
+                {"q": "avg:final.win_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name}", "alias": "Win Rate", "aggregator": "avg"},
+                {"q": "avg:final.max_drawdown{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:*} by {approach_name}", "alias": "Max Drawdown", "aggregator": "avg"}
+              ],
+              "has_search_bar": "auto"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 4: Analisi Hyperparameter Optimization (HPO) (approach_name:hpo_final)",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Migliori Parametri HPO (per Run)",
+              "title_align": "left",
+              "type": "query_table",
+              "requests": [
+                {"q": "avg:hpo.best_params.learning_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:hpo_final} by {test_run_id}", "alias": "Learning Rate", "aggregator": "avg"},
+                {"q": "avg:hpo.best_params.batch_size{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:hpo_final} by {test_run_id}", "alias": "Batch Size", "aggregator": "avg"}
+                
+              ],
+              "has_search_bar": "auto"
+            }
+          },
+          {
+            "definition": {
+              "title": "Durata Ottimizzazione HPO (s)",
+              "type": "query_value",
+              "requests": [{"q": "avg:hpo.duration_seconds{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:hpo_final}", "aggregator": "avg"}],
+              "precision": 2
+            }
+          },
+          {
+            "definition": {
+              "title": "Numero Trial HPO",
+              "type": "query_value",
+              "requests": [{"q": "avg:hpo.num_trials{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:hpo_final}", "aggregator": "avg"}],
+              "precision": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 5: Dettagli Configurazione Modello e Training (Filtra per $approach_name)",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Configurazione Modello & Training (Approach: $approach_name)",
+              "type": "query_table",
+              "requests": [
+                {"q": "avg:model.config.learning_rate{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {approach_name}", "alias": "LR", "aggregator": "avg"},
+                {"q": "avg:model.config.batch_size{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {approach_name}", "alias": "Batch Size", "aggregator": "avg"},
+                {"q": "avg:training.config.episodes{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {approach_name}", "alias": "Episodes Cfg", "aggregator": "avg"},
+                {"q": "avg:training.final.use_transfer_learning{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {approach_name}", "alias": "Use TransferL", "aggregator": "avg"},
+                {"q": "avg:training.final.use_ensemble{test_run_id:$test_run_id, asset:$asset, model_type:$model_type, approach_name:$approach_name} by {approach_name}", "alias": "Use Ensemble", "aggregator": "avg"}
+              ]
+            }
+          },
+          {
+            "definition": {
+                "title": "Durata Training Modello Finale (per Approach)",
+                "type": "timeseries",
+                "requests": [
+                    {"q": "avg:training.duration_seconds{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}", "display_type": "bars"}
+                ],
+                "show_legend": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "type": "group",
+        "layout_type": "ordered",
+        "title": "Sezione 6: Salute Operativa e Dati",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Conteggio Errori per Approach",
+              "type": "timeseries",
+              "requests": [
+                {"q": "sum:execution.error.count{test_run_id:$test_run_id, asset:$asset, model_type:$model_type} by {approach_name}.as_count()", "display_type": "bars"}
+              ],
+              "show_legend": true
+            }
+          },
+          {
+            "definition": {
+              "title": "Errori Complessivi del Test Run",
+              "type": "timeseries",
+              "requests": [
+                {"q": "sum:test.run.initialization_error.count{test_run_id:$test_run_id}.as_count()", "display_type": "line"},
+                {"q": "sum:test.run.data_fetch_error.count{test_run_id:$test_run_id}.as_count()", "display_type": "line"},
+                {"q": "sum:test.run.comparison_report_error.count{test_run_id:$test_run_id}.as_count()", "display_type": "line"}
+              ],
+              "show_legend": true
+            }
+          },
+          {
+            "definition": {
+              "title": "Dimensioni Dati (Run: $test_run_id)",
+              "type": "query_table",
+              "requests": [
+                {"q": "avg:data.total_rows{test_run_id:$test_run_id, asset:$asset} by {asset}", "alias": "Total Rows", "aggregator": "avg"},
+                {"q": "avg:data.train.rows{test_run_id:$test_run_id, asset:$asset, approach_name:$approach_name} by {asset}", "alias": "Train Rows ($approach_name)", "aggregator": "avg"},
+                {"q": "avg:data.test.rows{test_run_id:$test_run_id, asset:$asset, approach_name:$approach_name} by {asset}", "alias": "Test Rows ($approach_name)", "aggregator": "avg"},
+                {"q": "avg:data.total_features{test_run_id:$test_run_id, asset:$asset} by {asset}", "alias": "Total Features", "aggregator": "avg"}
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "notify_list": [],
+  "reflow_type": "auto"
+}

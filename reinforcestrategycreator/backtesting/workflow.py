@@ -305,6 +305,46 @@ class BacktestingWorkflow:
         except Exception as e:
             logger.error(f"Error saving HPO summary: {e}", exc_info=True)
     
+    def update_config_with_hpo_params(self, hpo_params: Dict[str, Any]) -> None:
+        """
+        Update the main configuration, specifically agent_config, with parameters from HPO.
+        
+        Args:
+            hpo_params: Dictionary of hyperparameters obtained from HPO.
+        """
+        if not hpo_params:
+            logger.warning("No HPO parameters provided to update config.")
+            return
+            
+        logger.info(f"Attempting to update configuration with HPO parameters: {hpo_params}")
+        
+        if "agent_config" not in self.config:
+            self.config["agent_config"] = {}
+            logger.warning("self.config['agent_config'] not found. Initialized as empty dict before HPO update.")
+
+        updated_keys = []
+        for key, value in hpo_params.items():
+            # These are typical hyperparameters tuned by HPO for the agent
+            agent_hyperparameters = [
+                "learning_rate", "batch_size", "gamma",
+                "epsilon_decay", "epsilon_min", "layers",
+                "buffer_size", "learning_starts", "tau", "train_freq",
+                "gradient_steps", "target_update_interval" # Add other known agent hyperparameters
+            ]
+            # Check if the key is a known agent hyperparameter or already exists in agent_config
+            if key in agent_hyperparameters or key in self.config.get("agent_config", {}):
+                self.config["agent_config"][key] = value
+                updated_keys.append(key)
+                logger.info(f"Updated self.config['agent_config']['{key}'] = {value}")
+            else:
+                logger.debug(f"HPO param '{key}' with value '{value}' was not used to update agent_config "
+                             "as it's not a known agent hyperparameter or pre-existing key in agent_config.")
+        
+        if updated_keys:
+            logger.info(f"Successfully updated agent_config with HPO keys: {updated_keys}.")
+        else:
+            logger.warning("No relevant HPO parameters found to update agent_config.")
+        logger.debug(f"Current agent_config after HPO update attempt: {self.config.get('agent_config')}")
     def select_best_model(self) -> Dict[str, Any]:
         """
         Select best model using enhanced multi-metric selection criteria.

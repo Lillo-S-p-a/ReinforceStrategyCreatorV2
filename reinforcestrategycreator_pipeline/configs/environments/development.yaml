@@ -1,0 +1,48 @@
+# Development environment overrides
+environment: "development"
+
+# Data configuration for development
+data:
+  # Use smaller date range for faster development
+  start_date: "2022-01-01"
+  end_date: "2022-12-31"
+  
+  # Fewer symbols for testing
+  symbols:
+    - "AAPL"
+    - "GOOGL"
+
+# Model configuration for development
+model:
+  # Smaller model for faster iteration
+  hyperparameters:
+    hidden_layers: [128, 64]
+
+# Training configuration for development
+training:
+  episodes: 10  # Fewer episodes for quick testing
+  batch_size: 16
+  replay_buffer_size: 1000
+  use_tensorboard: true
+  log_dir: "./logs/dev"
+
+# Evaluation configuration for development
+evaluation:
+  test_episodes: 2
+  generate_plots: true
+  results_dir: "./results/dev"
+
+# Deployment configuration for development
+deployment:
+  mode: "paper_trading"
+  # Use mock endpoints for development
+  api_endpoint: "http://localhost:8000/mock-trading"
+  api_key: "dev-key-12345"
+
+# Monitoring configuration for development
+monitoring:
+  enabled: false  # Disable external monitoring in dev
+  log_level: "DEBUG"
+  
+# Use local artifact store
+artifact_store: "./artifacts/dev"

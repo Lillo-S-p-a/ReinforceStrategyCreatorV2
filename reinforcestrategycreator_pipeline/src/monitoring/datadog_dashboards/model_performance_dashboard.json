@@ -1,0 +1,536 @@
+{
+  "title": "Model Pipeline - Real-time Performance & P&L",
+  "description": "Real-time tracking of model performance metrics and profit/loss for trading models",
+  "widgets": [
+    {
+      "id": 1,
+      "definition": {
+        "title": "Real-time Model Performance",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 2,
+            "definition": {
+              "title": "Current Model Accuracy",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.model_accuracy{$model_version,$environment}",
+                  "aggregator": "last",
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "value": 0.9,
+                      "palette": "white_on_green"
+                    },
+                    {
+                      "comparator": ">=",
+                      "value": 0.8,
+                      "palette": "white_on_yellow"
+                    },
+                    {
+                      "comparator": "<",
+                      "value": 0.8,
+                      "palette": "white_on_red"
+                    }
+                  ]
+                }
+              ],
+              "precision": 3,
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 3,
+            "definition": {
+              "title": "Current F1 Score",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.model_f1_score{$model_version,$environment}",
+                  "aggregator": "last",
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "value": 0.85,
+                      "palette": "white_on_green"
+                    },
+                    {
+                      "comparator": ">=",
+                      "value": 0.7,
+                      "palette": "white_on_yellow"
+                    },
+                    {
+                      "comparator": "<",
+                      "value": 0.7,
+                      "palette": "white_on_red"
+                    }
+                  ]
+                }
+              ],
+              "precision": 3,
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 3,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 4,
+            "definition": {
+              "title": "Prediction Volume (5min)",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "sum:model_pipeline.predictions{$model_version,$environment}.rollup(sum, 300)",
+                  "aggregator": "last"
+                }
+              ],
+              "precision": 0,
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 5,
+            "definition": {
+              "title": "Average Confidence",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.prediction_confidence{$model_version,$environment}",
+                  "aggregator": "avg",
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "value": 0.8,
+                      "palette": "white_on_green"
+                    },
+                    {
+                      "comparator": ">=",
+                      "value": 0.6,
+                      "palette": "white_on_yellow"
+                    },
+                    {
+                      "comparator": "<",
+                      "value": 0.6,
+                      "palette": "white_on_red"
+                    }
+                  ]
+                }
+              ],
+              "precision": 3,
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 9,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 3
+      }
+    },
+    {
+      "id": 6,
+      "definition": {
+        "title": "P&L Tracking (Trading Models)",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 7,
+            "definition": {
+              "title": "Cumulative P&L",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "cumsum(sum:model_pipeline.trade_pnl{$model_version,$environment})",
+                  "display_type": "area",
+                  "style": {
+                    "palette": "green",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true,
+                "label": "P&L ($)"
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          },
+          {
+            "id": 8,
+            "definition": {
+              "title": "Daily P&L",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "sum:model_pipeline.trade_pnl{$model_version,$environment}.rollup(sum, 86400)",
+                  "display_type": "bars",
+                  "style": {
+                    "palette": "dog_classic",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true,
+                "label": "Daily P&L ($)"
+              }
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 3,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "id": 9,
+      "definition": {
+        "title": "Performance Metrics Over Time",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 10,
+            "definition": {
+              "title": "Model Accuracy Trend",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.model_accuracy{$model_version,$environment}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "dog_classic",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "1"
+              },
+              "markers": [
+                {
+                  "value": "y = 0.9",
+                  "display_type": "ok dashed",
+                  "label": "Target"
+                },
+                {
+                  "value": "y = 0.8",
+                  "display_type": "warning dashed",
+                  "label": "Minimum"
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          },
+          {
+            "id": 11,
+            "definition": {
+              "title": "Precision vs Recall",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.model_precision{$model_version,$environment}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:model_pipeline.model_precision{$model_version,$environment}",
+                      "alias": "Precision"
+                    }
+                  ]
+                },
+                {
+                  "q": "avg:model_pipeline.model_recall{$model_version,$environment}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "warm",
+                    "line_type": "solid",
+                    "line_width": "normal"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:model_pipeline.model_recall{$model_version,$environment}",
+                      "alias": "Recall"
+                    }
+                  ]
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "1"
+              }
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 7,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "id": 12,
+      "definition": {
+        "title": "Trading Performance Metrics",
+        "title_size": "16",
+        "title_align": "left",
+        "type": "group",
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "id": 13,
+            "definition": {
+              "title": "Sharpe Ratio (30d)",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.sharpe_ratio_30d{$model_version,$environment}",
+                  "aggregator": "last",
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "value": 2,
+                      "palette": "white_on_green"
+                    },
+                    {
+                      "comparator": ">=",
+                      "value": 1,
+                      "palette": "white_on_yellow"
+                    },
+                    {
+                      "comparator": "<",
+                      "value": 1,
+                      "palette": "white_on_red"
+                    }
+                  ]
+                }
+              ],
+              "precision": 2,
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 14,
+            "definition": {
+              "title": "Win Rate",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.win_rate{$model_version,$environment}",
+                  "aggregator": "avg",
+                  "conditional_formats": [
+                    {
+                      "comparator": ">",
+                      "value": 0.6,
+                      "palette": "white_on_green"
+                    },
+                    {
+                      "comparator": ">=",
+                      "value": 0.5,
+                      "palette": "white_on_yellow"
+                    },
+                    {
+                      "comparator": "<",
+                      "value": 0.5,
+                      "palette": "white_on_red"
+                    }
+                  ]
+                }
+              ],
+              "precision": 1,
+              "custom_unit": "%",
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 3,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 15,
+            "definition": {
+              "title": "Max Drawdown",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "max:model_pipeline.max_drawdown{$model_version,$environment}",
+                  "aggregator": "max",
+                  "conditional_formats": [
+                    {
+                      "comparator": "<",
+                      "value": 0.1,
+                      "palette": "white_on_green"
+                    },
+                    {
+                      "comparator": "<=",
+                      "value": 0.2,
+                      "palette": "white_on_yellow"
+                    },
+                    {
+                      "comparator": ">",
+                      "value": 0.2,
+                      "palette": "white_on_red"
+                    }
+                  ]
+                }
+              ],
+              "precision": 1,
+              "custom_unit": "%",
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          },
+          {
+            "id": 16,
+            "definition": {
+              "title": "Avg Trade Return",
+              "title_size": "16",
+              "title_align": "left",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:model_pipeline.avg_trade_return{$model_version,$environment}",
+                  "aggregator": "avg"
+                }
+              ],
+              "precision": 2,
+              "custom_unit": "%",
+              "text_align": "center"
+            },
+            "layout": {
+              "x": 9,
+              "y": 0,
+              "width": 3,
+              "height": 2
+            }
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 11,
+        "width": 12,
+        "height": 3
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "model_version",
+      "default": "*",
+      "prefix": "model_version"
+    },
+    {
+      "name": "environment",
+      "default": "production",
+      "prefix": "environment"
+    }
+  ],
+  "layout_type": "ordered",
+  "is_read_only": false,
+  "notify_list": [],
+  "reflow_type": "fixed"
+}
