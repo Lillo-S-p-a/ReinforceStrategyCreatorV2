@@ -31,6 +31,7 @@ torchaudio = "^2.3.0"
 ray = {extras = ["rllib"], version = "^2.46.0"} # Adjusted for gymnasium 1.0.0 compatibility
 protobuf = "~3.20.0" # Pinned to resolve AttributeError
 datadog = "^0.44.0"
+datadog-api-client = "^2.35.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

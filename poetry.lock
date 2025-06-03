@@ -491,6 +491,29 @@ files = [
 requests = ">=2.6.0"
 
 [[package]]
+name = "datadog-api-client"
+version = "2.35.0"
+description = "Collection of all Datadog Public endpoints"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "datadog_api_client-2.35.0-py3-none-any.whl", hash = "sha256:801dba061684f7ac3d7e1914a866cba2acd5c53a1d617a735e2227a88c535310"},
+    {file = "datadog_api_client-2.35.0.tar.gz", hash = "sha256:45de8e2e3ced859f6b3d54b2c1caf74c5f26171af0493a04791e9e7552a467e9"},
+]
+
+[package.dependencies]
+certifi = "*"
+python-dateutil = "*"
+typing-extensions = ">=4.0.0"
+urllib3 = ">=1.15"
+
+[package.extras]
+apm = ["ddtrace (>=1.15.0)"]
+async = ["aiosonic (==0.15.1)"]
+tests = ["aiosonic (==0.15.1)", "glom", "jinja2", "mypy", "pytest (<8.0.0)", "pytest-asyncio", "pytest-bdd (==6.0.1)", "pytest-randomly", "pytest-recording", "python-dateutil", "types-python-dateutil", "urllib3 (<2.3.0)", "zstandard"]
+zstandard = ["zstandard"]
+
+[[package]]
 name = "dm-tree"
 version = "0.1.8"
 description = "Tree is a library for working with nested data structures."
@@ -3826,4 +3849,4 @@ repair = ["scipy (>=1.6.3)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "674ce352ceb9784b3d34f92e5a66e6422392824a65360ac5f3ad6cf654f7a762"
+content-hash = "0ef82d599ac0c431def1cfef00d2736263dea925b2d1453b95959acc2d9d8de4"

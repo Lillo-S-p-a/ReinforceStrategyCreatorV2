@@ -273,6 +273,39 @@ class DatadogClient:
         """
         for metric_name, value in metrics.items():
             self.gauge(metric_name, value, tags=tags)
+    
+    def send_service_check(
+        self,
+        check_name: str,
+        status: int,
+        tags: Optional[List[str]] = None,
+        message: Optional[str] = None,
+        hostname: Optional[str] = None
+    ) -> None:
+        """
+        Send a service check to Datadog.
+
+        Args:
+            check_name: Name of the service check.
+            status: Status of the check (0: OK, 1: WARNING, 2: CRITICAL, 3: UNKNOWN).
+            tags: Optional tags.
+            message: Optional message for the service check.
+            hostname: Optional hostname for the service check.
+        """
+        if not self.enabled or not DATADOG_AVAILABLE:
+            return
+
+        try:
+            api.ServiceCheck.check(
+                check=self._format_metric_name(check_name), # Use existing prefixing
+                host_name=hostname,
+                status=status,
+                message=message,
+                tags=tags
+            )
+            self.logger.debug(f"Service check '{check_name}' sent with status {status}")
+        except Exception as e:
+            self.logger.error(f"Failed to send service check '{check_name}': {e}")
 
 
 # Singleton instance

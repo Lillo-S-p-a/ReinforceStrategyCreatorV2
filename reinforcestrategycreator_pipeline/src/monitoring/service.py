@@ -9,7 +9,8 @@ from ..config.models import (
     PipelineConfig,
     DataDriftConfig,
     ModelDriftConfig,
-    ModelDriftDetectionMethod, # Added import
+    ModelDriftDetectionMethod,
+    DataDriftDetectionMethod, # Added import
     AlertManagerConfig,
     AlertRuleConfig,
     AlertChannelConfig,
@@ -402,10 +403,70 @@ class MonitoringService:
                 context=drift_result
             )
             self.process_alert("data_drift_detected", drift_result, severity="warning", tags=tags) # Uncommented
-        else:
+        
+        # Send service checks for each feature
+        if drift_result and drift_result.get("details"):
+            feature_details = drift_result["details"].get("feature_scores") or \
+                              drift_result["details"].get("feature_results")
+            
+            # Attempt to get environment tag, default to "unknown"
+            environment_tag = "unknown"
+            if self.config and hasattr(self.config, 'environment_tag'): # Placeholder for actual config attribute
+                environment_tag = self.config.environment_tag
+            elif os.getenv("PIPELINE_ENVIRONMENT"): # Or from an environment variable
+                environment_tag = os.getenv("PIPELINE_ENVIRONMENT")
+
+
+            if feature_details:
+                for feature_name, feature_data in feature_details.items():
+                    feature_tags = [
+                        f"feature:{feature_name}",
+                        f"model_version:{model_version or 'N/A'}",
+                        f"environment:{environment_tag}" # Added environment tag
+                    ]
+                    
+                    status = 3 # UNKNOWN by default
+                    message = f"Drift status for feature {feature_name}."
+
+                    # Determine status based on drift method and score/p_value
+                    # This logic mirrors how drift_detected is set in DataDriftDetector
+                    # For PSI, higher score means drift.
+                    # For KS/Chi2, lower p-value means drift.
+                    feature_score = 0.0
+                    is_psi = self.data_drift_config.method == DataDriftDetectionMethod.PSI
+                    
+                    if isinstance(feature_data, (float, int)): # PSI score
+                        feature_score = feature_data
+                        if feature_score > self.data_drift_config.threshold:
+                            status = 1 # WARNING
+                            message = f"Data drift WARNING for {feature_name}. Score: {feature_score:.4f} > Threshold: {self.data_drift_config.threshold}"
+                        else:
+                            status = 0 # OK
+                            message = f"Data drift OK for {feature_name}. Score: {feature_score:.4f} <= Threshold: {self.data_drift_config.threshold}"
+                    elif isinstance(feature_data, dict): # KS or Chi2 result
+                        p_value = feature_data.get("p_value")
+                        if p_value is not None:
+                            feature_score = p_value
+                            if feature_score < self.data_drift_config.threshold:
+                                status = 1 # WARNING
+                                message = f"Data drift WARNING for {feature_name}. P-value: {feature_score:.4f} < Threshold: {self.data_drift_config.threshold}"
+                            else:
+                                status = 0 # OK
+                                message = f"Data drift OK for {feature_name}. P-value: {feature_score:.4f} >= Threshold: {self.data_drift_config.threshold}"
+                        else: # If p_value is not in dict, status remains UNKNOWN
+                             message = f"Could not determine drift status for {feature_name}, p_value missing."
+                    
+                    datadog_client.send_service_check(
+                        check_name="drift_check", # This is the 'model_pipeline.drift_check' from dashboard
+                        status=status,
+                        tags=feature_tags,
+                        message=message
+                    )
+
+        if not (drift_result and drift_result.get("drift_detected")): # Log overall score if no drift
             if drift_result: # Ensure drift_result is not None
                 self.log_metric("data_drift_score", drift_result.get("score", 0.0), tags=tags)
-                self.logger.info(f"No significant data drift detected. Score: {drift_result.get('score')}")
+                self.logger.info(f"No significant overall data drift detected. Score: {drift_result.get('score')}")
             else: # Should not happen if detector is present, but good practice
                 self.logger.warning("Data drift detection returned None unexpectedly.")
             
