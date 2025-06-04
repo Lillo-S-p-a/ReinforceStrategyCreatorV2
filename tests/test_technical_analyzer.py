@@ -217,7 +217,7 @@ class TestTechnicalAnalyzer(unittest.TestCase):
         pta_df.ta.atr(high='High', low='Low', close='Close', length=14, append=True)
         expected_adx = pta_df['ADX_14']
         expected_aroonosc = pta_df['AROONOSC_14']
-        expected_atr = pta_df['ATR_14']
+        expected_atr = pta_df['ATRr_14']
 
         # --- Compare results (allow for small floating point differences) ---
         # Check names=False because the function adds suffixes like _14, _12_26_9 etc.

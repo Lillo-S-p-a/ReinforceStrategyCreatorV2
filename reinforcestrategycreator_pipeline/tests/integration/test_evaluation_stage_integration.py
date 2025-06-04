@@ -18,6 +18,12 @@ from reinforcestrategycreator_pipeline.src.evaluation.engine import EvaluationEn
 class TestEvaluationStageIntegration(unittest.TestCase):
 
     def setUp(self):
+        self.stage_config = {
+            "metrics": ["accuracy", "precision", "f1"],
+            "threshold_config": {"accuracy": 0.75, "f1": 0.7},
+            "report_format": "json",
+            "baseline_model": None # Can be enabled in specific tests
+        }
         self.test_dir = Path(tempfile.mkdtemp())
         
         if PipelineContext._instance:
@@ -61,6 +67,14 @@ class TestEvaluationStageIntegration(unittest.TestCase):
             "interval": "1d"
         }
 
+        # Mock the return values for evaluation configuration
+        self.mock_config_manager.get_config.return_value.evaluation.model_dump.return_value = {
+            "metrics": self.stage_config["metrics"],
+            "threshold_config": self.stage_config["threshold_config"],
+            "report_format": self.stage_config["report_format"],
+            "baseline_model": self.stage_config["baseline_model"]
+        }
+
         self.mock_logger_patcher = patch('reinforcestrategycreator_pipeline.src.pipeline.stage.get_logger')
         self.mock_logger = self.mock_logger_patcher.start()
         self.mock_logger_instance = MagicMock()
@@ -72,44 +86,35 @@ class TestEvaluationStageIntegration(unittest.TestCase):
         self.patcher_evaluation_engine.start()
         self.mock_evaluation_engine.return_value = self.mock_evaluation_engine # Make the mock callable and return itself
 
-        self.stage_config = {
-            "metrics": ["accuracy", "precision", "f1"],
-            "threshold_config": {"accuracy": 0.75, "f1": 0.7},
-            "report_format": "json",
-            "baseline_model": None # Can be enabled in specific tests
-        }
+
         # Prepare dummy data for context
         self.trained_model_mock = {"type": "test_classifier", "model_data": "some_weights"}
         self.test_features_df = pd.DataFrame({'x1': [1,0,1,0], 'x2': [0,1,0,1]})
         self.test_labels_series = pd.Series([1,0,1,1])
         
-        # Create a dummy CSV file for the mocked CsvDataSource
-        self.dummy_csv_path = self.test_dir / "dummy_data.csv"
-        dummy_df = pd.DataFrame({
-            'timestamp': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03', '2023-01-04']),
-            'open': [10, 11, 12, 13],
-            'high': [12, 13, 14, 15],
-            'low': [9, 10, 11, 12],
-            'close': [11, 12, 13, 14],
-            'volume': [100, 110, 120, 130]
-        })
-        dummy_df.to_csv(self.dummy_csv_path, index=False)
-
-        # Update the mock_data_config to include the file_path
-        mock_data_config = MagicMock()
-        mock_data_config.get.side_effect = lambda key, default=None: {
+        # Mock the return values for data source configuration
+        self.mock_config_manager.get_config.return_value.data.model_dump.return_value = {
             "source_id": "mock_data_source",
             "source_type": "csv",
             "file_path": str(self.dummy_csv_path), # Provide the path to the dummy CSV
             "cache_enabled": False,
             "auto_adjust": False,
             "interval": "1d"
-        }.get(key, default)
-        self.mock_config_manager.get_config.return_value.data.model_dump.return_value = mock_data_config
+        }
+
+        # Mock the return values for evaluation configuration
+        self.mock_config_manager.get_config.return_value.evaluation.model_dump.return_value = {
+            "metrics": self.stage_config["metrics"],
+            "threshold_config": self.stage_config["threshold_config"],
+            "report_format": self.stage_config["report_format"],
+            "baseline_model": self.stage_config["baseline_model"]
+        }
 
         self.stage = EvaluationStage(config=self.stage_config) # This line needs to be after full config mock
 
         self.context.set("trained_model", self.trained_model_mock)
+        self.context.set("trained_model_artifact_id", "mock_model_id") # Add this line
+        self.context.set("trained_model_version", "1.0") # Add this line
         self.context.set("test_features", self.test_features_df)
         self.context.set("test_labels", self.test_labels_series)
         self.context.set("model_type", "test_classifier_from_train_stage")
@@ -139,19 +144,29 @@ class TestEvaluationStageIntegration(unittest.TestCase):
             "timestamp": datetime.now().isoformat(),
             "model": {"version": "v1.0.0"} # Example model info
         }
-        self.mock_evaluation_engine.evaluate.return_value = mock_evaluation_results
+        # --- Mocking the behavior of EvaluationEngine.evaluate() ---
+        # We need to mock the side effect of evaluate to also call save_artifact
+        def mock_evaluate_side_effect(*args, **kwargs):
+            # Simulate EvaluationEngine saving artifacts
+            self.mock_artifact_store.save_artifact(
+                artifact_id="eval_results_id_1",
+                artifact_type=ArtifactType.METRICS,
+                version="1",
+                description="",
+                created_at=datetime.now(),
+                tags=[]
+            )
+            self.mock_artifact_store.save_artifact(
+                artifact_id="eval_report_id_1",
+                artifact_type=ArtifactType.REPORT,
+                version="1",
+                description="",
+                created_at=datetime.now(),
+                tags=[]
+            )
+            return mock_evaluation_results
 
-        # --- Mocking ArtifactStore (EvaluationEngine handles saving now) ---
-        # The EvaluationEngine is responsible for calling artifact_store.save_artifact.
-        # We need to mock the artifact_store that is passed to the EvaluationEngine.
-        # Since EvaluationStage creates EvaluationEngine, we need to ensure our mock
-        # is passed through.
-        # The EvaluationEngine constructor is mocked in setUp, so we can configure its behavior.
-        
-        # Simulate artifact_store.save_artifact calls that EvaluationEngine would make
-        mock_results_artifact_meta = ArtifactMetadata(artifact_id="eval_results_id_1", artifact_type=ArtifactType.METRICS, version="1", description="", created_at=datetime.now(), tags=[])
-        mock_report_artifact_meta = ArtifactMetadata(artifact_id="eval_report_id_1", artifact_type=ArtifactType.REPORT, version="1", description="", created_at=datetime.now(), tags=[])
-        self.mock_artifact_store.save_artifact.side_effect = [mock_results_artifact_meta, mock_report_artifact_meta]
+        self.mock_evaluation_engine.evaluate.side_effect = mock_evaluate_side_effect
 
         # --- Execute Stage ---
         self.stage.setup(self.context)

@@ -251,12 +251,29 @@ class EvaluationStage(PipelineStage):
             context.set("evaluation_artifacts_summary", evaluation_results) # Store the whole summary
 
             # Store evaluation metadata (can enhance this based on what EvaluationEngine returns)
+            # Determine if model passed thresholds
+            model_passed_thresholds = True
+            threshold_config = self.global_evaluation_config.get("threshold_config", {})
+            computed_metrics = evaluation_results.get("metrics", {})
+            self.logger.info(f"Threshold config: {threshold_config}")
+            self.logger.info(f"Computed metrics: {computed_metrics}")
+
+            for metric, threshold in threshold_config.items():
+                if metric in computed_metrics and computed_metrics[metric] < threshold:
+                    model_passed_thresholds = False
+                    self.logger.warning(f"Model failed threshold for metric '{metric}': {computed_metrics[metric]} < {threshold}")
+                    break
+            
+            context.set("model_passed_thresholds", model_passed_thresholds)
+
+            # Store evaluation metadata (can enhance this based on what EvaluationEngine returns)
             metadata = {
                 "evaluated_at": evaluation_results.get("timestamp", datetime.now().isoformat()),
                 "model_id_evaluated": model_artifact_id,
-                "model_version_evaluated": model_version or results.get("model",{}).get("version"),
+                "model_version_evaluated": model_version or evaluation_results.get("model",{}).get("version"),
                 "data_source_evaluated": eval_data_source_id,
-                "metrics_computed": list(evaluation_results.get("metrics", {}).keys()),
+                "metrics_computed": list(computed_metrics.keys()),
+                "passed_thresholds": model_passed_thresholds, # Add this to metadata
             }
             context.set("evaluation_metadata", metadata)
 
