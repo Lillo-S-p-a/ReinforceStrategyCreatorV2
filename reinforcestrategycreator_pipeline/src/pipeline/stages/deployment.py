@@ -1,3 +1,5 @@
+import pandas as pd
+import numpy as np
 from typing import Any, Dict
 
 from reinforcestrategycreator_pipeline.src.pipeline.stage import PipelineStage
@@ -175,7 +177,13 @@ class DeploymentStage(PipelineStage):
                     # Assuming data_for_paper_trading is a DataFrame and model.predict takes it # Indented
                     # The actual prediction and signal generation logic depends heavily on the model type # Indented
                     try: # Indented
-                        predictions = self.model.predict(data_for_paper_trading) # This is a placeholder # Indented
+                        # Ensure data is in numpy array format for the model
+                        data_for_model_prediction = data_for_paper_trading
+                        if isinstance(data_for_paper_trading, pd.DataFrame):
+                            self.logger.info("Converting data_for_paper_trading from DataFrame to NumPy array for model prediction.")
+                            data_for_model_prediction = data_for_paper_trading.values
+                        
+                        predictions = self.model.predict(data_for_model_prediction) # This is a placeholder # Indented
                         self.logger.info(f"Generated {len(predictions)} predictions/signals for paper trading.") # Indented
                         
                         # Example: Iterate through data and predictions to simulate trades # Indented
