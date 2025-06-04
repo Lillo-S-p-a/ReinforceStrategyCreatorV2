@@ -249,6 +249,14 @@ class EvaluationStage(PipelineStage):
             context.set("evaluation_results", evaluation_results.get("metrics")) # Main metrics dict
             context.set("evaluation_reports", evaluation_results.get("reports")) # Dict of report paths/content
             context.set("evaluation_artifacts_summary", evaluation_results) # Store the whole summary
+            
+            # Extract and set the evaluation data for paper trading
+            evaluation_df_for_paper_trading = evaluation_results.get("evaluation_dataframe_for_paper_trading")
+            if evaluation_df_for_paper_trading is not None:
+                context.set("evaluation_data_output", evaluation_df_for_paper_trading)
+                self.logger.info("Set 'evaluation_data_output' in context for DeploymentStage.")
+            else:
+                self.logger.warning("'evaluation_dataframe_for_paper_trading' not found in evaluation_results. DeploymentStage might not get data.")
 
             # Store evaluation metadata (can enhance this based on what EvaluationEngine returns)
             # Determine if model passed thresholds

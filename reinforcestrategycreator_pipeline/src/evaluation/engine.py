@@ -164,7 +164,8 @@ class EvaluationEngine:
                     "metrics_requested": metrics,
                     "compare_benchmarks": compare_benchmarks,
                     "kwargs": kwargs
-                }
+                },
+                "evaluation_dataframe_for_paper_trading": data # Pass the loaded data
             }
             
             # Compare with benchmarks if requested
