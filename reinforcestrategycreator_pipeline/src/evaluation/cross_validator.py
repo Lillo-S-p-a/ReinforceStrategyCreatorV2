@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 import numpy as np
 import pandas as pd
 import json
+from ..artifact_store.local_adapter import NumpyEncoder # Added import
 
 from ..models.base import ModelBase
 from ..models.factory import ModelFactory, get_factory
@@ -515,7 +516,7 @@ class CrossValidator:
         results_file = self.checkpoint_dir / f"cv_results_{timestamp}.json"
         
         with open(results_file, "w") as f:
-            json.dump(cv_results.to_dict(), f, indent=2)
+            json.dump(cv_results.to_dict(), f, indent=2, cls=NumpyEncoder)
         
         self.logger.info(f"Saved CV results to {results_file}")
         

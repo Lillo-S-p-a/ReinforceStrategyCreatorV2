@@ -14,6 +14,9 @@ class ModelBase(ABC):
     All models in the pipeline must inherit from this class and implement
     the required methods.
     """
+    MODEL_FILENAME = "model.pkl"
+    CONFIG_FILENAME = "config.json"
+    METADATA_FILENAME = "metadata.json"
     
     def __init__(self, config: Dict[str, Any]):
         """Initialize the model with configuration.

@@ -7,10 +7,10 @@ from unittest.mock import Mock, patch, MagicMock
 import smtplib
 import requests
 
-from src.config.models import (
+from reinforcestrategycreator_pipeline.src.config.models import (
     AlertManagerConfig, AlertRuleConfig, AlertChannelConfig, AlertChannelType
 )
-from src.monitoring.alerting import AlertManager
+from reinforcestrategycreator_pipeline.src.monitoring.alerting import AlertManager
 
 
 class TestAlertManager:

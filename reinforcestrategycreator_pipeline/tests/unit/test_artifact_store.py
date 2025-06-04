@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import pytest
 
-from src.artifact_store import (
+from reinforcestrategycreator_pipeline.src.artifact_store import (
     ArtifactStore,
     ArtifactMetadata,
     ArtifactType,
@@ -135,7 +135,7 @@ class TestLocalFileSystemStore:
         assert metadata.source_info["is_directory"] is False
         
         # Check that the artifact was saved
-        assert temp_store.artifact_exists("test-file")
+        assert temp_store.artifact_exists("test-file", artifact_type=ArtifactType.OTHER)
     
     def test_save_directory_artifact(self, temp_store, sample_directory):
         """Test saving a directory artifact."""
@@ -162,13 +162,13 @@ class TestLocalFileSystemStore:
         )
         
         # Load without destination
-        loaded_path = temp_store.load_artifact("test-load")
+        loaded_path = temp_store.load_artifact("test-load", artifact_type=ArtifactType.OTHER)
         assert loaded_path.exists()
         assert loaded_path.read_text() == "Sample artifact content"
         
         # Load with destination
         dest_path = Path(tempfile.mkdtemp()) / "loaded_artifact.txt"
-        loaded_path2 = temp_store.load_artifact("test-load", destination_path=dest_path)
+        loaded_path2 = temp_store.load_artifact("test-load", artifact_type=ArtifactType.OTHER, destination_path=dest_path)
         assert loaded_path2 == dest_path
         assert dest_path.read_text() == "Sample artifact content"
     
@@ -192,14 +192,14 @@ class TestLocalFileSystemStore:
         )
         
         # Load specific versions
-        v1_path = temp_store.load_artifact("versioned-artifact", version="v1.0")
+        v1_path = temp_store.load_artifact("versioned-artifact", artifact_type=ArtifactType.MODEL, version="v1.0")
         assert v1_path.read_text() == "Sample artifact content"
         
-        v2_path = temp_store.load_artifact("versioned-artifact", version="v2.0")
+        v2_path = temp_store.load_artifact("versioned-artifact", artifact_type=ArtifactType.MODEL, version="v2.0")
         assert v2_path.read_text() == "Updated content"
         
         # Load latest (should be v2.0)
-        latest_path = temp_store.load_artifact("versioned-artifact")
+        latest_path = temp_store.load_artifact("versioned-artifact", artifact_type=ArtifactType.MODEL)
         assert latest_path.read_text() == "Updated content"
     
     def test_get_artifact_metadata(self, temp_store, sample_file):
@@ -213,7 +213,7 @@ class TestLocalFileSystemStore:
         )
         
         # Get metadata
-        retrieved_metadata = temp_store.get_artifact_metadata("test-metadata")
+        retrieved_metadata = temp_store.get_artifact_metadata("test-metadata", artifact_type=ArtifactType.CONFIG)
         assert retrieved_metadata.artifact_id == saved_metadata.artifact_id
         assert retrieved_metadata.version == saved_metadata.version
         assert retrieved_metadata.description == "Configuration file"
@@ -248,7 +248,7 @@ class TestLocalFileSystemStore:
         assert len(all_artifacts) == 3
         
         # List by type
-        models = temp_store.list_artifacts(artifact_type=ArtifactType.MODEL)
+        models = temp_store.list_artifacts(artifact_type_filter=ArtifactType.MODEL)
         assert len(models) == 2
         assert all(m.artifact_type == ArtifactType.MODEL for m in models)
         
@@ -259,7 +259,7 @@ class TestLocalFileSystemStore:
         
         # List by type and tags
         prod_models = temp_store.list_artifacts(
-            artifact_type=ArtifactType.MODEL,
+            artifact_type_filter=ArtifactType.MODEL,
             tags=["production"]
         )
         assert len(prod_models) == 1
@@ -276,7 +276,7 @@ class TestLocalFileSystemStore:
                 version=f"v1.{i}"
             )
         
-        versions = temp_store.list_versions("multi-version")
+        versions = temp_store.list_versions("multi-version", artifact_type=ArtifactType.MODEL)
         assert len(versions) == 3
         assert versions == ["v1.0", "v1.1", "v1.2"]
     
@@ -297,12 +297,12 @@ class TestLocalFileSystemStore:
         )
         
         # Delete v1.0
-        assert temp_store.delete_artifact("deletable", version="v1.0")
-        assert not temp_store.artifact_exists("deletable", version="v1.0")
-        assert temp_store.artifact_exists("deletable", version="v2.0")
+        assert temp_store.delete_artifact("deletable", artifact_type=ArtifactType.OTHER, version="v1.0")
+        assert not temp_store.artifact_exists("deletable", artifact_type=ArtifactType.OTHER, version="v1.0")
+        assert temp_store.artifact_exists("deletable", artifact_type=ArtifactType.OTHER, version="v2.0")
         
         # Latest should still be v2.0
-        metadata = temp_store.get_artifact_metadata("deletable")
+        metadata = temp_store.get_artifact_metadata("deletable", artifact_type=ArtifactType.OTHER)
         assert metadata.version == "v2.0"
     
     def test_delete_all_versions(self, temp_store, sample_file):
@@ -314,13 +314,13 @@ class TestLocalFileSystemStore:
             artifact_type=ArtifactType.OTHER
         )
         
-        assert temp_store.artifact_exists("delete-all")
-        assert temp_store.delete_artifact("delete-all")
-        assert not temp_store.artifact_exists("delete-all")
+        assert temp_store.artifact_exists("delete-all", artifact_type=ArtifactType.OTHER)
+        assert temp_store.delete_artifact("delete-all", artifact_type=ArtifactType.OTHER)
+        assert not temp_store.artifact_exists("delete-all", artifact_type=ArtifactType.OTHER)
     
     def test_artifact_exists(self, temp_store, sample_file):
         """Test checking artifact existence."""
-        assert not temp_store.artifact_exists("non-existent")
+        assert not temp_store.artifact_exists("non-existent", artifact_type=ArtifactType.OTHER)
         
         temp_store.save_artifact(
             artifact_id="exists-test",
@@ -329,9 +329,9 @@ class TestLocalFileSystemStore:
             version="v1.0"
         )
         
-        assert temp_store.artifact_exists("exists-test")
-        assert temp_store.artifact_exists("exists-test", version="v1.0")
-        assert not temp_store.artifact_exists("exists-test", version="v2.0")
+        assert temp_store.artifact_exists("exists-test", artifact_type=ArtifactType.OTHER)
+        assert temp_store.artifact_exists("exists-test", artifact_type=ArtifactType.OTHER, version="v1.0")
+        assert not temp_store.artifact_exists("exists-test", artifact_type=ArtifactType.OTHER, version="v2.0")
     
     def test_auto_version_generation(self, temp_store, sample_file):
         """Test automatic version generation."""
@@ -370,8 +370,8 @@ class TestLocalFileSystemStore:
         
         # Load non-existent artifact
         with pytest.raises(ValueError):
-            temp_store.load_artifact("non-existent")
+            temp_store.load_artifact("non-existent", artifact_type=ArtifactType.OTHER)
         
         # Get metadata for non-existent artifact
         with pytest.raises(ValueError):
-            temp_store.get_artifact_metadata("non-existent")
+            temp_store.get_artifact_metadata("non-existent", artifact_type=ArtifactType.OTHER)

@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 import tempfile
 
-from data.validator import (
+from reinforcestrategycreator_pipeline.src.data.validator import (
     ValidationStatus,
     ValidationResult,
     ValidatorBase,
@@ -17,7 +17,7 @@ from data.validator import (
     RangeValidator,
     DataValidator
 )
-from config.models import ValidationConfig
+from reinforcestrategycreator_pipeline.src.config.models import ValidationConfig
 
 
 class TestValidationResult:

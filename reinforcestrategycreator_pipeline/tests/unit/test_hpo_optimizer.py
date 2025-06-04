@@ -6,9 +6,9 @@ from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch
 import pytest
 
-from src.training.hpo_optimizer import HPOptimizer
-from src.training.engine import TrainingEngine
-from src.artifact_store.base import ArtifactStore, ArtifactType
+from reinforcestrategycreator_pipeline.src.training.hpo_optimizer import HPOptimizer
+from reinforcestrategycreator_pipeline.src.training.engine import TrainingEngine
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactStore, ArtifactType
 
 
 class TestHPOptimizer:
@@ -36,7 +36,7 @@ class TestHPOptimizer:
     @pytest.fixture
     def hpo_optimizer(self, mock_training_engine, mock_artifact_store, temp_dir):
         """Create an HPOptimizer instance."""
-        with patch('src.training.hpo_optimizer.RAY_AVAILABLE', True):
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.RAY_AVAILABLE', True):
             optimizer = HPOptimizer(
                 training_engine=mock_training_engine,
                 artifact_store=mock_artifact_store,
@@ -46,7 +46,7 @@ class TestHPOptimizer:
     
     def test_init(self, mock_training_engine, mock_artifact_store, temp_dir):
         """Test HPOptimizer initialization."""
-        with patch('src.training.hpo_optimizer.RAY_AVAILABLE', True):
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.RAY_AVAILABLE', True):
             optimizer = HPOptimizer(
                 training_engine=mock_training_engine,
                 artifact_store=mock_artifact_store,
@@ -62,7 +62,7 @@ class TestHPOptimizer:
     
     def test_init_without_ray(self, mock_training_engine):
         """Test initialization fails without Ray."""
-        with patch('src.training.hpo_optimizer.RAY_AVAILABLE', False):
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.RAY_AVAILABLE', False):
             with pytest.raises(ImportError, match="Ray Tune is required"):
                 HPOptimizer(training_engine=mock_training_engine)
     
@@ -76,7 +76,7 @@ class TestHPOptimizer:
             }
         }
         
-        with patch('src.training.hpo_optimizer.tune') as mock_tune:
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune') as mock_tune:
             mock_tune.uniform.return_value = "uniform_dist"
             
             processed_space, search_alg = hpo_optimizer.define_search_space(
@@ -97,7 +97,7 @@ class TestHPOptimizer:
             }
         }
         
-        with patch('src.training.hpo_optimizer.tune') as mock_tune:
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune') as mock_tune:
             mock_tune.loguniform.return_value = "loguniform_dist"
             
             processed_space, _ = hpo_optimizer.define_search_space(param_space)
@@ -114,7 +114,7 @@ class TestHPOptimizer:
             }
         }
         
-        with patch('src.training.hpo_optimizer.tune') as mock_tune:
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune') as mock_tune:
             mock_tune.choice.return_value = "choice_dist"
             
             processed_space, _ = hpo_optimizer.define_search_space(param_space)
@@ -126,9 +126,9 @@ class TestHPOptimizer:
         """Test defining search space with Optuna."""
         param_space = {"lr": {"type": "uniform", "low": 0.001, "high": 0.1}}
         
-        with patch('src.training.hpo_optimizer.tune'), \
-             patch('src.training.hpo_optimizer.OPTUNA_AVAILABLE', True), \
-             patch('src.training.hpo_optimizer.OptunaSearch') as mock_optuna:
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune'), \
+             patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.OPTUNA_AVAILABLE', True), \
+             patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.OptunaSearch') as mock_optuna:
             
             mock_search = Mock()
             mock_optuna.return_value = mock_search
@@ -183,7 +183,7 @@ class TestHPOptimizer:
         )
         
         # Test the trainable function
-        with patch('src.training.hpo_optimizer.tune') as mock_tune:
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune') as mock_tune:
             trainable({"learning_rate": 0.001})
             
             # Verify training was called
@@ -208,14 +208,14 @@ class TestHPOptimizer:
             model_config, {}, {}, param_mapping
         )
         
-        with patch('src.training.hpo_optimizer.tune'):
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune'):
             trainable({"lr": 0.001})
             
             call_args = mock_training_engine.train.call_args[1]
             assert call_args["model_config"]["hyperparameters"]["learning_rate"] == 0.001
     
-    @patch('src.training.hpo_optimizer.ray')
-    @patch('src.training.hpo_optimizer.tune')
+    @patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.ray')
+    @patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune')
     def test_optimize_basic(self, mock_tune, mock_ray, hpo_optimizer, mock_training_engine):
         """Test basic optimization run."""
         # Setup mocks
@@ -341,8 +341,8 @@ class TestHPOptimizer:
         assert hpo_optimizer.best_score == 0.3
         assert len(hpo_optimizer.all_trials) == 1
     
-    @patch('src.training.hpo_optimizer.ray')
-    @patch('src.training.hpo_optimizer.tune')
+    @patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.ray')
+    @patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune')
     def test_optimize_with_scheduler(self, mock_tune, mock_ray, hpo_optimizer):
         """Test optimization with ASHA scheduler."""
         # Setup mocks
@@ -355,7 +355,7 @@ class TestHPOptimizer:
         mock_analysis.trials = []
         mock_tune.run.return_value = mock_analysis
         
-        with patch('src.training.hpo_optimizer.ASHAScheduler') as mock_asha:
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.ASHAScheduler') as mock_asha:
             mock_scheduler = Mock()
             mock_asha.return_value = mock_scheduler
             
@@ -392,8 +392,8 @@ class TestHPOptimizer:
     
     def test_optimize_saves_to_artifact_store(self, hpo_optimizer, mock_artifact_store):
         """Test that optimization results are saved to artifact store."""
-        with patch('src.training.hpo_optimizer.ray'), \
-             patch('src.training.hpo_optimizer.tune') as mock_tune:
+        with patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.ray'), \
+             patch('reinforcestrategycreator_pipeline.src.training.hpo_optimizer.tune') as mock_tune:
             
             mock_analysis = Mock()
             mock_analysis.get_best_trial.return_value = Mock(

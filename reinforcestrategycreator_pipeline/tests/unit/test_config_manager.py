@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.config.manager import ConfigManager
-from src.config.models import PipelineConfig, EnvironmentType
+from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
+from reinforcestrategycreator_pipeline.src.config.models import PipelineConfig, EnvironmentType
 
 
 class TestConfigManager:

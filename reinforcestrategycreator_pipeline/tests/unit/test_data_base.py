@@ -6,7 +6,7 @@ from typing import Dict
 
 import pandas as pd
 
-from src.data.base import DataSource, DataSourceMetadata
+from reinforcestrategycreator_pipeline.src.data.base import DataSource, DataSourceMetadata
 
 
 class MockDataSource(DataSource):

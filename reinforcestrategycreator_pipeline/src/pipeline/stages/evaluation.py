@@ -106,7 +106,8 @@ class EvaluationStage(PipelineStage):
         if self.global_data_config:
             source_id = self.global_data_config.get("source_id", "dummy_csv_data")
             source_type = self.global_data_config.get("source_type", "csv")
-            source_path = self.global_data_config.get("source_path")
+            # Prioritize 'file_path' if 'source_path' is not present, as CsvDataSource uses it
+            source_path = self.global_data_config.get("source_path", self.global_data_config.get("file_path"))
             
             # Check if the data source is already registered
             if source_id not in self.data_manager.data_sources:

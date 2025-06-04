@@ -4,19 +4,19 @@ import pytest
 from unittest.mock import patch, MagicMock, call
 from pathlib import Path
 
-from src.config.models import (
+from reinforcestrategycreator_pipeline.src.config.models import (
     MonitoringConfig, PipelineConfig, ModelConfig, ModelType,
     DataDriftConfig, ModelDriftConfig, AlertManagerConfig,
     DataDriftDetectionMethod, ModelDriftDetectionMethod # Assuming these enums exist
 )
-from src.monitoring.service import (
+from reinforcestrategycreator_pipeline.src.monitoring.service import (
     MonitoringService,
     get_monitoring_service,
     initialize_monitoring_from_pipeline_config
 )
-from src.monitoring.drift_detection import DataDriftDetector, ModelDriftDetector
-from src.monitoring.alerting import AlertManager
-from src.deployment.manager import DeploymentManager
+from reinforcestrategycreator_pipeline.src.monitoring.drift_detection import DataDriftDetector, ModelDriftDetector
+from reinforcestrategycreator_pipeline.src.monitoring.alerting import AlertManager
+from reinforcestrategycreator_pipeline.src.deployment.manager import DeploymentManager
 
 
 class TestMonitoringService:
@@ -30,8 +30,8 @@ class TestMonitoringService:
             metrics_prefix="test_pipeline"
         )
         
-        with patch('src.monitoring.service.configure_logging') as mock_log_config, \
-             patch('src.monitoring.service.configure_datadog') as mock_dd_config:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_logging') as mock_log_config, \
+             patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_datadog') as mock_dd_config:
             
             service = MonitoringService(config)
             
@@ -44,8 +44,8 @@ class TestMonitoringService:
         """Test initializing with disabled monitoring."""
         config = MonitoringConfig(enabled=False)
         
-        with patch('src.monitoring.service.configure_logging') as mock_log_config, \
-             patch('src.monitoring.service.configure_datadog') as mock_dd_config:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_logging') as mock_log_config, \
+             patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_datadog') as mock_dd_config:
             
             service = MonitoringService(config)
             
@@ -61,7 +61,7 @@ class TestMonitoringService:
             log_level="INFO"
         )
         
-        with patch('src.monitoring.service.configure_logging') as mock_config:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_logging') as mock_config:
             service = MonitoringService()
             service._configure_logging()  # Should do nothing without config
             mock_config.assert_not_called()
@@ -84,7 +84,7 @@ class TestMonitoringService:
             metrics_prefix="test"
         )
         
-        with patch('src.monitoring.service.configure_datadog') as mock_config:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_datadog') as mock_config:
             service = MonitoringService()
             service.config = config
             service._configure_datadog()
@@ -110,8 +110,8 @@ class TestMonitoringService:
         with patch('os.getenv', return_value="env_value"):
             assert service._resolve_env_var("${TEST_VAR}") == "env_value"
     
-    @patch('src.monitoring.service.log_with_context')
-    @patch('src.monitoring.service.datadog_client')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.log_with_context')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.datadog_client')
     def test_log_metric(self, mock_dd_client, mock_log_context):
         """Test logging metrics."""
         service = MonitoringService()
@@ -144,8 +144,8 @@ class TestMonitoringService:
         service.log_metric("distribution", 100.5, "histogram")
         mock_dd_client.histogram.assert_called_once_with("distribution", 100.5, tags=[])
     
-    @patch('src.monitoring.service.log_with_context')
-    @patch('src.monitoring.service.track_pipeline_event')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.log_with_context')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.track_pipeline_event')
     def test_log_event(self, mock_track_event, mock_log_context):
         """Test logging events."""
         service = MonitoringService()
@@ -231,7 +231,7 @@ class TestMonitoringService:
         assert health["datadog_configured"] is False
         
         # Test initialized service
-        with patch('src.monitoring.service.datadog_client') as mock_dd:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.service.datadog_client') as mock_dd:
             mock_dd.enabled = True
             
             service = MonitoringService(config)
@@ -251,8 +251,8 @@ class TestMonitoringServiceSingleton:
     def test_get_monitoring_service(self):
         """Test getting monitoring service instance."""
         # Reset global instance
-        import src.monitoring.service
-        src.monitoring.service._monitoring_service = None
+        import reinforcestrategycreator_pipeline.src.monitoring.service
+        reinforcestrategycreator_pipeline.src.monitoring.service._monitoring_service = None
         
         # First call creates instance
         service1 = get_monitoring_service()
@@ -282,7 +282,7 @@ class TestMonitoringServiceSingleton:
             )
         )
         
-        with patch('src.monitoring.service.get_monitoring_service') as mock_get:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.service.get_monitoring_service') as mock_get:
             mock_service = MagicMock()
             mock_get.return_value = mock_service
             
@@ -306,9 +306,9 @@ class TestMonitoringIntegration:
         )
         
         with patch('os.getenv') as mock_getenv, \
-             patch('src.monitoring.service.configure_logging') as mock_log, \
-             patch('src.monitoring.service.configure_datadog') as mock_dd, \
-             patch('src.monitoring.service.track_pipeline_event') as mock_event:
+             patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_logging') as mock_log, \
+             patch('reinforcestrategycreator_pipeline.src.monitoring.service.configure_datadog') as mock_dd, \
+             patch('reinforcestrategycreator_pipeline.src.monitoring.service.track_pipeline_event') as mock_event:
             
             # Mock environment variables
             mock_getenv.side_effect = lambda key: {
@@ -337,7 +337,7 @@ class TestMonitoringIntegration:
                 alert_type="success"
             )
 
-    @patch('src.monitoring.service.log_with_context')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.log_with_context')
     @patch.object(MonitoringService, 'process_alert') # Mock process_alert for these tests
     def test_check_data_drift_detected(self, mock_process_alert, mock_log_context):
         """Test check_data_drift when drift is detected."""
@@ -375,7 +375,7 @@ class TestMonitoringIntegration:
             tags=['model_version:v1', 'drift_method:ks']
         )
 
-    @patch('src.monitoring.service.log_with_context')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.log_with_context')
     @patch.object(MonitoringService, 'log_metric')
     def test_check_data_drift_not_detected(self, mock_log_metric, mock_log_context):
         """Test check_data_drift when no drift is detected."""
@@ -406,7 +406,7 @@ class TestMonitoringIntegration:
         # or checking call_count if log_event is only called for drift.
         # For simplicity, we assume log_event is primarily for actual drift here.
 
-    @patch('src.monitoring.service.log_with_context')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.log_with_context')
     @patch.object(MonitoringService, 'process_alert')
     def test_check_model_drift_detected(self, mock_process_alert, mock_log_context):
         """Test check_model_drift when drift is detected."""
@@ -463,8 +463,8 @@ class TestMonitoringIntegration:
             event_type, event_data, severity, tags
         )
 
-    @patch('src.monitoring.service.log_with_context')
-    @patch('src.monitoring.service.datadog_client')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.log_with_context')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.service.datadog_client')
     def test_log_metric_with_deployment_manager_enrichment(self, mock_dd_client, mock_log_context):
         """Test log_metric enriches tags using DeploymentManager."""
         mock_deployment_manager = MagicMock(spec=DeploymentManager)

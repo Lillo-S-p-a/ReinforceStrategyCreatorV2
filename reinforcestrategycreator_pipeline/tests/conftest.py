@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
 
-from src.artifact_store.base import ArtifactStore, ArtifactMetadata, ArtifactType
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactStore, ArtifactMetadata, ArtifactType
 
 @pytest.fixture
 def mock_artifact_store() -> MagicMock:

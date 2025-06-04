@@ -8,12 +8,12 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
 import pandas as pd
 
-from src.data.manager import DataManager
-from src.data.base import DataSource, DataSourceMetadata
-from src.data.csv_source import CsvDataSource
-from src.data.api_source import ApiDataSource
-from src.artifact_store.base import ArtifactStore, ArtifactType, ArtifactMetadata
-from src.config.manager import ConfigManager
+from reinforcestrategycreator_pipeline.src.data.manager import DataManager
+from reinforcestrategycreator_pipeline.src.data.base import DataSource, DataSourceMetadata
+from reinforcestrategycreator_pipeline.src.data.csv_source import CsvDataSource
+from reinforcestrategycreator_pipeline.src.data.api_source import ApiDataSource
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactStore, ArtifactType, ArtifactMetadata
+from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
 
 
 class MockDataSource(DataSource):

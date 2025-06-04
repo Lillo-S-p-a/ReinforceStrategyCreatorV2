@@ -7,7 +7,7 @@ import tempfile
 import json
 from unittest.mock import Mock, MagicMock, patch
 
-from src.deployment.paper_trading import (
+from reinforcestrategycreator_pipeline.src.deployment.paper_trading import (
     TradingSimulationEngine,
     PaperTradingDeployer,
     Order,
@@ -16,9 +16,9 @@ from src.deployment.paper_trading import (
     OrderStatus,
     Position
 )
-from src.deployment.manager import DeploymentManager, DeploymentStatus
-from src.models.registry import ModelRegistry
-from src.artifact_store.base import ArtifactStore, ArtifactType
+from reinforcestrategycreator_pipeline.src.deployment.manager import DeploymentManager, DeploymentStatus
+from reinforcestrategycreator_pipeline.src.models.registry import ModelRegistry
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactStore, ArtifactType
 
 
 class TestTradingSimulationEngine:

@@ -9,6 +9,7 @@ from datetime import datetime # Added import
 from reinforcestrategycreator_pipeline.src.pipeline.stages.data_ingestion import DataIngestionStage
 from reinforcestrategycreator_pipeline.src.pipeline.context import PipelineContext
 from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactMetadata, ArtifactType
+from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
 
 class TestDataIngestionStageIntegration(unittest.TestCase):
 
@@ -22,6 +23,13 @@ class TestDataIngestionStageIntegration(unittest.TestCase):
 
         self.mock_artifact_store = MagicMock()
         self.context.set("artifact_store", self.mock_artifact_store)
+        
+        self.mock_config_manager = MagicMock(spec=ConfigManager)
+        # You might need to set up return values for methods of mock_config_manager
+        # if the DataIngestionStage calls them during its setup or run.
+        # For now, just setting the mock instance.
+        self.context.set("config_manager", self.mock_config_manager)
+        
         self.context.set_metadata("run_id", "test_integration_run_123")
 
         # Mock logger for the stage

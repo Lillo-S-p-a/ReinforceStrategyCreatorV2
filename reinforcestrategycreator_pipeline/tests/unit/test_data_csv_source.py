@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import pandas as pd
 
-from src.data.csv_source import CsvDataSource
+from reinforcestrategycreator_pipeline.src.data.csv_source import CsvDataSource
 
 
 class TestCsvDataSource:
@@ -69,14 +69,14 @@ class TestCsvDataSource:
         """Test validation with missing file path."""
         config = {}
         
-        with pytest.raises(ValueError, match="requires 'file_path'"):
+        with pytest.raises(ValueError, match="requires a valid 'source_path' or 'file_path' in config"):
             CsvDataSource("test_csv", config)
     
     def test_validate_config_file_not_found(self):
         """Test validation with non-existent file."""
         config = {"file_path": "/non/existent/file.csv"}
         
-        with pytest.raises(ValueError, match="CSV file not found"):
+        with pytest.raises(FileNotFoundError, match="CSV file not found"): # Changed ValueError to FileNotFoundError
             CsvDataSource("test_csv", config)
     
     def test_validate_config_not_a_file(self, tmp_path):

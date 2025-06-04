@@ -1,10 +1,11 @@
 """Quick test of TrainingEngine with fixed models - minimal epochs and episodes"""
 import numpy as np
-from src.training.engine import TrainingEngine
-from src.models.implementations.dqn import DQN
-from src.models.implementations.ppo import PPO
-from src.models.implementations.a2c import A2C
-from src.training.callbacks import LoggingCallback, ModelCheckpointCallback
+import pytest
+from reinforcestrategycreator_pipeline.src.training.engine import TrainingEngine
+from reinforcestrategycreator_pipeline.src.models.implementations.dqn import DQN
+from reinforcestrategycreator_pipeline.src.models.implementations.ppo import PPO
+from reinforcestrategycreator_pipeline.src.models.implementations.a2c import A2C
+from reinforcestrategycreator_pipeline.src.training.callbacks import LoggingCallback, ModelCheckpointCallback
 
 def create_dummy_data(n_samples=100):
     """Create dummy data for testing"""
@@ -12,6 +13,11 @@ def create_dummy_data(n_samples=100):
     y = np.random.randint(0, 2, n_samples)
     return X, y
 
+@pytest.mark.parametrize("model_class, model_name", [
+    (DQN, "DQN"),
+    (PPO, "PPO"),
+    (A2C, "A2C")
+])
 def test_model_with_engine(model_class, model_name):
     """Test a model with TrainingEngine"""
     print(f"\n{'='*50}")

@@ -7,7 +7,7 @@ import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-from src.visualization.performance_visualizer import PerformanceVisualizer
+from reinforcestrategycreator_pipeline.src.visualization.performance_visualizer import PerformanceVisualizer
 
 
 class TestPerformanceVisualizer(unittest.TestCase):

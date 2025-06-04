@@ -8,18 +8,21 @@ import tempfile
 import shutil
 import json
 from unittest.mock import Mock, patch, MagicMock
+from typing import Tuple, Dict, Any
 
-from src.evaluation.cross_validator import CrossValidator, CVResults, CVFoldResult
-from src.models.base import ModelBase
-from src.models.factory import ModelFactory
-from src.training.engine import TrainingEngine
+from reinforcestrategycreator_pipeline.src.evaluation.cross_validator import CrossValidator, CVResults, CVFoldResult
+from reinforcestrategycreator_pipeline.src.models.base import ModelBase
+from reinforcestrategycreator_pipeline.src.models.factory import ModelFactory
+from reinforcestrategycreator_pipeline.src.training.engine import TrainingEngine
 
 
 class MockModel(ModelBase):
     """Mock model for testing."""
     
     def __init__(self, model_type: str = "mock", **kwargs):
-        super().__init__(model_type=model_type, **kwargs)
+        config_arg = {"model_type": model_type}
+        config_arg.update(kwargs)
+        super().__init__(config=config_arg)
         self.train_call_count = 0
         self.evaluate_call_count = 0
     
@@ -47,6 +50,21 @@ class MockModel(ModelBase):
     
     def load(self, path):
         """Mock load method."""
+        pass
+
+    def build(self, input_shape: Tuple[int, ...], output_shape: Tuple[int, ...]) -> None:
+        """Mock build method."""
+        # Minimal implementation for a mock
+        pass
+
+    def get_model_state(self) -> Dict[str, Any]:
+        """Mock get_model_state method."""
+        # Return a simple dictionary representing state
+        return {"weights": "mock_weights", "optimizer_state": "mock_optimizer_state"}
+
+    def set_model_state(self, state: Dict[str, Any]) -> None:
+        """Mock set_model_state method."""
+        # Minimal implementation for a mock
         pass
 
 
@@ -119,8 +137,10 @@ class TestCrossValidator:
         assert isinstance(results, CVResults)
         assert len(results.fold_results) == 3
         assert results.config["n_folds"] == 3
-        assert "loss" in results.aggregated_metrics["train_loss"]
-        assert "loss" in results.aggregated_metrics["val_loss"]
+        assert "train_loss" in results.aggregated_metrics
+        assert "mean" in results.aggregated_metrics["train_loss"] # Check for a specific stat key
+        assert "val_loss" in results.aggregated_metrics
+        assert "mean" in results.aggregated_metrics["val_loss"] # Check for a specific stat key
     
     def test_fold_results_structure(self, cross_validator, sample_data):
         """Test structure of fold results."""
@@ -312,7 +332,7 @@ class TestCrossValidator:
         for model_name, cv_results in results_dict.items():
             assert isinstance(cv_results, CVResults)
     
-    @patch('src.evaluation.cross_validator.ProcessPoolExecutor')
+    @patch('reinforcestrategycreator_pipeline.src.evaluation.cross_validator.ProcessPoolExecutor')
     def test_parallel_cv_multiprocessing(self, mock_executor, cross_validator, sample_data):
         """Test parallel CV with multiprocessing."""
         cross_validator.n_jobs = 2
@@ -334,7 +354,7 @@ class TestCrossValidator:
         mock_executor.return_value = mock_executor_instance
         
         # Mock as_completed
-        with patch('src.evaluation.cross_validator.as_completed', return_value=[mock_future]):
+        with patch('reinforcestrategycreator_pipeline.src.evaluation.cross_validator.as_completed', return_value=[mock_future]):
             model_config = {"type": "mock"}
             data_config = {"data": sample_data}
             cv_config = {"n_folds": 2}
@@ -428,8 +448,8 @@ class TestCVVisualization:
     
     def test_visualizer_import(self):
         """Test that CVVisualizer can be imported."""
-        from src.evaluation.cv_visualization import CVVisualizer
+        from reinforcestrategycreator_pipeline.src.evaluation.cv_visualization import CVVisualizer
         
         viz = CVVisualizer()
-        assert viz.style == "seaborn"
+        assert viz.style == "seaborn-v0_8-darkgrid"
         assert viz.figsize == (10, 6)

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-from src.visualization.report_generator import ReportGenerator
+from reinforcestrategycreator_pipeline.src.visualization.report_generator import ReportGenerator
 
 
 class TestReportGenerator(unittest.TestCase):

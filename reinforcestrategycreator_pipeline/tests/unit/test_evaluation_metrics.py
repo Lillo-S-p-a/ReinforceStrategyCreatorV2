@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from src.evaluation.metrics import MetricsCalculator
+from reinforcestrategycreator_pipeline.src.evaluation.metrics import MetricsCalculator
 
 
 class TestMetricsCalculator:

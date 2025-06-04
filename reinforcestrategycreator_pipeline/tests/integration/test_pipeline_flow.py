@@ -13,6 +13,8 @@ from reinforcestrategycreator_pipeline.src.pipeline.executor import PipelineExec
 from reinforcestrategycreator_pipeline.src.pipeline.stages.data_ingestion import DataIngestionStage
 from reinforcestrategycreator_pipeline.src.pipeline.stages.training import TrainingStage
 from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactMetadata, ArtifactType, ArtifactStore
+from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
+from reinforcestrategycreator_pipeline.src.data.manager import DataManager # Added import
 
 # ConfigManager will be mocked
 # from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
@@ -70,6 +72,14 @@ class TestPipelineFlowIntegration(unittest.TestCase):
         self.mock_artifact_store = MagicMock(spec=ArtifactStore) # Use ArtifactStore class for spec
         self.context.set("artifact_store", self.mock_artifact_store)
 
+        # Set a ConfigManager in the global context for stages that might need it directly
+        # This is separate from the one mocked for ModelPipeline's direct use.
+        self.global_mock_config_manager = MagicMock(spec=ConfigManager)
+        self.context.set("config_manager", self.global_mock_config_manager)
+
+        # Mock and set DataManager in context
+        self.mock_data_manager = MagicMock(spec=DataManager)
+        self.context.set("data_manager", self.mock_data_manager)
 
         # Mock ConfigManager for ModelPipeline initialization (even if stages are overridden)
         self.mock_config_manager_patcher = patch('reinforcestrategycreator_pipeline.src.pipeline.orchestrator.ConfigManager')

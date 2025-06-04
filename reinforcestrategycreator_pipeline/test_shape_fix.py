@@ -10,8 +10,8 @@ logging.basicConfig(
 )
 
 # Import required components
-from src.training import TrainingEngine
-from src.models.factory import get_factory
+from reinforcestrategycreator_pipeline.src.training import TrainingEngine
+from reinforcestrategycreator_pipeline.src.models.factory import get_factory
 
 def create_sample_data(n_samples=100, n_features=5):
     """Create sample training data."""

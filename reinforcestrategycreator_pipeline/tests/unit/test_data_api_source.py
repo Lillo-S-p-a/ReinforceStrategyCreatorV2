@@ -7,7 +7,7 @@ from datetime import timedelta
 import requests
 import pandas as pd
 
-from src.data.api_source import ApiDataSource
+from reinforcestrategycreator_pipeline.src.data.api_source import ApiDataSource
 
 
 class TestApiDataSource:
@@ -93,7 +93,7 @@ class TestApiDataSource:
         with pytest.raises(ValueError, match="Unsupported response format"):
             ApiDataSource("test_api", config)
     
-    @patch('src.data.api_source.requests.Session')
+    @patch('reinforcestrategycreator_pipeline.src.data.api_source.requests.Session')
     @patch.object(ApiDataSource, 'get_schema', return_value={})
     def test_load_data_json_list(self, mock_get_schema, mock_session_class, mock_response):
         """Test loading JSON data that returns a list."""
@@ -220,7 +220,7 @@ class TestApiDataSource:
         assert list(df.columns) == ["id", "name", "value"]
         assert df["name"].tolist() == ["Alice", "Bob"]
     
-    @patch('src.data.api_source.requests.Session')
+    @patch('reinforcestrategycreator_pipeline.src.data.api_source.requests.Session')
     @patch.object(ApiDataSource, 'get_schema', return_value={})
     def test_load_data_with_params(self, mock_get_schema, mock_session_class, mock_response):
         """Test loading data with query parameters."""
@@ -266,7 +266,7 @@ class TestApiDataSource:
             auth=None
         )
     
-    @patch('src.data.api_source.requests.Session')
+    @patch('reinforcestrategycreator_pipeline.src.data.api_source.requests.Session')
     @patch.object(ApiDataSource, 'get_schema', return_value={})
     def test_load_data_post_method(self, mock_get_schema, mock_session_class, mock_response):
         """Test loading data with POST method."""

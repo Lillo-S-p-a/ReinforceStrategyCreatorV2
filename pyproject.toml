@@ -32,6 +32,8 @@ ray = {extras = ["rllib"], version = "^2.46.0"} # Adjusted for gymnasium 1.0.0 c
 protobuf = "~3.20.0" # Pinned to resolve AttributeError
 datadog = "^0.44.0"
 datadog-api-client = "^2.35.0"
+seaborn = "^0.13.2"
+pdfkit = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.2"

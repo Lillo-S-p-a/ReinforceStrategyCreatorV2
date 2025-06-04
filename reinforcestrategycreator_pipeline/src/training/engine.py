@@ -123,13 +123,15 @@ class TrainingEngine:
                 callbacks, training_config, model_config
             )
             
-            # Initialize training history
-            self.training_history = {
-                "loss": [],
-                "val_loss": [],
-                "epochs": [],
-                "metrics": {}
-            }
+            # Initialize training history only if not resuming
+            if not resume_from_checkpoint:
+                self.training_history = {
+                    "loss": [],
+                    "val_loss": [],
+                    "epochs": [],
+                    "metrics": {}
+                }
+            # If resuming, self.training_history should have been loaded by _load_checkpoint
             
             # Training loop
             self.logger.info(f"Starting training for {epochs} epochs")
@@ -516,30 +518,57 @@ class TrainingEngine:
         Returns:
             Tuple of (model, start_epoch)
         """
-        checkpoint_path = Path(checkpoint_path)
-        
-        # Load training state
-        state_path = checkpoint_path / "training_state.json"
-        with open(state_path, "r") as f:
-            training_state = json.load(f)
-        
-        # Load model configuration
-        config_path = checkpoint_path / "config.json"
-        with open(config_path, "r") as f:
-            model_config = json.load(f)
-        
-        # Create and load model
-        model = self.model_factory.create_from_config(model_config)
-        model.load(checkpoint_path)
-        
-        # Get start epoch (next epoch after checkpoint)
-        start_epoch = training_state["epoch"] + 1
-        
-        # Restore training history if available
-        if "training_history" in training_state:
-            self.training_history = training_state["training_history"]
-        
-        return model, start_epoch
+        self.logger.info(f"Attempting to load checkpoint from: {checkpoint_path}")
+        checkpoint_path_obj = Path(checkpoint_path)
+
+        try:
+            # Load training state
+            state_path = checkpoint_path_obj / "training_state.json"
+            self.logger.info(f"Loading training state from: {state_path}")
+            if not state_path.exists():
+                self.logger.error(f"Training state file not found: {state_path}")
+                return None, 0
+            with open(state_path, "r") as f:
+                training_state = json.load(f)
+            self.logger.info(f"Training state loaded. Keys: {list(training_state.keys())}")
+
+            # Load model configuration
+            # The checkpoint should save its config as "config.json"
+            config_path = checkpoint_path_obj / "config.json"
+            self.logger.info(f"Loading model config from: {config_path} (expected by ModelBase: {ModelBase.CONFIG_FILENAME})")
+            if not config_path.exists():
+                self.logger.error(f"Model config file not found: {config_path}")
+                return None, 0
+            with open(config_path, "r") as f:
+                model_config = json.load(f)
+            self.logger.info(f"Model config loaded: {model_config}")
+
+            # Create and load model
+            self.logger.info("Creating model from config...")
+            model = self.model_factory.create_from_config(model_config)
+            if model is None:
+                self.logger.error("Model factory returned None for the given config.")
+                return None, 0
+            self.logger.info(f"Model '{model.name}' created. Attempting to load model state from checkpoint path: {checkpoint_path_obj}")
+            model.load(checkpoint_path_obj) # Model's load method handles its specific files
+            self.logger.info(f"Model state loaded for '{model.name}'.")
+
+            # Get start epoch (next epoch after checkpoint)
+            start_epoch = training_state.get("epoch", -1) + 1
+            self.logger.info(f"Checkpoint indicates last completed epoch was {start_epoch -1}. Resuming from epoch {start_epoch}.")
+
+            # Restore training history if available
+            if "training_history" in training_state:
+                self.training_history = training_state["training_history"]
+                self.logger.info(f"Training history restored. History keys: {list(self.training_history.keys())}, loss length: {len(self.training_history.get('loss', []))}")
+            else:
+                self.logger.warning("No 'training_history' found in checkpoint state.")
+            
+            self.logger.info(f"Checkpoint loaded successfully. Returning model '{model.name}' and start_epoch: {start_epoch}")
+            return model, start_epoch
+        except Exception as e:
+            self.logger.error(f"Error loading checkpoint from {checkpoint_path_obj}: {str(e)}", exc_info=True)
+            return None, 0
     
     def save_checkpoint(
         self,

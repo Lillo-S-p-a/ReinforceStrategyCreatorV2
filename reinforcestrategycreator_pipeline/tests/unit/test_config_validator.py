@@ -3,8 +3,8 @@
 import pytest
 from pydantic import BaseModel, Field
 
-from src.config.validator import ConfigValidator
-from src.config.models import PipelineConfig, ModelType
+from reinforcestrategycreator_pipeline.src.config.validator import ConfigValidator
+from reinforcestrategycreator_pipeline.src.config.models import PipelineConfig, ModelType
 
 
 class TestConfigValidator:

@@ -193,6 +193,9 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
             # Calculate ATR
             result_df.ta.atr(high=result_df[high_col], low=result_df[low_col], close=result_df[close_col], length=14, append=True)
             # Expected column: ATR_14
+            # Rename ATRr_14 to ATR_14 for consistency if it exists
+            if 'ATRr_14' in result_df.columns:
+                result_df.rename(columns={'ATRr_14': 'ATR_14'}, inplace=True)
         except Exception as e:
             logger.warning(f"CalculationError: Failed to calculate ATR: {str(e)}")
 

@@ -9,6 +9,8 @@ from datetime import datetime
 from reinforcestrategycreator_pipeline.src.pipeline.stages.training import TrainingStage
 from reinforcestrategycreator_pipeline.src.pipeline.context import PipelineContext
 from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactMetadata, ArtifactType
+from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
+from reinforcestrategycreator_pipeline.src.models.registry import ModelRegistry # Added import
 
 class TestTrainingStageIntegration(unittest.TestCase):
 
@@ -22,6 +24,13 @@ class TestTrainingStageIntegration(unittest.TestCase):
 
         self.mock_artifact_store = MagicMock()
         self.context.set("artifact_store", self.mock_artifact_store)
+
+        self.mock_config_manager = MagicMock(spec=ConfigManager)
+        self.context.set("config_manager", self.mock_config_manager)
+
+        self.mock_model_registry = MagicMock(spec=ModelRegistry) # Added
+        self.context.set("model_registry", self.mock_model_registry) # Added
+        
         self.context.set_metadata("run_id", "test_train_run_456")
 
         self.mock_logger_patcher = patch('reinforcestrategycreator_pipeline.src.pipeline.stage.get_logger')

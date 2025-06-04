@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 
-from src.deployment import DeploymentManager, DeploymentStatus, DeploymentStrategy
-from src.artifact_store.base import ArtifactMetadata, ArtifactType
+from reinforcestrategycreator_pipeline.src.deployment import DeploymentManager, DeploymentStatus, DeploymentStrategy
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactMetadata, ArtifactType
 
 
 class TestDeploymentManager:

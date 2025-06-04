@@ -8,13 +8,13 @@ import json
 import tempfile
 from unittest.mock import Mock, patch
 
-from data.transformer import (
+from reinforcestrategycreator_pipeline.src.data.transformer import (
     TransformerBase,
     TechnicalIndicatorTransformer,
     ScalingTransformer,
     DataTransformer
 )
-from config.models import TransformationConfig
+from reinforcestrategycreator_pipeline.src.config.models import TransformationConfig
 
 
 class TestTechnicalIndicatorTransformer:

@@ -14,7 +14,7 @@ from .cross_validator import CVResults
 class CVVisualizer:
     """Visualization tools for cross-validation results."""
     
-    def __init__(self, style: str = "seaborn", figsize: tuple = (10, 6)):
+    def __init__(self, style: str = "seaborn-v0_8-darkgrid", figsize: tuple = (10, 6)):
         """Initialize the visualizer.
         
         Args:

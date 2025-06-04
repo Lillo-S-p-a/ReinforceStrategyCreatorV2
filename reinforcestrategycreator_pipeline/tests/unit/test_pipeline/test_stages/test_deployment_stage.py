@@ -32,7 +32,7 @@ class TestDeploymentStage(unittest.TestCase):
             },
             "packaging_format": "pickle"
         }
-        self.stage = DeploymentStage(config=self.config)
+        self.stage = DeploymentStage(name="deployment_stage_unit_test", config=self.config)
         
         # Reset PipelineContext singleton
         PipelineContext._instance = None

@@ -4,7 +4,7 @@ import pytest
 import os
 from unittest.mock import patch, MagicMock, call
 
-from src.monitoring.datadog_client import (
+from reinforcestrategycreator_pipeline.src.monitoring.datadog_client import (
     DatadogClient,
     configure_datadog,
     track_metric,
@@ -23,7 +23,7 @@ class TestDatadogClient:
         client2 = DatadogClient()
         assert client1 is client2
     
-    @patch('src.monitoring.datadog_client.initialize')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.initialize')
     def test_configure_with_api_key(self, mock_initialize):
         """Test configuring with API key."""
         client = DatadogClient()
@@ -59,7 +59,7 @@ class TestDatadogClient:
         assert not client.enabled
     
     @patch.dict(os.environ, {"DATADOG_API_KEY": "env_api_key"})
-    @patch('src.monitoring.datadog_client.initialize')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.initialize')
     def test_configure_with_env_var(self, mock_initialize):
         """Test configuring with environment variable."""
         client = DatadogClient()
@@ -78,7 +78,7 @@ class TestDatadogClient:
         formatted = client._format_metric_name("my.metric")
         assert formatted == "test_prefix.my.metric"
     
-    @patch('src.monitoring.datadog_client.statsd')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.statsd')
     def test_increment(self, mock_statsd):
         """Test increment metric."""
         client = DatadogClient()
@@ -93,7 +93,7 @@ class TestDatadogClient:
             tags=["tag1"]
         )
     
-    @patch('src.monitoring.datadog_client.statsd')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.statsd')
     def test_gauge(self, mock_statsd):
         """Test gauge metric."""
         client = DatadogClient()
@@ -108,7 +108,7 @@ class TestDatadogClient:
             tags=["tag1", "tag2"]
         )
     
-    @patch('src.monitoring.datadog_client.statsd')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.statsd')
     def test_histogram(self, mock_statsd):
         """Test histogram metric."""
         client = DatadogClient()
@@ -123,7 +123,7 @@ class TestDatadogClient:
             tags=None
         )
     
-    @patch('src.monitoring.datadog_client.statsd')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.statsd')
     def test_timing(self, mock_statsd):
         """Test timing metric."""
         client = DatadogClient()
@@ -138,8 +138,8 @@ class TestDatadogClient:
             tags=["operation:test"]
         )
     
-    @patch('src.monitoring.datadog_client.time')
-    @patch('src.monitoring.datadog_client.statsd')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.time')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.statsd')
     def test_timed_context_manager(self, mock_statsd, mock_time):
         """Test timed context manager."""
         # Mock time to return predictable values
@@ -164,7 +164,7 @@ class TestDatadogClient:
         client = DatadogClient()
         client.enabled = False
         
-        with patch('src.monitoring.datadog_client.statsd') as mock_statsd:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.statsd') as mock_statsd:
             client.increment("test")
             client.gauge("test", 1)
             client.histogram("test", 1)
@@ -176,7 +176,7 @@ class TestDatadogClient:
             mock_statsd.histogram.assert_not_called()
             mock_statsd.timing.assert_not_called()
     
-    @patch('src.monitoring.datadog_client.api')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.api')
     def test_event(self, mock_api):
         """Test sending events."""
         client = DatadogClient()
@@ -199,7 +199,7 @@ class TestDatadogClient:
                 aggregation_key="test_key"
             )
     
-    @patch('src.monitoring.datadog_client.statsd')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.statsd')
     def test_send_metrics(self, mock_statsd):
         """Test sending multiple metrics."""
         client = DatadogClient()
@@ -229,7 +229,7 @@ class TestDatadogClient:
 class TestConvenienceFunctions:
     """Test module-level convenience functions."""
     
-    @patch('src.monitoring.datadog_client.datadog_client')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.datadog_client')
     def test_configure_datadog_function(self, mock_client):
         """Test configure_datadog function."""
         configure_datadog(
@@ -246,7 +246,7 @@ class TestConvenienceFunctions:
             enabled=True
         )
     
-    @patch('src.monitoring.datadog_client.datadog_client')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.datadog_client')
     def test_track_model_metrics(self, mock_client):
         """Test track_model_metrics function."""
         metrics = {
@@ -265,7 +265,7 @@ class TestConvenienceFunctions:
         assert mock_client.gauge.call_count == 2
         mock_client.gauge.assert_has_calls(expected_calls, any_order=True)
     
-    @patch('src.monitoring.datadog_client.datadog_client')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.datadog_client')
     def test_track_pipeline_event(self, mock_client):
         """Test track_pipeline_event function."""
         track_pipeline_event(
@@ -287,7 +287,7 @@ class TestConvenienceFunctions:
 class TestTrackMetricDecorator:
     """Test the track_metric decorator."""
     
-    @patch('src.monitoring.datadog_client.datadog_client')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.datadog_client')
     def test_track_metric_success(self, mock_client):
         """Test track_metric decorator with successful execution."""
         @track_metric("gauge")
@@ -309,7 +309,7 @@ class TestTrackMetricDecorator:
             42.0
         )
     
-    @patch('src.monitoring.datadog_client.datadog_client')
+    @patch('reinforcestrategycreator_pipeline.src.monitoring.datadog_client.datadog_client')
     def test_track_metric_failure(self, mock_client):
         """Test track_metric decorator with failed execution."""
         @track_metric("histogram")

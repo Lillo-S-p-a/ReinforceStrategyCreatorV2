@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 from unittest.mock import Mock, patch
 
-from src.config.models import (
-    DataDriftConfig, ModelDriftConfig, 
+from reinforcestrategycreator_pipeline.src.config.models import (
+    DataDriftConfig, ModelDriftConfig,
     DataDriftDetectionMethod, ModelDriftDetectionMethod
 )
-from src.monitoring.drift_detection import (
+from reinforcestrategycreator_pipeline.src.monitoring.drift_detection import (
     DataDriftDetector, ModelDriftDetector
 )
 

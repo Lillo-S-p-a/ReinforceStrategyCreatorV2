@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional, Type, Union
 import pandas as pd
 from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
 
-from artifact_store.base import ArtifactStore, ArtifactType
-from config.manager import ConfigManager
+from ..artifact_store.base import ArtifactStore, ArtifactType
+from reinforcestrategycreator_pipeline.src.config.manager import ConfigManager
 from .base import DataSource, DataSourceMetadata
 from .csv_source import CsvDataSource
 from .api_source import ApiDataSource

@@ -9,10 +9,10 @@ import shutil
 import json
 import numpy as np
 
-from src.models.registry import ModelRegistry
-from src.models.base import ModelBase
-from src.models.implementations import DQN
-from src.artifact_store.base import ArtifactStore, ArtifactType, ArtifactMetadata
+from reinforcestrategycreator_pipeline.src.models.registry import ModelRegistry
+from reinforcestrategycreator_pipeline.src.models.base import ModelBase
+from reinforcestrategycreator_pipeline.src.models.implementations import DQN
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactStore, ArtifactType, ArtifactMetadata
 
 
 class MockModel(ModelBase):
@@ -80,8 +80,8 @@ class TestModelRegistry:
         mock_artifact_store.save_artifact.return_value = mock_metadata
         
         # Register model
-        with patch('src.models.registry.Path') as mock_path:
-            with patch('src.models.registry.shutil'):
+        with patch('reinforcestrategycreator_pipeline.src.models.registry.Path') as mock_path:
+            with patch('reinforcestrategycreator_pipeline.src.models.registry.shutil'):
                 model_id = registry.register_model(
                     model=mock_model,
                     model_name="test_model",
@@ -117,8 +117,8 @@ class TestModelRegistry:
         )
         mock_artifact_store.save_artifact.return_value = mock_metadata
         
-        with patch('src.models.registry.Path') as mock_path:
-            with patch('src.models.registry.shutil'):
+        with patch('reinforcestrategycreator_pipeline.src.models.registry.Path') as mock_path:
+            with patch('reinforcestrategycreator_pipeline.src.models.registry.shutil'):
                 model_id = registry.register_model(
                     model=mock_model,
                     model_name="child_model",
@@ -173,7 +173,7 @@ class TestModelRegistry:
             mock_artifact_store.get_artifact_metadata.return_value = mock_metadata
             
             # Register MockModel with factory
-            with patch('src.models.registry.get_factory') as mock_get_factory:
+            with patch('reinforcestrategycreator_pipeline.src.models.registry.get_factory') as mock_get_factory:
                 mock_factory = Mock()
                 mock_factory.create_model.return_value = MockModel(config)
                 mock_get_factory.return_value = mock_factory
@@ -436,8 +436,8 @@ class TestModelRegistry:
         # Simulate error during save
         mock_artifact_store.save_artifact.side_effect = Exception("Storage error")
         
-        with patch('src.models.registry.Path') as mock_path:
-            with patch('src.models.registry.shutil') as mock_shutil:
+        with patch('reinforcestrategycreator_pipeline.src.models.registry.Path') as mock_path:
+            with patch('reinforcestrategycreator_pipeline.src.models.registry.shutil') as mock_shutil:
                 # Create a real temp directory for the test
                 temp_dir = tempfile.mkdtemp()
                 mock_path.return_value = Path(temp_dir)

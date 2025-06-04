@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.config.loader import ConfigLoader
+from reinforcestrategycreator_pipeline.src.config.loader import ConfigLoader
 
 
 class TestConfigLoader:

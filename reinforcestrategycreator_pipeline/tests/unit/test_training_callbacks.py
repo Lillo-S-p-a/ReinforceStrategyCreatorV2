@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 
-from src.training.callbacks import (
+from reinforcestrategycreator_pipeline.src.training.callbacks import (
     CallbackBase,
     CallbackList,
     LoggingCallback,
@@ -119,7 +119,8 @@ class TestModelCheckpointCallback:
             
             # Mock model
             mock_model = Mock()
-            mock_model.save.return_value = {"model_path": "test_path"}
+            # Ensure the save mock creates the directory
+            mock_model.save.side_effect = lambda p: (p.mkdir(parents=True, exist_ok=True), {"model_path": str(p / "model.pkl")})[1]
             mock_model.get_hyperparameters.return_value = {}
             mock_model.get_metadata.return_value = {}
             callback.set_model(mock_model)
@@ -149,7 +150,8 @@ class TestModelCheckpointCallback:
             
             # Mock model
             mock_model = Mock()
-            mock_model.save.return_value = {"model_path": "test_path"}
+            # Ensure the save mock creates the directory
+            mock_model.save.side_effect = lambda p: (p.mkdir(parents=True, exist_ok=True), {"model_path": str(p / "model.pkl")})[1]
             callback.set_model(mock_model)
             
             # First epoch

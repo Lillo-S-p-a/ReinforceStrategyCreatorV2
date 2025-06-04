@@ -8,8 +8,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 
-from src.deployment.packager import ModelPackager
-from src.artifact_store.base import ArtifactMetadata, ArtifactType
+from reinforcestrategycreator_pipeline.src.deployment.packager import ModelPackager
+from reinforcestrategycreator_pipeline.src.artifact_store.base import ArtifactMetadata, ArtifactType
 
 
 class TestModelPackager:

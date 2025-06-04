@@ -13,7 +13,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, SMAIndicator, EMAIndicator
 from ta.volatility import BollingerBands
 
-from config.models import TransformationConfig
+from reinforcestrategycreator_pipeline.src.config.models import TransformationConfig
 
 
 logger = logging.getLogger(__name__)

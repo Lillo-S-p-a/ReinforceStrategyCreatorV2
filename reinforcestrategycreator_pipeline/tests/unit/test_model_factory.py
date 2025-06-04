@@ -4,9 +4,9 @@ import pytest
 from typing import Dict, Any, Tuple
 import numpy as np
 
-from src.models.base import ModelBase
-from src.models.factory import ModelFactory, get_factory, create_model, register_model, list_available_models
-from src.models.implementations import DQN, PPO, A2C
+from reinforcestrategycreator_pipeline.src.models.base import ModelBase
+from reinforcestrategycreator_pipeline.src.models.factory import ModelFactory, get_factory, create_model, register_model, list_available_models
+from reinforcestrategycreator_pipeline.src.models.implementations import DQN, PPO, A2C
 
 
 class MockModel(ModelBase):

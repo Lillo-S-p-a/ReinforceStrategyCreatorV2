@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from src.monitoring.logger import (
+from reinforcestrategycreator_pipeline.src.monitoring.logger import (
     StructuredFormatter,
     PipelineLogger,
     get_logger,
@@ -210,7 +210,7 @@ class TestLoggingFunctions:
     
     def test_log_with_context_function(self):
         """Test the log_with_context function."""
-        with patch('src.monitoring.logger.logger_instance.log_with_context') as mock_log:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.logger.logger_instance.log_with_context') as mock_log:
             log_with_context("info", "Test", key="value")
             mock_log.assert_called_once_with("info", "Test", key="value")
 
@@ -224,7 +224,7 @@ class TestDecorators:
         def test_function():
             return "success"
         
-        with patch('src.monitoring.logger.get_logger') as mock_get_logger:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.logger.get_logger') as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
             
@@ -243,7 +243,7 @@ class TestDecorators:
         def test_function():
             raise ValueError("Test error")
         
-        with patch('src.monitoring.logger.get_logger') as mock_get_logger:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.logger.get_logger') as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
             
@@ -262,7 +262,7 @@ class TestDecorators:
         def test_function(value):
             return value * 2
         
-        with patch('src.monitoring.logger.get_logger') as mock_get_logger:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.logger.get_logger') as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
             
@@ -287,7 +287,7 @@ class TestDecorators:
         def test_function():
             raise RuntimeError("Step failed")
         
-        with patch('src.monitoring.logger.get_logger') as mock_get_logger:
+        with patch('reinforcestrategycreator_pipeline.src.monitoring.logger.get_logger') as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
             

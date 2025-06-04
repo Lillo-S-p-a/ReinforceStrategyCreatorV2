@@ -7,8 +7,8 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from src.models.implementations import DQN, PPO, A2C
-from src.models.base import ModelBase
+from reinforcestrategycreator_pipeline.src.models.implementations import DQN, PPO, A2C
+from reinforcestrategycreator_pipeline.src.models.base import ModelBase
 
 
 class TestModelBase:

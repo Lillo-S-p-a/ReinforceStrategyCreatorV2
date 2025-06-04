@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-from data.splitter import DataSplitter
+from reinforcestrategycreator_pipeline.src.data.splitter import DataSplitter
 
 
 class TestDataSplitter:
