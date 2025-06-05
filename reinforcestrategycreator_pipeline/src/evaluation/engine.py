@@ -306,21 +306,21 @@ class EvaluationEngine:
         portfolio_history = [initial_capital]
         trades = []
 
-        if 'close' not in data.columns:
-            logger.error("Backtesting requires a 'close' column in the evaluation data.")
+        if 'Close' not in data.columns:
+            logger.error("Backtesting requires a 'Close' column in the evaluation data.")
             # Return empty metrics and initial portfolio if data is unsuitable
             return {}, [initial_capital]
 
         for i in range(len(data)):
             current_timestamp = data.index[i] if has_datetime_index else i
-            current_price = data['close'].iloc[i]
+            current_price = data['Close'].iloc[i]
 
             # Prepare state for the model.
-            # This assumes the model takes the current row's features (excluding 'close' if it's not a feature).
-            # If 'close' is a feature, it should be included. For simplicity, assume all other columns are features.
+            # This assumes the model takes the current row's features (excluding 'Close' if it's not a feature).
+            # If 'Close' is a feature, it should be included. For simplicity, assume all other columns are features.
             # This part might need adjustment based on the specific model's observation space.
             # Create a copy to avoid SettingWithCopyWarning if data is a slice
-            current_state_features = data.drop(columns=['close'], errors='ignore').iloc[i].copy()
+            current_state_features = data.drop(columns=['Close'], errors='ignore').iloc[i].copy()
             
             # Ensure current_state_features is a NumPy array of the correct shape for the model
             # Most SB3 models expect a flat NumPy array or a dict of arrays.
@@ -381,7 +381,7 @@ class EvaluationEngine:
 
         # Liquidate any open position at the end of the data
         if current_position_units > 0:
-            last_price = data['close'].iloc[-1]
+            last_price = data['Close'].iloc[-1]
             last_timestamp = data.index[-1] if has_datetime_index else len(data) -1 # Use index of last data point
             
             pnl = (last_price - entry_price) * current_position_units
