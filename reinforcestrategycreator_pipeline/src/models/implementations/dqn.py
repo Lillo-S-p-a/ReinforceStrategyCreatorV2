@@ -302,69 +302,132 @@ class DQN(ModelBase):
         learning_rate = kwargs.get("learning_rate", 0.001)
         
         epsilon = epsilon_start
-        
-        # Training loop (simplified)
+
+        # Reward and portfolio parameters
+        initial_episode_cash = 100000.0
+        transaction_cost_rate = 0.001
+        invalid_action_penalty = -1.0
+        hold_cash_reward = -0.005 # Small penalty for holding cash
+        unrealized_pnl_reward_scaling_factor = 0.1
+        close_price_index = 3 # Assuming OHLCV, Close is at index 3
+
+        if not isinstance(train_data, np.ndarray) or train_data.ndim != 2:
+            raise ValueError("train_data must be a 2D numpy array of features.")
+        if train_data.shape[1] <= close_price_index:
+            raise ValueError(f"close_price_index {close_price_index} is out of bounds for train_data with shape {train_data.shape}")
+
+        # Training loop
         for episode in range(episodes):
-            # In a real implementation, you would interact with an environment
-            # Here we'll simulate some training progress
+            cash = initial_episode_cash
+            current_position_units = 0.0
+            entry_price = 0.0
+            previous_unrealized_pnl = 0.0
+            
             episode_reward = 0
             episode_length = 0
             losses = []
             
-            # Simulate episode
-            for step in range(100):  # Max steps per episode
-                # Simulate experience
-                state = np.random.randn(*self.input_shape)
+            # Iterate through the training data for the episode
+            # Ensure we have enough data for a next_state
+            for step_idx in range(len(train_data) - 1):
+                state = train_data[step_idx]
+                current_price = state[close_price_index]
+                next_state = train_data[step_idx + 1]
+                next_price = next_state[close_price_index] # Used for liquidation if done
+
                 action = self.select_action(state, epsilon)
-                reward = np.random.randn()
-                next_state = np.random.randn(*self.input_shape)
-                done = step == 99 or np.random.random() < 0.01
+                reward = 0.0
+
+                # Trading Logic (0: Hold, 1: Buy, 2: Sell)
+                if action == 0: # Hold
+                    if current_position_units > 0:
+                        unrealized_pnl_at_step = (current_price - entry_price) * current_position_units
+                        change_in_unrealized_pnl = unrealized_pnl_at_step - previous_unrealized_pnl
+                        reward = change_in_unrealized_pnl * unrealized_pnl_reward_scaling_factor
+                        previous_unrealized_pnl = unrealized_pnl_at_step
+                    else: # Holding cash
+                        reward = hold_cash_reward
+                        previous_unrealized_pnl = 0.0
+                elif action == 1: # Buy
+                    # Check if affordable and not already in position
+                    if cash >= current_price * (1 + transaction_cost_rate) and current_position_units == 0 and current_price > 0:
+                        units_to_buy = cash / (current_price * (1 + transaction_cost_rate))
+                        cost = units_to_buy * current_price * transaction_cost_rate
+                        
+                        cash -= (units_to_buy * current_price) + cost
+                        current_position_units = units_to_buy
+                        entry_price = current_price
+                        reward = -cost # Negative reward for transaction cost
+                        previous_unrealized_pnl = 0.0
+                    else:
+                        reward = invalid_action_penalty
+                elif action == 2: # Sell
+                    if current_position_units > 0:
+                        realized_pnl = (current_price - entry_price) * current_position_units
+                        transaction_value = current_position_units * current_price
+                        cost = transaction_value * transaction_cost_rate
+                        
+                        reward = realized_pnl - cost
+                        cash += transaction_value - cost
+                        current_position_units = 0.0
+                        entry_price = 0.0
+                        previous_unrealized_pnl = 0.0
+                    else:
+                        reward = invalid_action_penalty
                 
-                # Store in replay buffer
+                done = (step_idx == len(train_data) - 2) # Episode ends at the second to last step
+
+                # If done and holding a position, liquidate
+                if done and current_position_units > 0:
+                    # PnL from liquidation at next_price (which is the last available price)
+                    liquidation_pnl = (next_price - entry_price) * current_position_units
+                    liquidation_cost = (current_position_units * next_price) * transaction_cost_rate
+                    # Add this to the reward of the last action
+                    reward += liquidation_pnl - liquidation_cost
+                    cash += (current_position_units * next_price) - liquidation_cost
+                    current_position_units = 0 # Position closed
+                
                 self.replay_buffer.push(state, action, reward, next_state, done)
                 
                 episode_reward += reward
                 episode_length += 1
                 
-                # Train if enough samples
                 if len(self.replay_buffer) >= batch_size and self.steps % self.update_frequency == 0:
                     loss = self._train_step(batch_size, gamma, learning_rate)
                     losses.append(loss)
                 
-                # Update target network
                 if self.steps % self.target_update_frequency == 0:
                     self._update_target_network()
                 
                 self.steps += 1
                 
                 if done:
-                    break
+                    break # End of episode
             
-            # Update epsilon
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             
-            # Record episode statistics
             self.episodes += 1
             self.training_history["episode_rewards"].append(episode_reward)
             self.training_history["episode_lengths"].append(episode_length)
-            self.training_history["losses"].extend(losses)
+            if losses: # only extend if there are losses to add
+                self.training_history["losses"].extend(losses)
             self.training_history["epsilon_values"].append(epsilon)
             
-            # Log progress
             if episode % 10 == 0:
-                avg_reward = np.mean(self.training_history["episode_rewards"][-10:])
-                print(f"Episode {episode}, Avg Reward: {avg_reward:.2f}, Epsilon: {epsilon:.3f}")
-        
+                # Ensure there are rewards to average
+                avg_reward = np.mean(self.training_history["episode_rewards"][-10:]) if self.training_history["episode_rewards"] else 0.0
+                print(f"Episode {self.episodes}, Avg Reward: {avg_reward:.2f}, Epsilon: {epsilon:.3f}, Steps: {self.steps}, Buffer: {len(self.replay_buffer)}")
+
         self.is_trained = True
         self.update_metadata({
-            "training_episodes": episodes,
+            "training_episodes": self.episodes, # Use self.episodes
             "final_epsilon": epsilon,
             "total_steps": self.steps
         })
         
         return self.training_history
-    
-    def _train_step(self, batch_size: int, gamma: float, 
+
+    def _train_step(self, batch_size: int, gamma: float,
                     learning_rate: float) -> float:
         """Perform one training step.
         
