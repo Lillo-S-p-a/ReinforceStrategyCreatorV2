@@ -7,7 +7,7 @@ import json
 import pickle
 from datetime import datetime
 
-from reinforcestrategycreator_pipeline.src.utils.logger import get_pipeline_logger
+from reinforcestrategycreator_pipeline.src.pipeline.logger import get_pipeline_logger
 
 
 class ModelBase(ABC):
