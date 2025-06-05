@@ -339,6 +339,9 @@ class EvaluationEngine:
                 except Exception as e:
                     logger.error(f"Error during model prediction at step {i}: {e}. State: {current_state_np}")
                     action = 0 # Default to hold if prediction fails
+
+                # Log action for debugging
+                logger.info(f"Backtest step {i}: Price={current_price:.2f}, Cash={cash:.2f}, Units={current_position_units}, Action={action}")
             
             # Trading Logic (0: Hold, 1: Buy, 2: Sell)
             if action == 1:  # Buy
