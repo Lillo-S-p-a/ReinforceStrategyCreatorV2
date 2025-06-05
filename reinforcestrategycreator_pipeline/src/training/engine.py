@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
+import pandas as pd
 
 from ..models.base import ModelBase
 from ..models.factory import ModelFactory, get_factory
@@ -150,7 +151,7 @@ class TrainingEngine:
                 
                 # Training phase
                 train_metrics = self._train_epoch(
-                    train_data, batch_size, shuffle, callback_list
+                    train_data, val_data, epoch, epochs, callback_list
                 )
                 epoch_logs.update(train_metrics)
                 
@@ -339,16 +340,18 @@ class TrainingEngine:
     def _train_epoch(
         self,
         train_data: Any,
-        batch_size: int,
-        shuffle: bool,
+        val_data: Any, # Added val_data
+        current_epoch: int, # Added current_epoch
+        total_epochs: int, # Added total_epochs
         callback_list: CallbackList
     ) -> Dict[str, float]:
         """Train for one epoch.
         
         Args:
             train_data: Training data
-            batch_size: Batch size
-            shuffle: Whether to shuffle data
+            val_data: Validation data (can be None)
+            current_epoch: The current epoch number
+            total_epochs: The total number of epochs for training
             callback_list: Callbacks to use
             
         Returns:
@@ -357,14 +360,35 @@ class TrainingEngine:
         # This is a simplified implementation
         # The actual implementation would depend on the model's train method
         
+        # Ensure data is numpy array before passing to model
+        train_data_np = train_data
+        if isinstance(train_data, pd.DataFrame):
+            self.logger.info(f"Converting train_data from DataFrame to NumPy array. Original type: {type(train_data)}")
+            train_data_np = train_data.values
+        
+        val_data_np = val_data
+        if isinstance(val_data, pd.DataFrame) and val_data is not None:
+            self.logger.info(f"Converting val_data from DataFrame to NumPy array. Original type: {type(val_data)}")
+            val_data_np = val_data.values
+
+        # Log types for debugging if conversion didn't result in ndarray
+        if train_data is not None and not isinstance(train_data_np, np.ndarray):
+            self.logger.warning(f"_train_epoch: train_data_np is type {type(train_data_np)} after conversion attempt from {type(train_data)}.")
+        if val_data is not None and val_data_np is not None and not isinstance(val_data_np, np.ndarray):
+            self.logger.warning(f"_train_epoch: val_data_np is type {type(val_data_np)} after conversion attempt from {type(val_data)}.")
+        elif val_data is not None and val_data_np is None:
+             self.logger.info("_train_epoch: val_data was provided, but val_data_np is None (original val_data might have been None or failed conversion).")
+
         # For now, delegate to the model's train method
         if hasattr(self.model, 'train'):
+            # DQN.train expects: train_data, val_data, current_epoch, total_epochs, callbacks
+            self.logger.info(f"Calling self.model.train with current_epoch={current_epoch}, total_epochs={total_epochs}")
             epoch_metrics = self.model.train(
-                train_data,
-                batch_size=batch_size,
-                epochs=1,  # Train for one epoch at a time
-                shuffle=shuffle,
-                verbose=0  # We handle logging via callbacks
+                train_data_np,
+                val_data_np,
+                current_epoch,
+                total_epochs,
+                callbacks=callback_list # Pass the callback list
             )
             
             # Extract metrics and handle different return formats
