@@ -333,15 +333,25 @@ class EvaluationEngine:
                 # Skip prediction if state is invalid, effectively a 'hold'
                 action = 0 # Default to hold if state preparation fails
             else:
-                try:
-                    q_values = model.predict(current_state_np, deterministic=True)
-                    action = np.argmax(q_values) # Get the action with the highest Q-value
-                except Exception as e:
-                    logger.error(f"Error during model prediction at step {i}: {e}. State: {current_state_np}")
-                    action = 0 # Default to hold if prediction fails
+                # try:
+                #     q_values = model.predict(current_state_np, deterministic=True)
+                #     action = np.argmax(q_values) # Get the action with the highest Q-value
+                # except Exception as e:
+                #     logger.error(f"Error during model prediction at step {i}: {e}. State: {current_state_np}")
+                #     action = 0 # Default to hold if prediction fails
+                
+                # --- TEMPORARY FORCED ACTIONS FOR DEBUGGING BACKTEST MECHANICS ---
+                data_len_third = len(data) / 3
+                if i < data_len_third:
+                    action = 1 # Force Buy
+                elif i < 2 * data_len_third:
+                    action = 2 # Force Sell
+                else:
+                    action = 0 # Force Hold
+                # --- END TEMPORARY FORCED ACTIONS ---
 
                 # Log action for debugging
-                logger.info(f"Backtest step {i}: Price={current_price:.2f}, Cash={cash:.2f}, Units={current_position_units}, Action={action}")
+                logger.info(f"Backtest step {i}: Price={current_price:.2f}, Cash={cash:.2f}, Units={current_position_units}, Action={action} (FORCED)")
             
             # Trading Logic (0: Hold, 1: Buy, 2: Sell)
             if action == 1:  # Buy
