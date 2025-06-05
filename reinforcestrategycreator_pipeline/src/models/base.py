@@ -7,6 +7,8 @@ import json
 import pickle
 from datetime import datetime
 
+from reinforcestrategycreator_pipeline.src.utils.logger import get_pipeline_logger
+
 
 class ModelBase(ABC):
     """Abstract base class for all models.
@@ -33,6 +35,7 @@ class ModelBase(ABC):
             "model_type": self.model_type,
             "hyperparameters": self.hyperparameters
         }
+        self.logger = get_pipeline_logger(self.__class__.__name__)
     
     @abstractmethod
     def build(self, input_shape: Tuple[int, ...], output_shape: Tuple[int, ...]) -> None:
