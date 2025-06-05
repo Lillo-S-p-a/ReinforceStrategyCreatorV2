@@ -382,12 +382,12 @@ class TrainingEngine:
         # For now, delegate to the model's train method
         if hasattr(self.model, 'train'):
             # DQN.train expects: train_data, val_data, current_epoch, total_epochs, callbacks
-            self.logger.info(f"Calling self.model.train with current_epoch={current_epoch}, total_epochs={total_epochs}")
+            self.logger.info(f"Calling self.model.train with current_epoch_num={current_epoch}, total_epochs_overall={total_epochs}")
             epoch_metrics = self.model.train(
                 train_data_np,
                 val_data_np,
-                current_epoch,
-                total_epochs,
+                current_epoch_num=current_epoch,
+                total_epochs_overall=total_epochs,
                 callbacks=callback_list # Pass the callback list
             )
             
