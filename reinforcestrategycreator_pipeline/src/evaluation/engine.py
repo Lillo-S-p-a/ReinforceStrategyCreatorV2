@@ -290,35 +290,134 @@ class EvaluationEngine:
         # 4. Calculate requested metrics
         
         # For now, we'll simulate some metrics
-        logger.warning("Using simulated metrics - implement actual model evaluation")
+        logger.info("Starting basic backtesting simulation for model evaluation...")
         
-        # Simulate running the model and getting portfolio values
-        num_steps = len(data)
-        initial_value = 10000.0
+        initial_capital = 100000.0
+        cash = initial_capital
+        current_position_units = 0.0
+        entry_price = 0.0
+        entry_timestamp_for_trade = None # To store timestamp when a position is opened
         
-        # Simulate portfolio values with some randomness
-        np.random.seed(42)  # For reproducibility
-        returns = np.random.normal(0.0005, 0.02, num_steps - 1)
-        portfolio_values = [initial_value]
+        # Ensure data has a DatetimeIndex for timestamping trades, otherwise use integer index
+        has_datetime_index = isinstance(data.index, pd.DatetimeIndex)
+
+        # Portfolio history will store value at each step *after* action is taken
+        # Initialize with initial capital (value before first step)
+        portfolio_history = [initial_capital]
+        trades = []
+
+        if 'close' not in data.columns:
+            logger.error("Backtesting requires a 'close' column in the evaluation data.")
+            # Return empty metrics and initial portfolio if data is unsuitable
+            return {}, [initial_capital]
+
+        for i in range(len(data)):
+            current_timestamp = data.index[i] if has_datetime_index else i
+            current_price = data['close'].iloc[i]
+
+            # Prepare state for the model.
+            # This assumes the model takes the current row's features (excluding 'close' if it's not a feature).
+            # If 'close' is a feature, it should be included. For simplicity, assume all other columns are features.
+            # This part might need adjustment based on the specific model's observation space.
+            # Create a copy to avoid SettingWithCopyWarning if data is a slice
+            current_state_features = data.drop(columns=['close'], errors='ignore').iloc[i].copy()
+            
+            # Ensure current_state_features is a NumPy array of the correct shape for the model
+            # Most SB3 models expect a flat NumPy array or a dict of arrays.
+            # Assuming a flat NumPy array for now.
+            try:
+                # Attempt to convert to NumPy array, handling potential non-numeric data gracefully
+                current_state_np = np.array(current_state_features.values, dtype=float).reshape(1, -1)
+            except ValueError as e:
+                logger.error(f"Error converting state features to NumPy array at step {i}: {e}. State: {current_state_features}")
+                # Skip prediction if state is invalid, effectively a 'hold'
+                action = 0 # Default to hold if state preparation fails
+            else:
+                try:
+                    action, _ = model.predict(current_state_np, deterministic=True)
+                    # Ensure action is a single value if model.predict returns a more complex structure
+                    if isinstance(action, (np.ndarray, list)):
+                        action = action[0]
+                except Exception as e:
+                    logger.error(f"Error during model prediction at step {i}: {e}. State: {current_state_np}")
+                    action = 0 # Default to hold if prediction fails
+            
+            # Trading Logic (0: Hold, 1: Buy, 2: Sell)
+            if action == 1:  # Buy
+                if current_position_units == 0 and cash > current_price and current_price > 0: # Check if enough cash and valid price
+                    # Simple strategy: invest all available cash
+                    units_to_buy = cash / current_price
+                    cash = 0.0 # All cash invested
+                    current_position_units = units_to_buy
+                    entry_price = current_price
+                    entry_timestamp_for_trade = current_timestamp
+                    logger.debug(f"Backtest: BUY {units_to_buy:.4f} units at {current_price:.2f} on {current_timestamp}")
+                else:
+                    logger.debug(f"Backtest: Attempted BUY at {current_price:.2f} on {current_timestamp} - No action (already in position or insufficient cash/invalid price).")
+            elif action == 2:  # Sell
+                if current_position_units > 0:
+                    pnl = (current_price - entry_price) * current_position_units
+                    cash += current_position_units * current_price # Add proceeds to cash
+                    trades.append({
+                        'pnl': pnl,
+                        'entry_price': entry_price,
+                        'exit_price': current_price,
+                        'units': current_position_units,
+                        'entry_timestamp': entry_timestamp_for_trade,
+                        'exit_timestamp': current_timestamp,
+                        'action_type': 'sell'
+                    })
+                    logger.debug(f"Backtest: SELL {current_position_units:.4f} units at {current_price:.2f} on {current_timestamp}, PnL: {pnl:.2f}")
+                    current_position_units = 0.0
+                    entry_price = 0.0
+                    entry_timestamp_for_trade = None # Reset
+                else:
+                    logger.debug(f"Backtest: Attempted SELL at {current_price:.2f} on {current_timestamp} - No action (not in position).")
+            # else action == 0 (Hold) or invalid action: do nothing
+
+            # Update portfolio value for this step
+            current_portfolio_value = cash + (current_position_units * current_price)
+            portfolio_history.append(current_portfolio_value)
+
+        # Liquidate any open position at the end of the data
+        if current_position_units > 0:
+            last_price = data['close'].iloc[-1]
+            last_timestamp = data.index[-1] if has_datetime_index else len(data) -1 # Use index of last data point
+            
+            pnl = (last_price - entry_price) * current_position_units
+            cash += current_position_units * last_price
+            trades.append({
+                'pnl': pnl,
+                'entry_price': entry_price,
+                'exit_price': last_price,
+                'units': current_position_units,
+                'entry_timestamp': entry_timestamp_for_trade,
+                'exit_timestamp': last_timestamp,
+                'action_type': 'liquidate_at_end'
+            })
+            logger.debug(f"Backtest: Liquidate SELL {current_position_units:.4f} units at {last_price:.2f} on {last_timestamp} (end of data), PnL: {pnl:.2f}")
+            current_position_units = 0.0 # Position closed
+            portfolio_history[-1] = cash # Update the last portfolio value to reflect final cash after liquidation
+
+        portfolio_values_np = np.array(portfolio_history, dtype=float)
         
-        for ret in returns:
-            new_value = portfolio_values[-1] * (1 + ret)
-            portfolio_values.append(new_value)
-        
-        # Simulate trades
-        num_trades = np.random.randint(50, 200)
-        win_rate = np.random.uniform(0.45, 0.65)
-        
-        # Calculate metrics using the metrics calculator
+        if len(portfolio_values_np) > 1:
+            # Calculate returns based on the change from one step to the next
+            returns_np = np.diff(portfolio_values_np) / portfolio_values_np[:-1]
+        else:
+            returns_np = np.array([])
+            
+        logger.info(f"Backtest simulation complete. Trades executed: {len(trades)}. Final portfolio value: {portfolio_values_np[-1]:.2f}")
+
+        # Calculate metrics using the metrics calculator, now with actual trades
         calculated_metrics = self.metrics_calculator.calculate_all_metrics(
-            portfolio_values=portfolio_values,
-            returns=returns,
-            trades_count=num_trades,
-            win_rate=win_rate,
+            portfolio_values=portfolio_values_np,
+            returns=returns_np,
+            trades=trades,  # Pass the list of actual trades
             requested_metrics=metrics
         )
         
-        return calculated_metrics, portfolio_values
+        return calculated_metrics, list(portfolio_values_np) # Return as list for consistency
     
     def _save_results(
         self,
