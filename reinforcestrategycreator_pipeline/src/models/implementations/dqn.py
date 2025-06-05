@@ -311,8 +311,22 @@ class DQN(ModelBase):
         unrealized_pnl_reward_scaling_factor = 0.1
         close_price_index = 3 # Assuming OHLCV, Close is at index 3
 
+        # Enhanced logging for train_data
+        self.logger.info(f"DQN.train() received train_data of type: {type(train_data)}")
+        if hasattr(train_data, 'shape'):
+            self.logger.info(f"DQN.train() received train_data with shape: {train_data.shape}")
+        else:
+            self.logger.info(f"DQN.train() received train_data that has no shape attribute.")
+        if hasattr(train_data, 'ndim'):
+            self.logger.info(f"DQN.train() received train_data with ndim: {train_data.ndim}")
+        else:
+            self.logger.info(f"DQN.train() received train_data that has no ndim attribute.")
+
         if not isinstance(train_data, np.ndarray) or train_data.ndim != 2:
+            self.logger.error(f"Validation failed for train_data: type is {type(train_data)}, ndim is {getattr(train_data, 'ndim', 'N/A')}, is_ndarray: {isinstance(train_data, np.ndarray)}")
             raise ValueError("train_data must be a 2D numpy array of features.")
+        
+        self.logger.info(f"DQN.train() train_data shape[1]: {train_data.shape[1]}, close_price_index: {close_price_index}")
         if train_data.shape[1] <= close_price_index:
             raise ValueError(f"close_price_index {close_price_index} is out of bounds for train_data with shape {train_data.shape}")
 
