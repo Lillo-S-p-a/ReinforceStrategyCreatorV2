@@ -334,10 +334,8 @@ class EvaluationEngine:
                 action = 0 # Default to hold if state preparation fails
             else:
                 try:
-                    action, _ = model.predict(current_state_np, deterministic=True)
-                    # Ensure action is a single value if model.predict returns a more complex structure
-                    if isinstance(action, (np.ndarray, list)):
-                        action = action[0]
+                    q_values = model.predict(current_state_np, deterministic=True)
+                    action = np.argmax(q_values) # Get the action with the highest Q-value
                 except Exception as e:
                     logger.error(f"Error during model prediction at step {i}: {e}. State: {current_state_np}")
                     action = 0 # Default to hold if prediction fails
