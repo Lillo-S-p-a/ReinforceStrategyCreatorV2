@@ -320,7 +320,7 @@ class EvaluationEngine:
             # If 'Close' is a feature, it should be included. For simplicity, assume all other columns are features.
             # This part might need adjustment based on the specific model's observation space.
             # Create a copy to avoid SettingWithCopyWarning if data is a slice
-            current_state_features = data.drop(columns=['Close'], errors='ignore').iloc[i].copy()
+            current_state_features = data.iloc[i].copy() # Keep all columns as features
             
             # Ensure current_state_features is a NumPy array of the correct shape for the model
             # Most SB3 models expect a flat NumPy array or a dict of arrays.
