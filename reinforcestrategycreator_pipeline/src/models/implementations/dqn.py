@@ -210,18 +210,43 @@ class DQN(ModelBase):
         
         # Simplified forward pass
         x = state.flatten()
-        
+        self.logger.debug(f"_forward: input state flattened sample: {x[:5]}")
+        if np.isnan(x).any(): self.logger.warning(f"_forward: NaN in input state x: {x}")
+
         # Hidden layers
         for i in range(len(self.hidden_layers)):
-            x = np.dot(x, weights[f"W{i}"]) + weights[f"b{i}"]
+            x_prev = x
+            W = weights[f"W{i}"]
+            b = weights[f"b{i}"]
+            if np.isnan(W).any(): self.logger.warning(f"_forward: NaN in W{i}")
+            if np.isnan(b).any(): self.logger.warning(f"_forward: NaN in b{i}")
+            
+            x = np.dot(x_prev, W) + b
+            self.logger.debug(f"_forward: after layer {i} (pre-activation) x sample: {x[:5]}")
+            if np.isnan(x).any():
+                self.logger.warning(f"_forward: NaN in x after layer {i} (pre-activation). x_prev: {x_prev[:5]}, W: {W[:2,:2]}, b: {b[:5]}") # Log parts of W and b
+                return x # Return early if NaN detected
+
             # ReLU activation
             if self.activation == "relu":
                 x = np.maximum(0, x)
             elif self.activation == "tanh":
                 x = np.tanh(x)
+            self.logger.debug(f"_forward: after layer {i} (post-activation) x sample: {x[:5]}")
+            if np.isnan(x).any():
+                self.logger.warning(f"_forward: NaN in x after layer {i} (post-activation)")
+                return x # Return early
         
         # Output layer
-        q_values = np.dot(x, weights["W_out"]) + weights["b_out"]
+        W_out = weights["W_out"]
+        b_out = weights["b_out"]
+        if np.isnan(W_out).any(): self.logger.warning(f"_forward: NaN in W_out")
+        if np.isnan(b_out).any(): self.logger.warning(f"_forward: NaN in b_out")
+
+        q_values = np.dot(x, W_out) + b_out
+        self.logger.debug(f"_forward: final q_values sample: {q_values[:5]}")
+        if np.isnan(q_values).any():
+            self.logger.error(f"_forward: NaN in final q_values. x: {x[:5]}, W_out: {W_out[:2,:2]}, b_out: {b_out[:5]}")
         
         return q_values
     
