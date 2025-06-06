@@ -529,30 +529,65 @@ class DQN(ModelBase):
         self.logger.debug(f"_train_step: Calculated loss: {loss}")
         if np.isnan(loss): self.logger.error("_train_step: LOSS IS NAN!")
         
-        # Simulate weight update (in reality, you'd use gradient descent)
-        # This is a very simplified simulation
-        error = targets - current_q_selected
-        self.logger.debug(f"_train_step: error sample: {error[:5]}")
-        if np.isnan(error).any(): self.logger.warning("_train_step: NaN in error term")
-        
-        # Ensure q_network and weights exist before updating
-        if self.q_network is None or "weights" not in self.q_network:
-            raise ValueError("Q-network is not properly initialized")
-        
-        # Create a copy of keys to avoid dictionary modification during iteration
-        weight_keys = list(self.q_network["weights"].keys())
-        
-        for i in range(batch_size):
-            # Simulate gradient update effect
-            adjustment = learning_rate * error[i] * 0.01
-            for key in weight_keys:
-                if key in self.q_network["weights"]:
-                    # Ensure weights are numpy arrays (they might be lists after loading from checkpoint)
-                    if isinstance(self.q_network["weights"][key], list):
-                        self.q_network["weights"][key] = np.array(self.q_network["weights"][key])
+        # Robust placeholder gradient update
+        if np.isnan(loss) or np.isinf(loss):
+            self.logger.error(f"_train_step: Loss is NaN or Inf ({loss}). Skipping weight update.")
+        else:
+            td_error_batch = targets - current_q_selected # Shape: (batch_size,)
+            self.logger.debug(f"_train_step: td_error_batch (targets - current_q_selected) shape: {td_error_batch.shape}, sample: {td_error_batch[:5] if td_error_batch.size > 0 else 'empty'}")
+
+            if np.isnan(td_error_batch).any() or np.isinf(td_error_batch).any():
+                self.logger.error(f"_train_step: NaN/Inf in td_error_batch. Skipping weight update. Sample: {td_error_batch[:5] if td_error_batch.size > 0 else 'empty'}")
+            else:
+                # Clip TD errors to prevent extreme values from td_error_batch
+                clipped_td_error_batch = np.clip(td_error_batch, -1.0, 1.0)
+                self.logger.debug(f"_train_step: clipped_td_error_batch sample: {clipped_td_error_batch[:5] if clipped_td_error_batch.size > 0 else 'empty'}")
+                
+                mean_clipped_td_error = np.mean(clipped_td_error_batch)
+                self.logger.debug(f"_train_step: mean_clipped_td_error: {mean_clipped_td_error}")
+
+                if np.isnan(mean_clipped_td_error) or np.isinf(mean_clipped_td_error):
+                    self.logger.error(f"_train_step: mean_clipped_td_error is NaN or Inf ({mean_clipped_td_error}). Skipping weight update.")
+                else:
+                    # Define a maximum absolute value for the adjustment scalar to prevent explosion
+                    # This is a heuristic for the placeholder update.
+                    max_abs_adjustment_val = 0.01 # Smaller max adjustment
                     
-                    # Apply random gradient update
-                    self.q_network["weights"][key] += np.random.randn(*self.q_network["weights"][key].shape) * adjustment
+                    # Calculate the adjustment scalar
+                    adjustment_scalar = learning_rate * mean_clipped_td_error
+                    
+                    # Clip the final adjustment scalar
+                    adjustment_scalar_clipped = np.clip(adjustment_scalar, -max_abs_adjustment_val, max_abs_adjustment_val)
+                    
+                    self.logger.debug(f"_train_step: Initial adjustment_scalar: {adjustment_scalar}, Clipped to: {adjustment_scalar_clipped} (lr: {learning_rate}, mean_clipped_td_error: {mean_clipped_td_error})")
+
+                    if np.isnan(adjustment_scalar_clipped) or np.isinf(adjustment_scalar_clipped):
+                         self.logger.error(f"_train_step: adjustment_scalar_clipped is NaN/Inf ({adjustment_scalar_clipped}). Skipping weight update.")
+                    else:
+                        if self.q_network is None or "weights" not in self.q_network:
+                            self.logger.error("_train_step: Q-network or weights not found during update. Skipping.")
+                        else:
+                            for key in self.q_network["weights"]:
+                                if key not in self.q_network["weights"]: # Should not happen if iterating keys from it
+                                    self.logger.warning(f"_train_step: Weight key {key} disappeared during update. Skipping.")
+                                    continue
+
+                                weights_before_update = self.q_network["weights"][key].copy() # For potential revert
+                                noise = np.random.randn(*self.q_network["weights"][key].shape)
+                                update_delta = noise * adjustment_scalar_clipped # Use the final clipped scalar
+                                
+                                if np.isnan(update_delta).any() or np.isinf(update_delta).any():
+                                    self.logger.error(f"_train_step: update_delta for weights[{key}] is NaN/Inf. Adjustment_scalar_clipped: {adjustment_scalar_clipped}. Noise sample: {noise.flatten()[:2]}. Skipping update for this weight matrix.")
+                                    continue
+
+                                self.q_network["weights"][key] += update_delta
+                                
+                                if np.isnan(self.q_network["weights"][key]).any():
+                                    self.logger.critical(f"_train_step: CRITICAL - Weights[{key}] became NaN AFTER update. Reverting update for this matrix. Adjustment_scalar_clipped: {adjustment_scalar_clipped}, Update_delta sample: {update_delta.flatten()[:2]}.")
+                                    self.q_network["weights"][key] = weights_before_update # Revert
+                                elif np.isinf(self.q_network["weights"][key]).any():
+                                    self.logger.critical(f"_train_step: CRITICAL - Weights[{key}] became Inf AFTER update. Reverting update for this matrix. Adjustment_scalar_clipped: {adjustment_scalar_clipped}, Update_delta sample: {update_delta.flatten()[:2]}.")
+                                    self.q_network["weights"][key] = weights_before_update # Revert
         
         return float(loss)
     
