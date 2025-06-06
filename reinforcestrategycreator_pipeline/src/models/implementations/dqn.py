@@ -455,31 +455,60 @@ class DQN(ModelBase):
         """
         # Sample batch from replay buffer
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
-        
+        self.logger.debug(f"_train_step: Sampled states shape: {states.shape}")
+        self.logger.debug(f"_train_step: Sampled actions: {actions[:5]}") # Log first 5
+        self.logger.debug(f"_train_step: Sampled rewards: {rewards[:5]}")
+        self.logger.debug(f"_train_step: Sampled next_states shape: {next_states.shape}")
+        self.logger.debug(f"_train_step: Sampled dones: {dones[:5]}")
+
         # Compute target Q-values
         if self.double_dqn:
             # Double DQN: use online network to select actions, target network for values
             next_q_values = self.predict(next_states)
+            self.logger.debug(f"_train_step (double_dqn): next_q_values (online net for action selection) sample: {next_q_values[0] if next_q_values.size > 0 else 'empty'}")
+            if np.isnan(next_q_values).any(): self.logger.warning("_train_step (double_dqn): NaN in next_q_values (online)")
+
             next_actions = np.argmax(next_q_values, axis=1)
+            self.logger.debug(f"_train_step (double_dqn): next_actions sample: {next_actions[:5]}")
+
             next_q_values_target = self.predict(next_states, use_target_network=True)
+            self.logger.debug(f"_train_step (double_dqn): next_q_values_target (target net for value) sample: {next_q_values_target[0] if next_q_values_target.size > 0 else 'empty'}")
+            if np.isnan(next_q_values_target).any(): self.logger.warning("_train_step (double_dqn): NaN in next_q_values_target (target)")
+            
             next_q_selected = next_q_values_target[np.arange(batch_size), next_actions]
         else:
             # Standard DQN
             next_q_values = self.predict(next_states, use_target_network=True)
+            self.logger.debug(f"_train_step (std_dqn): next_q_values (target net) sample: {next_q_values[0] if next_q_values.size > 0 else 'empty'}")
+            if np.isnan(next_q_values).any(): self.logger.warning("_train_step (std_dqn): NaN in next_q_values (target)")
             next_q_selected = np.max(next_q_values, axis=1)
         
+        self.logger.debug(f"_train_step: next_q_selected sample: {next_q_selected[:5]}")
+        if np.isnan(next_q_selected).any(): self.logger.warning("_train_step: NaN in next_q_selected")
+
         targets = rewards + gamma * next_q_selected * (1 - dones)
+        self.logger.debug(f"_train_step: targets sample: {targets[:5]}")
+        if np.isnan(targets).any(): self.logger.warning("_train_step: NaN in targets")
         
         # Compute current Q-values
         current_q_values = self.predict(states)
+        self.logger.debug(f"_train_step: current_q_values sample: {current_q_values[0] if current_q_values.size > 0 else 'empty'}")
+        if np.isnan(current_q_values).any(): self.logger.warning("_train_step: NaN in current_q_values")
+
         current_q_selected = current_q_values[np.arange(batch_size), actions]
+        self.logger.debug(f"_train_step: current_q_selected sample: {current_q_selected[:5]}")
+        if np.isnan(current_q_selected).any(): self.logger.warning("_train_step: NaN in current_q_selected")
         
         # Compute loss (simplified - in reality you'd use backpropagation)
         loss = np.mean((targets - current_q_selected) ** 2)
+        self.logger.debug(f"_train_step: Calculated loss: {loss}")
+        if np.isnan(loss): self.logger.error("_train_step: LOSS IS NAN!")
         
         # Simulate weight update (in reality, you'd use gradient descent)
         # This is a very simplified simulation
         error = targets - current_q_selected
+        self.logger.debug(f"_train_step: error sample: {error[:5]}")
+        if np.isnan(error).any(): self.logger.warning("_train_step: NaN in error term")
         
         # Ensure q_network and weights exist before updating
         if self.q_network is None or "weights" not in self.q_network:
