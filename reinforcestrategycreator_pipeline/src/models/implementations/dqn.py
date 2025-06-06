@@ -517,23 +517,46 @@ class DQN(ModelBase):
 
         current_weights = self.q_network["weights"]
         
-        # Assuming a 2-layer MLP (1 hidden layer + 1 output layer)
-        # Layer 1 (Hidden)
-        W0 = current_weights.get("W0")
-        b0 = current_weights.get("b0")
-        # Layer 2 (Output)
-        W_out = current_weights.get("W_out") # Corresponds to W1 in a 2-layer MLP context
-        b_out = current_weights.get("b_out") # Corresponds to b1
+        # Generalized check for all weight matrices
+        all_param_keys_for_check = []
+        for i in range(len(self.hidden_layers)):
+            all_param_keys_for_check.extend([f"W{i}", f"b{i}"])
+        all_param_keys_for_check.extend(["W_out", "b_out"])
 
-        if W0 is None or b0 is None or W_out is None or b_out is None:
-            self.logger.error(f"_train_step: One or more weight matrices are missing. W0: {W0 is not None}, b0: {b0 is not None}, W_out: {W_out is not None}, b_out: {b_out is not None}")
+        missing_keys = [key for key in all_param_keys_for_check if current_weights.get(key) is None]
+        if missing_keys:
+            self.logger.error(f"_train_step: One or more weight matrices are missing: {missing_keys}. Available keys: {list(current_weights.keys())}")
             return np.nan
 
-        Z0 = X_batch @ W0 + b0
-        A0 = np.maximum(0, Z0)  # ReLU activation
+        # Generalized forward pass for training (caching activations and pre-activations)
+        A_layers = {}  # Activations: A_layers[l_idx] = activation of layer l_idx
+        Z_layers = {}  # Pre-activations: Z_layers[l_idx] = pre-activation of layer l_idx
         
-        Z1 = A0 @ W_out + b_out # Q-values for all actions
-        current_q_values_all_actions = Z1
+        A_layers[-1] = X_batch # Input layer activation (index -1 for convenience)
+
+        # Hidden layers
+        current_A = X_batch
+        for l_idx in range(len(self.hidden_layers)):
+            Wl = current_weights[f"W{l_idx}"]
+            bl = current_weights[f"b{l_idx}"]
+            
+            Z_layers[l_idx] = current_A @ Wl + bl
+            # Consistent with backprop assumption of ReLU for hidden layers during training
+            current_A = np.maximum(0, Z_layers[l_idx])
+            A_layers[l_idx] = current_A
+            if np.isnan(Z_layers[l_idx]).any() or np.isnan(A_layers[l_idx]).any():
+                self.logger.warning(f"_train_step: NaN detected in hidden layer {l_idx}. Z: {np.isnan(Z_layers[l_idx]).any()}, A: {np.isnan(A_layers[l_idx]).any()}")
+                # return np.nan # Optional: return early if NaN
+
+        # Output layer
+        W_out = current_weights["W_out"]
+        b_out = current_weights["b_out"]
+        # The input to the output layer is the activation of the last hidden layer,
+        # or X_batch if there are no hidden layers.
+        input_to_output_layer = A_layers[len(self.hidden_layers) - 1] if self.hidden_layers else X_batch
+        
+        Z_layers["out"] = input_to_output_layer @ W_out + b_out
+        current_q_values_all_actions = Z_layers["out"] # Q-values are pre-activation of output
         
         current_q_selected_for_loss = current_q_values_all_actions[np.arange(batch_size), actions]
         
@@ -545,26 +568,45 @@ class DQN(ModelBase):
 
         # --- Backward pass ---
         grads = {}
-        
-        # Gradient of loss w.r.t. Z1 (output layer pre-activation)
-        dloss_dcurrent_q_selected = 2 * (current_q_selected_for_loss - targets) / batch_size
-        dloss_dZ1 = np.zeros_like(current_q_values_all_actions)
-        dloss_dZ1[np.arange(batch_size), actions] = dloss_dcurrent_q_selected
+        num_hidden_layers = len(self.hidden_layers)
+
+        # Gradient of loss w.r.t. Z_out (output layer pre-activation)
+        # dL/dQ_selected * dQ_selected/dZ_out (where dQ_selected/dZ_out is 1 for the selected action, 0 otherwise)
+        dloss_dZ_out = np.zeros_like(current_q_values_all_actions)
+        # The factor of 2 comes from (y-y_hat)^2, derivative is 2(y_hat-y).
+        # Division by batch_size for mean squared error.
+        dloss_dZ_out[np.arange(batch_size), actions] = 2 * (current_q_selected_for_loss - targets) / batch_size
         
         # Gradients for output layer (W_out, b_out)
-        grads["W_out"] = A0.T @ dloss_dZ1
-        grads["b_out"] = np.sum(dloss_dZ1, axis=0)
+        # Input to output layer was A_layers[num_hidden_layers - 1] or X_batch if no hidden layers
+        A_input_to_output = A_layers.get(num_hidden_layers - 1, X_batch) # Use X_batch if num_hidden_layers is 0
         
-        # Gradient of loss w.r.t. A0 (hidden layer activation)
-        dloss_dA0 = dloss_dZ1 @ W_out.T
+        grads["W_out"] = A_input_to_output.T @ dloss_dZ_out
+        grads["b_out"] = np.sum(dloss_dZ_out, axis=0)
         
-        # Gradient of loss w.r.t. Z0 (hidden layer pre-activation)
-        dRelu_dZ0 = (Z0 > 0) * 1.0  # Derivative of ReLU
-        dloss_dZ0 = dloss_dA0 * dRelu_dZ0
+        # Initialize dloss_dA_prev for backpropagation through hidden layers
+        # This is dL/dA_last_hidden_layer
+        dloss_dA_prev = dloss_dZ_out @ current_weights["W_out"].T
         
-        # Gradients for hidden layer (W0, b0)
-        grads["W0"] = X_batch.T @ dloss_dZ0
-        grads["b0"] = np.sum(dloss_dZ0, axis=0)
+        # Loop backward through hidden layers
+        for l_idx in range(num_hidden_layers - 1, -1, -1):
+            # Gradient of loss w.r.t. Zl (hidden layer l_idx pre-activation)
+            # dL/dZl = dL/dAl * dAl/dZl
+            # dAl/dZl is derivative of ReLU: 1 if Zl > 0, else 0
+            dRelu_dZl = (Z_layers[l_idx] > 0) * 1.0
+            dloss_dZl = dloss_dA_prev * dRelu_dZl
+            
+            # Gradients for hidden layer l_idx (Wl, bl)
+            # Input to this layer was A_layers[l_idx - 1] (or X_batch if l_idx is 0)
+            A_input_to_current_hidden = A_layers.get(l_idx - 1, X_batch) # Use X_batch if l_idx-1 is -1
+            
+            grads[f"W{l_idx}"] = A_input_to_current_hidden.T @ dloss_dZl
+            grads[f"b{l_idx}"] = np.sum(dloss_dZl, axis=0)
+            
+            # Update dloss_dA_prev for the next iteration (i.e., for layer l_idx-1)
+            # This is dL/dA_{l_idx-1} = dL/dZl * dZl/dA_{l_idx-1} = dL/dZl * Wl.T
+            if l_idx > 0: # No need to compute for A_input (A_layers[-1])
+                dloss_dA_prev = dloss_dZl @ current_weights[f"W{l_idx}"].T
 
         # Log gradient norms (optional, for debugging)
         # self.logger.debug(f"Grad norms: W0={np.linalg.norm(grads['W0']):.2e}, b0={np.linalg.norm(grads['b0']):.2e}, W_out={np.linalg.norm(grads['W_out']):.2e}, b_out={np.linalg.norm(grads['b_out']):.2e}")
@@ -578,7 +620,12 @@ class DQN(ModelBase):
         opt_state["t"] += 1
         t = opt_state["t"]
         
-        for param_key in ["W0", "b0", "W_out", "b_out"]:
+        param_keys_for_adam = []
+        for i in range(len(self.hidden_layers)):
+            param_keys_for_adam.extend([f"W{i}", f"b{i}"])
+        param_keys_for_adam.extend(["W_out", "b_out"])
+
+        for param_key in param_keys_for_adam:
             if param_key not in grads:
                 self.logger.warning(f"_train_step: Gradient for {param_key} not found. Skipping update for this param.")
                 continue
