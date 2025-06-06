@@ -77,13 +77,19 @@ class DQN(ModelBase):
         super().__init__(config)
         
         # Extract hyperparameters
-        self.hidden_layers = self.hyperparameters.get("hidden_layers", [256, 128, 64])
+        self.hidden_layers = self.hyperparameters.get("hidden_layers", [256, 128, 64]) # Default from task description implies 2-layer, but code default is 3
         self.activation = self.hyperparameters.get("activation", "relu")
         self.dropout_rate = self.hyperparameters.get("dropout_rate", 0.2)
         self.double_dqn = self.hyperparameters.get("double_dqn", True)
         self.dueling_dqn = self.hyperparameters.get("dueling_dqn", False)
         self.prioritized_replay = self.hyperparameters.get("prioritized_replay", True)
         
+        # Learning and Optimizer settings
+        self.learning_rate = self.hyperparameters.get("learning_rate", 0.001)
+        self.beta1 = self.hyperparameters.get("adam_beta1", 0.9)
+        self.beta2 = self.hyperparameters.get("adam_beta2", 0.999)
+        self.epsilon = self.hyperparameters.get("adam_epsilon", 1e-8)
+
         # Memory settings
         self.memory_size = self.hyperparameters.get("memory_size", 10000)
         self.update_frequency = self.hyperparameters.get("update_frequency", 4)
@@ -93,7 +99,7 @@ class DQN(ModelBase):
         self.replay_buffer = ReplayBuffer(self.memory_size)
         self.q_network = None
         self.target_network = None
-        self.optimizer = None
+        self.optimizer = None # This might be redundant with optimizer_state
         self.steps = 0
         self.episodes = 0
         
@@ -130,20 +136,29 @@ class DQN(ModelBase):
             output_shape: Shape of action output
         """
         # Initialize Q-network
+        q_network_weights = self._initialize_weights(input_shape, output_shape)
+        optimizer_m_state = {key: np.zeros_like(val) for key, val in q_network_weights.items()}
+        optimizer_v_state = {key: np.zeros_like(val) for key, val in q_network_weights.items()}
+        
         self.q_network = {
-            "weights": self._initialize_weights(input_shape, output_shape),
+            "weights": q_network_weights,
             "input_shape": input_shape,
-            "output_shape": output_shape
+            "output_shape": output_shape,
+            "optimizer_state": {
+                "t": 0, # Adam timestep
+                "m": optimizer_m_state,
+                "v": optimizer_v_state
+            }
         }
         
-        # Initialize target network
+        # Initialize target network (does not need optimizer state)
         self.target_network = {
-            "weights": self._initialize_weights(input_shape, output_shape),
+            "weights": self._initialize_weights(input_shape, output_shape), # Fresh set of weights
             "input_shape": input_shape,
             "output_shape": output_shape
         }
     
-    def _initialize_weights(self, input_shape: Tuple[int, ...], 
+    def _initialize_weights(self, input_shape: Tuple[int, ...],
                           output_shape: Tuple[int, ...]) -> Dict[str, np.ndarray]:
         """Initialize network weights.
         
@@ -432,7 +447,7 @@ class DQN(ModelBase):
                 episode_length += 1
                 
                 if len(self.replay_buffer) >= batch_size and self.steps % self.update_frequency == 0:
-                    loss = self._train_step(batch_size, gamma, learning_rate)
+                    loss = self._train_step(batch_size, gamma) # learning_rate removed
                     losses.append(loss)
                 
                 if self.steps % self.target_update_frequency == 0:
@@ -466,129 +481,137 @@ class DQN(ModelBase):
         
         return self.training_history
 
-    def _train_step(self, batch_size: int, gamma: float,
-                    learning_rate: float) -> float:
-        """Perform one training step.
+    def _train_step(self, batch_size: int, gamma: float) -> float:
+        """Perform one training step with backpropagation and Adam optimizer.
         
         Args:
             batch_size: Batch size for training
             gamma: Discount factor
-            learning_rate: Learning rate
             
         Returns:
             Training loss
         """
         # Sample batch from replay buffer
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
-        self.logger.debug(f"_train_step: Sampled states shape: {states.shape}")
-        self.logger.debug(f"_train_step: Sampled actions: {actions[:5]}") # Log first 5
-        self.logger.debug(f"_train_step: Sampled rewards: {rewards[:5]}")
-        self.logger.debug(f"_train_step: Sampled next_states shape: {next_states.shape}")
-        self.logger.debug(f"_train_step: Sampled dones: {dones[:5]}")
-
-        # Compute target Q-values
+        
+        # Compute target Q-values (using Double DQN logic if enabled)
         if self.double_dqn:
-            # Double DQN: use online network to select actions, target network for values
-            next_q_values = self.predict(next_states)
-            self.logger.debug(f"_train_step (double_dqn): next_q_values (online net for action selection) sample: {next_q_values[0] if next_q_values.size > 0 else 'empty'}")
-            if np.isnan(next_q_values).any(): self.logger.warning("_train_step (double_dqn): NaN in next_q_values (online)")
-
-            next_actions = np.argmax(next_q_values, axis=1)
-            self.logger.debug(f"_train_step (double_dqn): next_actions sample: {next_actions[:5]}")
-
-            next_q_values_target = self.predict(next_states, use_target_network=True)
-            self.logger.debug(f"_train_step (double_dqn): next_q_values_target (target net for value) sample: {next_q_values_target[0] if next_q_values_target.size > 0 else 'empty'}")
-            if np.isnan(next_q_values_target).any(): self.logger.warning("_train_step (double_dqn): NaN in next_q_values_target (target)")
-            
+            next_q_values_online = self.predict(next_states) # Q(s', a; theta)
+            next_actions = np.argmax(next_q_values_online, axis=1)
+            next_q_values_target = self.predict(next_states, use_target_network=True) # Q(s', a; theta_target)
             next_q_selected = next_q_values_target[np.arange(batch_size), next_actions]
         else:
-            # Standard DQN
-            next_q_values = self.predict(next_states, use_target_network=True)
-            self.logger.debug(f"_train_step (std_dqn): next_q_values (target net) sample: {next_q_values[0] if next_q_values.size > 0 else 'empty'}")
-            if np.isnan(next_q_values).any(): self.logger.warning("_train_step (std_dqn): NaN in next_q_values (target)")
-            next_q_selected = np.max(next_q_values, axis=1)
+            next_q_values_target = self.predict(next_states, use_target_network=True)
+            next_q_selected = np.max(next_q_values_target, axis=1)
         
-        self.logger.debug(f"_train_step: next_q_selected sample: {next_q_selected[:5]}")
-        if np.isnan(next_q_selected).any(): self.logger.warning("_train_step: NaN in next_q_selected")
-
         targets = rewards + gamma * next_q_selected * (1 - dones)
-        self.logger.debug(f"_train_step: targets sample: {targets[:5]}")
-        if np.isnan(targets).any(): self.logger.warning("_train_step: NaN in targets")
-        
-        # Compute current Q-values
-        current_q_values = self.predict(states)
-        self.logger.debug(f"_train_step: current_q_values sample: {current_q_values[0] if current_q_values.size > 0 else 'empty'}")
-        if np.isnan(current_q_values).any(): self.logger.warning("_train_step: NaN in current_q_values")
 
-        current_q_selected = current_q_values[np.arange(batch_size), actions]
-        self.logger.debug(f"_train_step: current_q_selected sample: {current_q_selected[:5]}")
-        if np.isnan(current_q_selected).any(): self.logger.warning("_train_step: NaN in current_q_selected")
+        # --- Forward pass for current states to get activations and Q-values for selected actions ---
+        # Assuming states is (batch_size, num_features)
+        X_batch = states
         
-        # Compute loss (simplified - in reality you'd use backpropagation)
-        loss = np.mean((targets - current_q_selected) ** 2)
-        self.logger.debug(f"_train_step: Calculated loss: {loss}")
-        if np.isnan(loss): self.logger.error("_train_step: LOSS IS NAN!")
+        # Ensure q_network and weights are available
+        if self.q_network is None or "weights" not in self.q_network:
+            self.logger.error("_train_step: Q-network or its weights are not initialized. Cannot proceed.")
+            return np.nan # Or raise an error
+
+        current_weights = self.q_network["weights"]
         
-        # Robust placeholder gradient update
+        # Assuming a 2-layer MLP (1 hidden layer + 1 output layer)
+        # Layer 1 (Hidden)
+        W0 = current_weights.get("W0")
+        b0 = current_weights.get("b0")
+        # Layer 2 (Output)
+        W_out = current_weights.get("W_out") # Corresponds to W1 in a 2-layer MLP context
+        b_out = current_weights.get("b_out") # Corresponds to b1
+
+        if W0 is None or b0 is None or W_out is None or b_out is None:
+            self.logger.error(f"_train_step: One or more weight matrices are missing. W0: {W0 is not None}, b0: {b0 is not None}, W_out: {W_out is not None}, b_out: {b_out is not None}")
+            return np.nan
+
+        Z0 = X_batch @ W0 + b0
+        A0 = np.maximum(0, Z0)  # ReLU activation
+        
+        Z1 = A0 @ W_out + b_out # Q-values for all actions
+        current_q_values_all_actions = Z1
+        
+        current_q_selected_for_loss = current_q_values_all_actions[np.arange(batch_size), actions]
+        
+        # Compute loss
+        loss = np.mean((targets - current_q_selected_for_loss) ** 2)
         if np.isnan(loss) or np.isinf(loss):
-            self.logger.error(f"_train_step: Loss is NaN or Inf ({loss}). Skipping weight update.")
-        else:
-            td_error_batch = targets - current_q_selected # Shape: (batch_size,)
-            self.logger.debug(f"_train_step: td_error_batch (targets - current_q_selected) shape: {td_error_batch.shape}, sample: {td_error_batch[:5] if td_error_batch.size > 0 else 'empty'}")
+            self.logger.error(f"_train_step: Loss is NaN or Inf ({loss}) before updates. Targets: {targets[:3]}, Q_selected: {current_q_selected_for_loss[:3]}")
+            return float(loss) # Return early if loss is invalid
 
-            if np.isnan(td_error_batch).any() or np.isinf(td_error_batch).any():
-                self.logger.error(f"_train_step: NaN/Inf in td_error_batch. Skipping weight update. Sample: {td_error_batch[:5] if td_error_batch.size > 0 else 'empty'}")
-            else:
-                # Clip TD errors to prevent extreme values from td_error_batch
-                clipped_td_error_batch = np.clip(td_error_batch, -1.0, 1.0)
-                self.logger.debug(f"_train_step: clipped_td_error_batch sample: {clipped_td_error_batch[:5] if clipped_td_error_batch.size > 0 else 'empty'}")
-                
-                mean_clipped_td_error = np.mean(clipped_td_error_batch)
-                self.logger.debug(f"_train_step: mean_clipped_td_error: {mean_clipped_td_error}")
-
-                if np.isnan(mean_clipped_td_error) or np.isinf(mean_clipped_td_error):
-                    self.logger.error(f"_train_step: mean_clipped_td_error is NaN or Inf ({mean_clipped_td_error}). Skipping weight update.")
-                else:
-                    # Define a maximum absolute value for the adjustment scalar to prevent explosion
-                    # This is a heuristic for the placeholder update.
-                    max_abs_adjustment_val = 0.01 # Smaller max adjustment
-                    
-                    # Calculate the adjustment scalar
-                    adjustment_scalar = learning_rate * mean_clipped_td_error
-                    
-                    # Clip the final adjustment scalar
-                    adjustment_scalar_clipped = np.clip(adjustment_scalar, -max_abs_adjustment_val, max_abs_adjustment_val)
-                    
-                    self.logger.debug(f"_train_step: Initial adjustment_scalar: {adjustment_scalar}, Clipped to: {adjustment_scalar_clipped} (lr: {learning_rate}, mean_clipped_td_error: {mean_clipped_td_error})")
-
-                    if np.isnan(adjustment_scalar_clipped) or np.isinf(adjustment_scalar_clipped):
-                         self.logger.error(f"_train_step: adjustment_scalar_clipped is NaN/Inf ({adjustment_scalar_clipped}). Skipping weight update.")
-                    else:
-                        if self.q_network is None or "weights" not in self.q_network:
-                            self.logger.error("_train_step: Q-network or weights not found during update. Skipping.")
-                        else:
-                            for key in self.q_network["weights"]:
-                                if key not in self.q_network["weights"]: # Should not happen if iterating keys from it
-                                    self.logger.warning(f"_train_step: Weight key {key} disappeared during update. Skipping.")
-                                    continue
-
-                                weights_before_update = self.q_network["weights"][key].copy() # For potential revert
-                                noise = np.random.randn(*self.q_network["weights"][key].shape)
-                                update_delta = noise * adjustment_scalar_clipped # Use the final clipped scalar
-                                
-                                if np.isnan(update_delta).any() or np.isinf(update_delta).any():
-                                    self.logger.error(f"_train_step: update_delta for weights[{key}] is NaN/Inf. Adjustment_scalar_clipped: {adjustment_scalar_clipped}. Noise sample: {noise.flatten()[:2]}. Skipping update for this weight matrix.")
-                                    continue
-
-                                self.q_network["weights"][key] += update_delta
-                                
-                                if np.isnan(self.q_network["weights"][key]).any():
-                                    self.logger.critical(f"_train_step: CRITICAL - Weights[{key}] became NaN AFTER update. Reverting update for this matrix. Adjustment_scalar_clipped: {adjustment_scalar_clipped}, Update_delta sample: {update_delta.flatten()[:2]}.")
-                                    self.q_network["weights"][key] = weights_before_update # Revert
-                                elif np.isinf(self.q_network["weights"][key]).any():
-                                    self.logger.critical(f"_train_step: CRITICAL - Weights[{key}] became Inf AFTER update. Reverting update for this matrix. Adjustment_scalar_clipped: {adjustment_scalar_clipped}, Update_delta sample: {update_delta.flatten()[:2]}.")
-                                    self.q_network["weights"][key] = weights_before_update # Revert
+        # --- Backward pass ---
+        grads = {}
         
+        # Gradient of loss w.r.t. Z1 (output layer pre-activation)
+        dloss_dcurrent_q_selected = 2 * (current_q_selected_for_loss - targets) / batch_size
+        dloss_dZ1 = np.zeros_like(current_q_values_all_actions)
+        dloss_dZ1[np.arange(batch_size), actions] = dloss_dcurrent_q_selected
+        
+        # Gradients for output layer (W_out, b_out)
+        grads["W_out"] = A0.T @ dloss_dZ1
+        grads["b_out"] = np.sum(dloss_dZ1, axis=0)
+        
+        # Gradient of loss w.r.t. A0 (hidden layer activation)
+        dloss_dA0 = dloss_dZ1 @ W_out.T
+        
+        # Gradient of loss w.r.t. Z0 (hidden layer pre-activation)
+        dRelu_dZ0 = (Z0 > 0) * 1.0  # Derivative of ReLU
+        dloss_dZ0 = dloss_dA0 * dRelu_dZ0
+        
+        # Gradients for hidden layer (W0, b0)
+        grads["W0"] = X_batch.T @ dloss_dZ0
+        grads["b0"] = np.sum(dloss_dZ0, axis=0)
+
+        # Log gradient norms (optional, for debugging)
+        # self.logger.debug(f"Grad norms: W0={np.linalg.norm(grads['W0']):.2e}, b0={np.linalg.norm(grads['b0']):.2e}, W_out={np.linalg.norm(grads['W_out']):.2e}, b_out={np.linalg.norm(grads['b_out']):.2e}")
+
+        # --- Adam Optimizer Update ---
+        if "optimizer_state" not in self.q_network:
+            self.logger.error("_train_step: Optimizer state not found in q_network. Cannot apply Adam.")
+            return float(loss) # Or re-initialize optimizer state here if appropriate
+
+        opt_state = self.q_network["optimizer_state"]
+        opt_state["t"] += 1
+        t = opt_state["t"]
+        
+        for param_key in ["W0", "b0", "W_out", "b_out"]:
+            if param_key not in grads:
+                self.logger.warning(f"_train_step: Gradient for {param_key} not found. Skipping update for this param.")
+                continue
+            
+            grad_p = grads[param_key]
+            
+            # Ensure optimizer state m and v exist for this param_key
+            if param_key not in opt_state["m"] or param_key not in opt_state["v"]:
+                 self.logger.error(f"_train_step: Optimizer state m or v missing for {param_key}. Re-initializing for this param.")
+                 opt_state["m"][param_key] = np.zeros_like(grad_p)
+                 opt_state["v"][param_key] = np.zeros_like(grad_p)
+
+            opt_state["m"][param_key] = self.beta1 * opt_state["m"][param_key] + (1 - self.beta1) * grad_p
+            opt_state["v"][param_key] = self.beta2 * opt_state["v"][param_key] + (1 - self.beta2) * (grad_p ** 2)
+            
+            m_hat = opt_state["m"][param_key] / (1 - self.beta1 ** t)
+            v_hat = opt_state["v"][param_key] / (1 - self.beta2 ** t)
+            
+            weight_update = self.learning_rate * m_hat / (np.sqrt(v_hat) + self.epsilon)
+            
+            # Sanity check for NaN/Inf in weight_update
+            if np.isnan(weight_update).any() or np.isinf(weight_update).any():
+                self.logger.error(f"_train_step: NaN/Inf in weight_update for {param_key}. Skipping update for this param. m_hat_sample: {m_hat.flatten()[:2]}, v_hat_sample: {v_hat.flatten()[:2]}")
+                continue
+
+            current_weights[param_key] -= weight_update
+
+            # Sanity check for NaN/Inf in weights after update
+            if np.isnan(current_weights[param_key]).any() or np.isinf(current_weights[param_key]).any():
+                self.logger.critical(f"_train_step: CRITICAL - Weights[{param_key}] became NaN/Inf AFTER Adam update. This should not happen with proper Adam. Investigate. Update was: {weight_update.flatten()[:2]}")
+                # Potentially revert or handle, but for now, just log critically.
+        
+        self.logger.debug(f"_train_step: Adam update applied. Loss: {loss:.4f}")
         return float(loss)
     
     def evaluate(self, test_data: Any, **kwargs) -> Dict[str, float]:
