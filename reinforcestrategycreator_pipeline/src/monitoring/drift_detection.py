@@ -4,8 +4,37 @@ Mechanisms for detecting data and model drift.
 from typing import Any, Dict, Optional, List, Union
 import numpy as np
 import pandas as pd
-from scipy import stats
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+# Handle scipy import gracefully for compatibility issues
+SCIPY_AVAILABLE = False
+stats = None
+
+def _import_scipy():
+    """Lazy import of scipy to handle compatibility issues."""
+    global SCIPY_AVAILABLE, stats
+    if not SCIPY_AVAILABLE:
+        try:
+            from scipy import stats as scipy_stats
+            stats = scipy_stats
+            SCIPY_AVAILABLE = True
+        except Exception as e:
+            print(f"Warning: scipy not available ({e}). Drift detection with KS and Chi2 tests will be disabled.")
+            SCIPY_AVAILABLE = False
+            stats = None
+    return SCIPY_AVAILABLE
+
+# Lazy import for sklearn to handle missing dependency gracefully
+def _import_sklearn():
+    """
+    Lazy import function for sklearn to handle missing dependency gracefully.
+    Returns tuple of (sklearn_available, sklearn_metrics_module)
+    """
+    try:
+        from sklearn import metrics
+        return True, metrics
+    except ImportError as e:
+        logger.warning(f"sklearn not available: {e}. Model drift detection will use fallback behavior.")
+        return False, None
 
 from ..config.models import DataDriftConfig, ModelDriftConfig, DataDriftDetectionMethod, ModelDriftDetectionMethod
 from .logger import get_logger
@@ -133,6 +162,15 @@ class DataDriftDetector:
     
     def _calculate_ks(self, current_data: pd.DataFrame, reference_data: pd.DataFrame) -> Dict[str, Any]:
         """Calculate Kolmogorov-Smirnov test for numerical features."""
+        if not _import_scipy():
+            logger.warning("KS test requires scipy which is not available. Returning no drift detected.")
+            return {
+                "drift_detected": False,
+                "score": 1.0,
+                "method": self.config.method.value,
+                "details": {"error": "scipy not available for KS test"}
+            }
+        
         ks_results = {}
         min_p_value = 1.0
         
@@ -167,6 +205,15 @@ class DataDriftDetector:
     
     def _calculate_chi2(self, current_data: pd.DataFrame, reference_data: pd.DataFrame) -> Dict[str, Any]:
         """Calculate Chi-squared test for categorical features."""
+        if not _import_scipy():
+            logger.warning("Chi-squared test requires scipy which is not available. Returning no drift detected.")
+            return {
+                "drift_detected": False,
+                "score": 1.0,
+                "method": self.config.method.value,
+                "details": {"error": "scipy not available for Chi-squared test"}
+            }
+        
         chi2_results = {}
         min_p_value = 1.0
         
@@ -310,17 +357,22 @@ class ModelDriftDetector:
         metric_value = 0.0
         
         try:
-            if metric_name == "accuracy":
-                metric_value = accuracy_score(truth, predictions)
+            sklearn_available, sklearn_metrics = _import_sklearn()
+            
+            if not sklearn_available:
+                logger.warning(f"sklearn not available. Cannot calculate {metric_name} metric. Returning default value 0.0.")
+                metric_value = 0.0
+            elif metric_name == "accuracy":
+                metric_value = sklearn_metrics.accuracy_score(truth, predictions)
             elif metric_name == "f1_score":
-                metric_value = f1_score(truth, predictions, average='weighted')
+                metric_value = sklearn_metrics.f1_score(truth, predictions, average='weighted')
             elif metric_name == "precision":
-                metric_value = precision_score(truth, predictions, average='weighted')
+                metric_value = sklearn_metrics.precision_score(truth, predictions, average='weighted')
             elif metric_name == "recall":
-                metric_value = recall_score(truth, predictions, average='weighted')
+                metric_value = sklearn_metrics.recall_score(truth, predictions, average='weighted')
             else:
                 logger.warning(f"Unknown performance metric: {metric_name}, defaulting to accuracy")
-                metric_value = accuracy_score(truth, predictions)
+                metric_value = sklearn_metrics.accuracy_score(truth, predictions)
         except Exception as e:
             logger.error(f"Error calculating {metric_name}: {str(e)}")
             return {

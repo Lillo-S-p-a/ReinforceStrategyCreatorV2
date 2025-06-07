@@ -40,3 +40,5 @@ tags = [
         *   `FileNotFoundError` in `ModelCheckpointCallback` when saving state.
         *   `ModelPipelineError` in `tests/unit/test_pipeline/test_orchestrator.py` due to issues loading pipeline definitions/stages.
     *   Plan is to address these systematically, starting with `MockModel` `TypeError`.
+- 2025-06-06T19:13:19Z - `util-senior-dev` (TASK-SRDEV-DQNOPT-20250606-191500): Implemented Adam optimizer and backpropagation in `_train_step` of `dqn.py`. Updated `__init__` and `_initialize_networks` to support Adam state. Updated MDTM checklist.
+- 2025-06-06 19:59:02: `util-senior-dev` (Task `BUG-DQNOPT-SHAPEMISMATCH-20250606-192500`): Executed `python3 reinforcestrategycreator_pipeline/run_main_pipeline.py` to test DQN multi-layer backpropagation fix. Pipeline completed successfully (exit code 0), indicating the shape mismatch error is resolved. Training proceeded for multiple episodes.

@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Optional, Type
 from enum import Enum
-from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
+from ..pipeline.logger import get_pipeline_logger
 import importlib
 import inspect
 from pathlib import Path
@@ -23,7 +23,7 @@ class ModelFactory:
         """Initialize the model factory."""
         self._registry: Dict[str, Type[ModelBase]] = {}
         # Get a logger instance for ModelFactory
-        self.logger = get_logger(self.__class__.__name__)
+        self.logger = get_pipeline_logger(self.__class__.__name__)
         self._register_builtin_models()
     
     def _register_builtin_models(self) -> None:
@@ -48,8 +48,8 @@ class ModelFactory:
             module_name = f".implementations.{model_file.stem}"
             self.logger.debug(f"Attempting to import module: {module_name} with package reinforcestrategycreator_pipeline.src.models")
             try:
-                # Ensure the package name matches the actual top-level package visible in sys.path
-                module = importlib.import_module(module_name, package="reinforcestrategycreator_pipeline.src.models")
+                # Import the model implementation module using relative import
+                module = importlib.import_module(f".implementations.{model_file.stem}", package=__name__.rsplit('.', 1)[0])
                 self.logger.debug(f"Successfully imported module: {module_name}")
                 
                 found_classes_in_module = False

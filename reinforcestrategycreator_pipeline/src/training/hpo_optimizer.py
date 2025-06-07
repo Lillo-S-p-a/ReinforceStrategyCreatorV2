@@ -161,6 +161,13 @@ class HPOptimizer:
         """
         def trainable(config: Dict[str, Any]):
             """Trainable function that Ray Tune will call."""
+            # CRITICAL: Ensure ModelFactory is properly initialized in Ray worker
+            # Each Ray worker process needs to have models registered independently
+            from ..models.factory import get_factory
+            worker_factory = get_factory()
+            # Force re-registration of built-in models in this worker process
+            worker_factory._register_builtin_models()
+            
             # Create a copy of the model config
             model_config = model_config_template.copy()
             
