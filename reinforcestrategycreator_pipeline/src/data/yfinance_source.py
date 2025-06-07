@@ -1,7 +1,8 @@
 """Data source for fetching data from Yahoo Finance using yfinance library."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union # Added Union
+from typing import Any, Dict, List, Optional, Union
+import time
 import pandas as pd
 import yfinance as yf
 from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
@@ -113,9 +114,21 @@ class YFinanceDataSource(DataSource):
             )
 
             if data.empty:
-                self.logger.warning(f"No data returned for tickers: {tickers_to_load} with given parameters.")
-                self.update_lineage("load_data_empty", {"tickers": tickers_to_load, "params_used": self.config})
-                return pd.DataFrame()
+                error_msg = (
+                    f"No data returned for tickers: {tickers_to_load}. "
+                    f"This could be due to: (1) Invalid ticker symbols, "
+                    f"(2) No data available for the specified date range, "
+                    f"(3) Market holidays/weekends, or (4) Yahoo Finance API issues. "
+                    f"Parameters used: period={period_to_load}, interval={interval_to_load}, "
+                    f"start={start_date_to_load}, end={end_date_to_load}"
+                )
+                self.logger.error(error_msg)
+                self.update_lineage("load_data_empty", {
+                    "tickers": tickers_to_load,
+                    "params_used": self.config,
+                    "error_details": error_msg
+                })
+                raise ValueError(f"YFinanceDataSource failed to load data: {error_msg}")
 
             # If multiple tickers, yfinance returns a MultiIndex for columns.
             # If single ticker (even as a list of one), it might return flat or MultiIndex.
@@ -138,9 +151,24 @@ class YFinanceDataSource(DataSource):
             })
             return data
         except Exception as e:
-            self.logger.error(f"Error loading data for {ticker_str_log} from Yahoo Finance: {e}", exc_info=True)
-            self.update_lineage("load_data_error", {"tickers": tickers_to_load, "error": str(e)})
-            raise
+            if "No data returned" in str(e):
+                # Re-raise our custom ValueError with detailed context
+                raise
+            else:
+                # Handle other exceptions (network issues, API errors, etc.)
+                enhanced_error_msg = (
+                    f"Error loading data for {ticker_str_log} from Yahoo Finance: {e}. "
+                    f"This could be due to network connectivity issues, Yahoo Finance API problems, "
+                    f"or invalid parameters. Please check your internet connection and verify "
+                    f"the ticker symbols and date ranges."
+                )
+                self.logger.error(enhanced_error_msg, exc_info=True)
+                self.update_lineage("load_data_error", {
+                    "tickers": tickers_to_load,
+                    "error": str(e),
+                    "enhanced_error": enhanced_error_msg
+                })
+                raise ValueError(f"YFinanceDataSource failed to load data: {enhanced_error_msg}") from e
 
     def get_schema(self) -> Dict[str, str]:
         """
