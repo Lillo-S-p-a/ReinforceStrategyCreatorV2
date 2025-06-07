@@ -17,6 +17,9 @@ current_pythonpath = os.environ.get('PYTHONPATH', '')
 new_pythonpath = f"{project_root}:{current_pythonpath}" if current_pythonpath else str(project_root)
 os.environ['PYTHONPATH'] = new_pythonpath
 
+# Import ray early to configure runtime environment for workers
+import ray
+
 from src.training import TrainingEngine, HPOptimizer
 from src.models.factory import ModelFactory
 from src.models.registry import ModelRegistry # Not strictly needed for this script if not registering final model

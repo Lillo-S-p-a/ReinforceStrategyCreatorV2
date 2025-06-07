@@ -136,13 +136,13 @@ class YFinanceDataSource(DataSource):
             if isinstance(tickers_to_load, str) or (isinstance(tickers_to_load, list) and len(tickers_to_load) == 1):
                 if isinstance(data.columns, pd.MultiIndex):
                     # If it's a single ticker but columns are MultiIndex, flatten them.
-                    # e.g. ('Open', 'SPY') -> 'Open'
-                    # The ticker name is usually the first element in the list/string.
+                    # e.g. ('Close', 'SPY') -> 'Close'
+                    # The ticker name is usually the second level in yfinance MultiIndex columns
                     actual_ticker_name = tickers_to_load if isinstance(tickers_to_load, str) else tickers_to_load[0]
-                    if actual_ticker_name in data.columns.get_level_values(0): # Check if ticker is the first level
-                         data = data.xs(actual_ticker_name, level=0, axis=1)
-                    elif actual_ticker_name in data.columns.get_level_values(1): # Check if ticker is the second level
+                    if actual_ticker_name in data.columns.get_level_values(1): # Check if ticker is the second level (most common)
                          data = data.xs(actual_ticker_name, level=1, axis=1)
+                    elif actual_ticker_name in data.columns.get_level_values(0): # Check if ticker is the first level (fallback)
+                         data = data.xs(actual_ticker_name, level=0, axis=1)
 
 
             self.logger.info(f"Successfully loaded data for {ticker_str_log}. Shape: {data.shape}")
@@ -202,10 +202,10 @@ class YFinanceDataSource(DataSource):
             
             if isinstance(df_sample.columns, pd.MultiIndex):
                  # If single ticker sample resulted in MultiIndex, flatten it
-                if sample_tickers_for_schema in df_sample.columns.get_level_values(0):
-                    df_sample = df_sample.xs(sample_tickers_for_schema, level=0, axis=1)
-                elif sample_tickers_for_schema in df_sample.columns.get_level_values(1):
+                if sample_tickers_for_schema in df_sample.columns.get_level_values(1):
                      df_sample = df_sample.xs(sample_tickers_for_schema, level=1, axis=1)
+                elif sample_tickers_for_schema in df_sample.columns.get_level_values(0):
+                    df_sample = df_sample.xs(sample_tickers_for_schema, level=0, axis=1)
 
 
             schema = {}

@@ -168,6 +168,35 @@ class HPOptimizer:
             # Force re-registration of built-in models in this worker process
             worker_factory._register_builtin_models()
             
+            # CRITICAL: Ensure TrainingEngine has a DataManager in Ray worker
+            # Each Ray worker process needs its own DataManager instance
+            from ..data.manager import DataManager
+            from ..config.manager import ConfigManager
+            from ..artifact_store.local_adapter import LocalFileSystemStore
+            from .engine import TrainingEngine
+            
+            # Create minimal dependencies for DataManager in Ray worker
+            # Use a simple in-memory config manager for the worker
+            worker_config_manager = ConfigManager()
+            # CRITICAL: Load configuration in Ray worker process
+            # Use absolute path to avoid working directory issues in Ray workers
+            import os
+            # Get the project root directory (where the script is run from)
+            # Navigate up from src/training/hpo_optimizer.py to project root (3 levels up)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            config_path = os.path.join(project_root, "configs", "base", "pipeline.yaml")
+            worker_config_manager.load_config(config_path)
+            worker_artifact_store = LocalFileSystemStore("./hpo_artifacts")
+            
+            # Create a new DataManager with proper dependencies
+            worker_data_manager = DataManager(
+                config_manager=worker_config_manager,
+                artifact_store=worker_artifact_store
+            )
+            
+            # Create a new TrainingEngine with DataManager for this worker
+            worker_training_engine = TrainingEngine(data_manager=worker_data_manager)
+            
             # Create a copy of the model config
             model_config = model_config_template.copy()
             
@@ -183,8 +212,8 @@ class HPOptimizer:
                     model_config["hyperparameters"] = {}
                 model_config["hyperparameters"].update(config)
             
-            # Train the model
-            result = self.training_engine.train(
+            # Train the model using the worker's TrainingEngine with DataManager
+            result = worker_training_engine.train(
                 model_config=model_config,
                 data_config=data_config,
                 training_config=training_config,

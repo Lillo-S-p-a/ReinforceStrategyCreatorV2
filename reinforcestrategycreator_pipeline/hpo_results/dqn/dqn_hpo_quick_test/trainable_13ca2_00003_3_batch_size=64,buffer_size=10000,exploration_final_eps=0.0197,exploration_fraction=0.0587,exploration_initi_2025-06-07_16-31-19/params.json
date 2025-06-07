@@ -1,0 +1,14 @@
+{
+  "batch_size": 64,
+  "buffer_size": 10000,
+  "exploration_final_eps": 0.019746916502084225,
+  "exploration_fraction": 0.05869028841681421,
+  "exploration_initial_eps": 0.5620985331869933,
+  "gamma": 0.9291021702622548,
+  "gradient_steps": 4,
+  "learning_rate": 1.0086556261565376e-05,
+  "learning_starts": 1000,
+  "target_update_interval": 5000,
+  "tau": 0.07469546700909167,
+  "train_freq": 16
+}

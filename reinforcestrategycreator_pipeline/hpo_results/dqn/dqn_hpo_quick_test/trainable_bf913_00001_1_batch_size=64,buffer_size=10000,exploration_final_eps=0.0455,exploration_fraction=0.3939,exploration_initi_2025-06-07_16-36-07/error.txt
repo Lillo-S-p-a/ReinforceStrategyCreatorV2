@@ -1,0 +1,27 @@
+Failure # 1 (occurred at 2025-06-07_16-36-09)
+[36mray::ImplicitFunc.train()[39m (pid=3762179, ip=37.27.65.57, actor_id=01cb5ba6d724c6347613678301000000, repr=trainable)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/.venv/lib/python3.12/site-packages/ray/tune/trainable/trainable.py", line 330, in train
+    raise skipped from exception_cause(skipped)
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/.venv/lib/python3.12/site-packages/ray/air/_internal/util.py", line 107, in run
+    self._ret = self._target(*self._args, **self._kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/.venv/lib/python3.12/site-packages/ray/tune/trainable/function_trainable.py", line 45, in <lambda>
+    training_func=lambda: self._trainable_func(self.config),
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/.venv/lib/python3.12/site-packages/ray/tune/trainable/function_trainable.py", line 261, in _trainable_func
+    output = fn()
+             ^^^^
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/src/training/hpo_optimizer.py", line 188, in trainable
+    worker_config_manager.load_config(config_path)
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/src/config/manager.py", line 62, in load_config
+    self._raw_config = self.loader.load_with_overrides(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/src/config/loader.py", line 69, in load_with_overrides
+    config = self.load_yaml(base_config_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alessio/Personal/ReinforceStrategyCreatorV2/reinforcestrategycreator_pipeline/src/config/loader.py", line 42, in load_yaml
+    raise FileNotFoundError(f"Configuration file not found: {path}")
+FileNotFoundError: Configuration file not found: /home/alessio/Personal/ReinforceStrategyCreatorV2/configs/base/pipeline.yaml
