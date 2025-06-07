@@ -8,7 +8,7 @@ import numpy as np
 from datetime import datetime
 from enum import Enum
 
-from reinforcestrategycreator_pipeline.src.config.models import ValidationConfig
+from ..config.models import ValidationConfig
 
 
 logger = logging.getLogger(__name__)

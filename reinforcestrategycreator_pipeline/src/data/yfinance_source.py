@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Union
 import time
 import pandas as pd
 import yfinance as yf
-from reinforcestrategycreator_pipeline.src.monitoring.logger import get_logger
+from ..monitoring.logger import get_logger
 
 from .base import DataSource, DataSourceMetadata
 
