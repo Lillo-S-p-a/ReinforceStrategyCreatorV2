@@ -7,6 +7,7 @@ from collections import deque
 import random
 
 from ..base import ModelBase
+from ...evaluation.metrics import MetricsCalculator
 
 
 class ReplayBuffer:
@@ -103,12 +104,36 @@ class DQN(ModelBase):
         self.steps = 0
         self.episodes = 0
         
-        # Training history
+        # Initialize metrics calculator for trading-specific metrics
+        self.metrics_calculator = MetricsCalculator(config.get("metrics_config", {}))
+        
+        # Training history - expanded to include trading metrics
         self.training_history = {
             "episode_rewards": [],
             "episode_lengths": [],
             "losses": [],
-            "epsilon_values": []
+            "epsilon_values": [],
+            # Portfolio tracking for metrics calculation
+            "portfolio_values": [],
+            "episode_returns": [],
+            "trades": [],
+            # Trading-specific metrics (calculated per episode)
+            "sharpe_ratio": [],
+            "sortino_ratio": [],
+            "max_drawdown": [],
+            "calmar_ratio": [],
+            "win_rate": [],
+            "profit_factor": [],
+            "average_win": [],
+            "average_loss": [],
+            "expectancy": [],
+            "volatility": [],
+            "downside_deviation": [],
+            "value_at_risk": [],
+            "conditional_value_at_risk": [],
+            "pnl": [],
+            "pnl_percentage": [],
+            "total_return": []
         }
     
     def build(self, input_shape: Tuple[int, ...], output_shape: Tuple[int, ...]) -> None:
@@ -381,6 +406,10 @@ class DQN(ModelBase):
             episode_length = 0
             losses = []
             
+            # Track portfolio values and trades for metrics calculation
+            episode_portfolio_values = [initial_episode_cash]
+            episode_trades = []
+            
             # Iterate through the training data for the episode
             # Ensure we have enough data for a next_state
             for step_idx in range(len(train_data) - 1):
@@ -413,6 +442,15 @@ class DQN(ModelBase):
                         entry_price = current_price
                         reward = -cost # Negative reward for transaction cost
                         previous_unrealized_pnl = 0.0
+                        
+                        # Record buy trade for metrics
+                        episode_trades.append({
+                            'type': 'buy',
+                            'price': current_price,
+                            'units': units_to_buy,
+                            'cost': cost,
+                            'pnl': -cost  # Transaction cost as negative PnL
+                        })
                     else:
                         reward = invalid_action_penalty
                 elif action == 2: # Sell
@@ -423,6 +461,16 @@ class DQN(ModelBase):
                         
                         reward = realized_pnl - cost
                         cash += transaction_value - cost
+                        
+                        # Record sell trade for metrics
+                        episode_trades.append({
+                            'type': 'sell',
+                            'price': current_price,
+                            'units': current_position_units,
+                            'cost': cost,
+                            'pnl': realized_pnl - cost  # Net PnL after transaction costs
+                        })
+                        
                         current_position_units = 0.0
                         entry_price = 0.0
                         previous_unrealized_pnl = 0.0
@@ -446,6 +494,10 @@ class DQN(ModelBase):
                 episode_reward += reward
                 episode_length += 1
                 
+                # Track portfolio value for metrics calculation
+                current_portfolio_value = cash + (current_position_units * current_price if current_position_units > 0 else 0)
+                episode_portfolio_values.append(current_portfolio_value)
+                
                 if len(self.replay_buffer) >= batch_size and self.steps % self.update_frequency == 0:
                     loss = self._train_step(batch_size, gamma) # learning_rate removed
                     losses.append(loss)
@@ -459,6 +511,55 @@ class DQN(ModelBase):
                     break # End of episode
             
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
+            
+            # Calculate trading metrics for this episode using MetricsCalculator
+            if len(episode_portfolio_values) > 1:
+                # Calculate returns from portfolio values
+                episode_returns = []
+                for i in range(1, len(episode_portfolio_values)):
+                    if episode_portfolio_values[i-1] > 0:
+                        ret = (episode_portfolio_values[i] - episode_portfolio_values[i-1]) / episode_portfolio_values[i-1]
+                        episode_returns.append(ret)
+                
+                # Use MetricsCalculator to compute all trading metrics
+                try:
+                    metrics = self.metrics_calculator.calculate_all_metrics(
+                        portfolio_values=episode_portfolio_values,
+                        returns=episode_returns,
+                        trades=episode_trades
+                    )
+                    
+                    # Store metrics in training history
+                    for metric_name, metric_value in metrics.items():
+                        if metric_name in self.training_history:
+                            self.training_history[metric_name].append(metric_value)
+                    
+                    # Store additional episode data
+                    self.training_history["portfolio_values"].append(episode_portfolio_values)
+                    self.training_history["episode_returns"].append(episode_returns)
+                    self.training_history["trades"].append(episode_trades)
+                    
+                except Exception as e:
+                    self.logger.warning(f"Failed to calculate trading metrics for episode {episode}: {e}")
+                    # Store NaN values for failed calculations
+                    for metric_name in ["sharpe_ratio", "sortino_ratio", "max_drawdown", "calmar_ratio",
+                                       "win_rate", "profit_factor", "average_win", "average_loss",
+                                       "expectancy", "volatility", "downside_deviation", "value_at_risk",
+                                       "conditional_value_at_risk", "pnl", "pnl_percentage", "total_return"]:
+                        if metric_name in self.training_history:
+                            self.training_history[metric_name].append(np.nan)
+            else:
+                # No portfolio data, store NaN values
+                for metric_name in ["sharpe_ratio", "sortino_ratio", "max_drawdown", "calmar_ratio",
+                                   "win_rate", "profit_factor", "average_win", "average_loss",
+                                   "expectancy", "volatility", "downside_deviation", "value_at_risk",
+                                   "conditional_value_at_risk", "pnl", "pnl_percentage", "total_return"]:
+                    if metric_name in self.training_history:
+                        self.training_history[metric_name].append(np.nan)
+                
+                self.training_history["portfolio_values"].append([])
+                self.training_history["episode_returns"].append([])
+                self.training_history["trades"].append([])
             
             self.episodes += 1
             self.training_history["episode_rewards"].append(episode_reward)
