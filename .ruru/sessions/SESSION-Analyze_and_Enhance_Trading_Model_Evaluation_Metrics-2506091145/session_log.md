@@ -54,3 +54,38 @@ Next: Define required trading-specific metrics list and implement calculation lo
 - ✅ Updated MDTM task checklist items: "Implement calculation logic" and "Add metrics to training_history"
 - Modified: [`reinforcestrategycreator_pipeline/src/models/implementations/dqn.py`](reinforcestrategycreator_pipeline/src/models/implementations/dqn.py)
 - Next: Verify metrics flow through Ray Tune and test implementation
+---
+timestamp: 2025-06-09T17:09:29Z
+actor: roo-commander
+event_type: specialist_report
+details: |
+  Received completion signal from `dev-python` for MDTM task [`TASK-SRDEV-250609114800`](./.ruru/tasks/METRICS_ENHANCEMENT/TASK-SRDEV-250609114800.md) (Enhance Trading Model Evaluation Metrics).
+  Summary of `dev-python`'s work:
+  - Integrated `MetricsCalculator` into `DQN` model.
+  - Expanded `training_history` with 25+ trading metrics.
+  - Implemented portfolio tracking and detailed trade recording.
+  - Added end-of-episode metrics calculation using `MetricsCalculator.calculate_all_metrics()`.
+  - Implemented NaN fallbacks for error handling.
+  - Updated MDTM task file: marked implementation checklist items as complete.
+  - Committed and pushed changes with message referencing task ID `TASK-SRDEV-250609114800`.
+  Remaining steps for `dev-python` on this task:
+  1. Confirm new metrics are reportable by Ray Tune.
+  2. Test the changes to ensure metrics are logged correctly to TensorBoard during HPO runs.
+---
+---
+timestamp: 2025-06-09T17:35:58Z
+actor: roo-commander
+event_type: specialist_report
+details: |
+  Received completion signal from `dev-python` for MDTM task [`TASK-SRDEV-250609114800`](./.ruru/tasks/METRICS_ENHANCEMENT/TASK-SRDEV-250609114800.md) (Enhance Trading Model Evaluation Metrics).
+  `dev-python` reported:
+  - All checklist items for the task are now complete.
+  - Implemented comprehensive trading metrics in `DQN` model ([`reinforcestrategycreator_pipeline/src/models/implementations/dqn.py`](reinforcestrategycreator_pipeline/src/models/implementations/dqn.py)).
+  - Made compatibility fixes in `TrainingEngine` ([`reinforcestrategycreator_pipeline/src/training/engine.py`](reinforcestrategycreator_pipeline/src/training/engine.py)) for Ray Tune and TensorBoard.
+  - Successfully tested HPO execution, Ray Tune compatibility, and TensorBoard logging.
+  - Resolved data type conversion errors.
+  - Updated MDTM task status to "🟢 Done".
+  - Committed and pushed all changes.
+  This task is now considered fully complete.
+---
+- 2025-06-09T17:39:44Z: `util-writer` completed task [`TASK-WRITER-250609125800`](./.ruru/tasks/METRICS_DOCUMENTATION/TASK-WRITER-250609125800.md). Created Italian documentation for trading metrics at [`./.ruru/docs/trading_metrics_explained_it.md`](./.ruru/docs/trading_metrics_explained_it.md). Task file updated to "🟢 Done".

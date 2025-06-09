@@ -396,18 +396,29 @@ class TrainingEngine:
                 # Convert lists to scalar values (e.g., take the last value or mean)
                 processed_metrics = {}
                 for key, value in epoch_metrics.items():
-                    if isinstance(value, list) and len(value) > 0:
-                        # For lists, take the last value as the epoch metric
-                        processed_metrics[key] = float(value[-1])
-                    elif isinstance(value, (int, float)):
-                        processed_metrics[key] = float(value)
-                    elif isinstance(value, np.ndarray):
-                        # For arrays, take the mean or last value
-                        if value.size > 0:
-                            processed_metrics[key] = float(value.mean())
-                        else:
-                            processed_metrics[key] = 0.0
-                    # Skip non-numeric values
+                    try:
+                        if isinstance(value, list) and len(value) > 0:
+                            # Handle nested lists by recursively extracting scalar values
+                            extracted_value = self._extract_scalar_from_nested_structure(value)
+                            if extracted_value is not None:
+                                processed_metrics[key] = float(extracted_value)
+                        elif isinstance(value, dict):
+                            # For dictionary values, skip them as they're not suitable for Ray Tune reporting
+                            # These might be complex objects like trade records or detailed breakdowns
+                            continue
+                        elif isinstance(value, (int, float)):
+                            processed_metrics[key] = float(value)
+                        elif isinstance(value, np.ndarray):
+                            # For arrays, take the mean or last value
+                            if value.size > 0:
+                                processed_metrics[key] = float(value.mean())
+                            else:
+                                processed_metrics[key] = 0.0
+                        # Skip non-numeric values
+                    except (TypeError, ValueError, IndexError) as e:
+                        # Log the error and skip this metric
+                        self.logger.warning(f"Skipping metric '{key}' due to conversion error: {e}")
+                        continue
                 
                 # Ensure we have at least a loss metric
                 if "loss" not in processed_metrics:
@@ -423,6 +434,58 @@ class TrainingEngine:
         else:
             # Fallback for models without train method
             return {"loss": np.random.random()}  # Placeholder
+    
+    def _extract_scalar_from_nested_structure(self, value, max_depth=5):
+        """
+        Recursively extract a scalar value from nested lists/structures.
+        
+        Args:
+            value: The value to extract from (could be nested lists, dicts, scalars)
+            max_depth: Maximum recursion depth to prevent infinite loops
+            
+        Returns:
+            float or None: Extracted scalar value or None if extraction fails
+        """
+        if max_depth <= 0:
+            return None
+            
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            elif isinstance(value, np.ndarray):
+                if value.size > 0:
+                    return float(value.mean())
+                else:
+                    return 0.0
+            elif isinstance(value, list) and len(value) > 0:
+                # Try to extract from the last element first (most recent value)
+                last_element = value[-1]
+                if isinstance(last_element, (int, float)):
+                    return float(last_element)
+                elif isinstance(last_element, list):
+                    # Recursively extract from nested list
+                    return self._extract_scalar_from_nested_structure(last_element, max_depth - 1)
+                elif isinstance(last_element, dict):
+                    # For dictionaries, skip them as they're not suitable for scalar extraction
+                    return None
+                else:
+                    # Try to find any numeric value in the list
+                    for item in reversed(value):  # Start from the end (most recent)
+                        if isinstance(item, (int, float)):
+                            return float(item)
+                        elif isinstance(item, list):
+                            extracted = self._extract_scalar_from_nested_structure(item, max_depth - 1)
+                            if extracted is not None:
+                                return extracted
+                    return None
+            elif isinstance(value, dict):
+                # Skip dictionaries as they're not suitable for scalar extraction
+                return None
+            else:
+                # For other types, try to convert to float
+                return float(value)
+        except (TypeError, ValueError, IndexError):
+            return None
     
     def _validate_epoch(
         self,
