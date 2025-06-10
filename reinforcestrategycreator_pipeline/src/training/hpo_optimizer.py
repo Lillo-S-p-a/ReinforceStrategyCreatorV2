@@ -233,7 +233,7 @@ class HPOptimizer:
                         metrics["final_val_loss"] = history["val_loss"][-1]
                         metrics["min_val_loss"] = min(history["val_loss"])
                 
-                # Report to Ray Tune
+                # Report epoch-level metrics to Ray Tune
                 for epoch_idx, epoch in enumerate(history.get("epochs", [])):
                     epoch_metrics = {
                         "loss": history["loss"][epoch_idx] if epoch_idx < len(history["loss"]) else None,
@@ -243,6 +243,25 @@ class HPOptimizer:
                     # Remove None values
                     epoch_metrics = {k: v for k, v in epoch_metrics.items() if v is not None}
                     tune.report(metrics=epoch_metrics)
+                
+                # CRITICAL FIX: Report final metrics as the last result to ensure get_best_trial works
+                # This ensures that the final metric is available in trial.last_result for get_best_trial
+                final_metrics = {}
+                if history.get("loss"):
+                    # Use the final loss as the primary optimization metric
+                    final_metrics["loss"] = history["loss"][-1]
+                    final_metrics["final_loss"] = history["loss"][-1]
+                    final_metrics["min_loss"] = min(history["loss"])
+                if history.get("val_loss"):
+                    final_metrics["val_loss"] = history["val_loss"][-1]
+                    final_metrics["final_val_loss"] = history["val_loss"][-1]
+                    final_metrics["min_val_loss"] = min(history["val_loss"])
+                
+                # Add any additional final metrics
+                final_metrics.update(metrics)
+                
+                # Report final metrics as the last result - this is what get_best_trial will use
+                tune.report(metrics=final_metrics)
             else:
                 # Report failure - Ray Tune expects metrics in a specific format
                 tune.report(metrics={"loss": float('inf'), "error": result.get("error", "Unknown error")})

@@ -216,7 +216,7 @@ def run_dqn_hpo():
         "early_stopping_patience": 5, # For HPO trials
         "save_checkpoints": False, # Usually false for HPO trials to save space/time
         "save_best_only": False,
-        "monitor_metric": "episode_reward_mean", # Metric to monitor for early stopping and for HPO
+        "monitor_metric": "episode_reward", # Metric to monitor for early stopping and for HPO
         "monitor_mode": "max" # "max" for reward, "min" for loss
     }
     logger.info(f"Training config for HPO trials: {training_config_hpo}")
