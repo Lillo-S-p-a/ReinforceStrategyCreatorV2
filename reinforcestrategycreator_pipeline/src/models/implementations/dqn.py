@@ -7,7 +7,8 @@ from collections import deque
 import random
 
 from ..base import ModelBase
-from ...evaluation.metrics import MetricsCalculator
+# Removed module-level import to break circular dependency
+# MetricsCalculator will be imported lazily in __init__ method
 
 
 class ReplayBuffer:
@@ -104,7 +105,8 @@ class DQN(ModelBase):
         self.steps = 0
         self.episodes = 0
         
-        # Initialize metrics calculator for trading-specific metrics
+        # Initialize metrics calculator for trading-specific metrics (lazy import to avoid circular dependency)
+        from ...evaluation.metrics import MetricsCalculator
         self.metrics_calculator = MetricsCalculator(config.get("metrics_config", {}))
         
         # Training history - expanded to include trading metrics and RL-specific metrics
