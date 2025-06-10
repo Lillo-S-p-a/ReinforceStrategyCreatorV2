@@ -107,12 +107,24 @@ class DQN(ModelBase):
         # Initialize metrics calculator for trading-specific metrics
         self.metrics_calculator = MetricsCalculator(config.get("metrics_config", {}))
         
-        # Training history - expanded to include trading metrics
+        # Training history - expanded to include trading metrics and RL-specific metrics
         self.training_history = {
+            # Core RL metrics
             "episode_rewards": [],
             "episode_lengths": [],
             "losses": [],
             "epsilon_values": [],
+            # Additional RL-specific metrics
+            "rl_episode_reward": [],      # Same as episode_rewards but explicitly named for RL
+            "rl_episode_length": [],      # Same as episode_lengths but explicitly named for RL
+            "rl_loss": [],                # Q-learning loss per training step
+            "rl_entropy": [],             # Exploration entropy (epsilon-based for DQN)
+            "rl_learning_rate": [],       # Current learning rate
+            "rl_value_estimates": [],     # Average Q-values per episode
+            "rl_td_error": [],            # Temporal Difference error
+            "rl_kl_divergence": [],       # KL divergence (approximated for DQN)
+            "rl_explained_variance": [],  # Explained variance of value function
+            "rl_success_rate": [],        # Success rate (profitable episodes)
             # Portfolio tracking for metrics calculation
             "portfolio_values": [],
             "episode_returns": [],
@@ -331,6 +343,16 @@ class DQN(ModelBase):
             return np.random.randint(self.n_actions)
         else:
             q_values = self.predict(state)
+            
+            # Track Q-values for RL metrics calculation
+            if not hasattr(self, '_episode_q_values'):
+                self._episode_q_values = []
+            
+            # Store the max Q-value for this state
+            if isinstance(q_values, np.ndarray) and len(q_values) > 0:
+                max_q_value = float(np.max(q_values))
+                self._episode_q_values.append(max_q_value)
+            
             return np.argmax(q_values)
     
     def train(self, train_data: Any, validation_data: Optional[Any] = None,
@@ -562,11 +584,17 @@ class DQN(ModelBase):
                 self.training_history["trades"].append([])
             
             self.episodes += 1
+            
+            # Store core RL metrics
             self.training_history["episode_rewards"].append(episode_reward)
             self.training_history["episode_lengths"].append(episode_length)
             if losses: # only extend if there are losses to add
                 self.training_history["losses"].extend(losses)
             self.training_history["epsilon_values"].append(epsilon)
+            
+            # Calculate and store additional RL-specific metrics
+            self._calculate_rl_metrics(episode_reward, episode_length, losses, epsilon,
+                                     episode_portfolio_values, episode_trades)
             
             if episode % 10 == 0:
                 # Ensure there are rewards to average
@@ -922,3 +950,126 @@ class DQN(ModelBase):
         
         # Reinitialize replay buffer
         self.replay_buffer = ReplayBuffer(self.memory_size)
+    
+    def _calculate_rl_metrics(self, episode_reward: float, episode_length: int,
+                             losses: List[float], epsilon: float,
+                             episode_portfolio_values: List[float],
+                             episode_trades: List[Dict]) -> None:
+        """Calculate and store RL-specific metrics for the current episode.
+        
+        Args:
+            episode_reward: Total reward for the episode
+            episode_length: Number of steps in the episode
+            losses: List of losses from training steps in this episode
+            epsilon: Current epsilon value for exploration
+            episode_portfolio_values: Portfolio values throughout the episode
+            episode_trades: List of trades executed in this episode
+        """
+        try:
+            # 1. RL Episode Reward (same as episode_reward but explicitly named)
+            self.training_history["rl_episode_reward"].append(episode_reward)
+            
+            # 2. RL Episode Length (same as episode_length but explicitly named)
+            self.training_history["rl_episode_length"].append(episode_length)
+            
+            # 3. RL Loss (average loss for this episode)
+            if losses:
+                avg_loss = float(np.mean(losses))
+                self.training_history["rl_loss"].append(avg_loss)
+            else:
+                self.training_history["rl_loss"].append(np.nan)
+            
+            # 4. RL Entropy (epsilon-based exploration entropy for DQN)
+            # For epsilon-greedy, entropy approximation: -epsilon*log(epsilon) - (1-epsilon)*log(1-epsilon)
+            if 0 < epsilon < 1:
+                entropy = -(epsilon * np.log(epsilon) + (1 - epsilon) * np.log(1 - epsilon))
+            else:
+                entropy = 0.0  # No entropy when epsilon is 0 or 1
+            self.training_history["rl_entropy"].append(float(entropy))
+            
+            # 5. RL Learning Rate (current learning rate)
+            self.training_history["rl_learning_rate"].append(self.learning_rate)
+            
+            # 6. RL Value Estimates (average Q-values for this episode)
+            # Calculate average Q-value from recent states if available
+            if hasattr(self, '_episode_q_values') and self._episode_q_values:
+                avg_q_value = float(np.mean(self._episode_q_values))
+                self.training_history["rl_value_estimates"].append(avg_q_value)
+                # Reset for next episode
+                self._episode_q_values = []
+            else:
+                # Fallback: estimate from current network if we have recent states
+                self.training_history["rl_value_estimates"].append(np.nan)
+            
+            # 7. RL TD Error (temporal difference error - use last loss as proxy)
+            if losses:
+                # TD error is approximated by the loss (which is based on TD error)
+                td_error = float(losses[-1]) if losses else np.nan
+                self.training_history["rl_td_error"].append(td_error)
+            else:
+                self.training_history["rl_td_error"].append(np.nan)
+            
+            # 8. RL KL Divergence (approximated for DQN using epsilon change)
+            # For DQN, we approximate KL divergence by measuring policy change via epsilon
+            if len(self.training_history["epsilon_values"]) > 1:
+                prev_epsilon = self.training_history["epsilon_values"][-2]
+                epsilon_change = abs(epsilon - prev_epsilon)
+                # Normalize to [0,1] range as a proxy for KL divergence
+                kl_div_approx = min(epsilon_change * 10, 1.0)  # Scale factor for visibility
+                self.training_history["rl_kl_divergence"].append(float(kl_div_approx))
+            else:
+                self.training_history["rl_kl_divergence"].append(0.0)
+            
+            # 9. RL Explained Variance (variance explained by value function)
+            # For DQN, we approximate this using the relationship between predicted and actual returns
+            if len(episode_portfolio_values) > 1:
+                # Calculate actual returns
+                actual_returns = []
+                for i in range(1, len(episode_portfolio_values)):
+                    if episode_portfolio_values[i-1] > 0:
+                        ret = (episode_portfolio_values[i] - episode_portfolio_values[i-1]) / episode_portfolio_values[i-1]
+                        actual_returns.append(ret)
+                
+                if actual_returns:
+                    # Use episode reward as predicted return proxy
+                    predicted_return = episode_reward / len(actual_returns) if actual_returns else 0
+                    actual_var = np.var(actual_returns) if len(actual_returns) > 1 else 0
+                    
+                    if actual_var > 0:
+                        # Simplified explained variance calculation
+                        residual_var = np.var([r - predicted_return for r in actual_returns])
+                        explained_var = max(0, 1 - (residual_var / actual_var))
+                        self.training_history["rl_explained_variance"].append(float(explained_var))
+                    else:
+                        self.training_history["rl_explained_variance"].append(1.0)  # Perfect prediction if no variance
+                else:
+                    self.training_history["rl_explained_variance"].append(np.nan)
+            else:
+                self.training_history["rl_explained_variance"].append(np.nan)
+            
+            # 10. RL Success Rate (percentage of profitable episodes)
+            # Define success as positive episode reward (profitable trading)
+            is_successful = episode_reward > 0
+            
+            # Calculate success rate over recent episodes (last 100 or all if fewer)
+            recent_rewards = self.training_history["rl_episode_reward"][-100:]
+            if recent_rewards:
+                success_count = sum(1 for r in recent_rewards if r > 0)
+                success_rate = success_count / len(recent_rewards)
+                self.training_history["rl_success_rate"].append(float(success_rate))
+            else:
+                self.training_history["rl_success_rate"].append(0.0)
+            
+            # Initialize episode Q-values list for next episode if not exists
+            if not hasattr(self, '_episode_q_values'):
+                self._episode_q_values = []
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to calculate RL metrics for episode: {e}")
+            # Store NaN values for failed calculations
+            for metric_name in ["rl_episode_reward", "rl_episode_length", "rl_loss", "rl_entropy",
+                               "rl_learning_rate", "rl_value_estimates", "rl_td_error", "rl_kl_divergence",
+                               "rl_explained_variance", "rl_success_rate"]:
+                if metric_name in self.training_history:
+                    if len(self.training_history[metric_name]) == len(self.training_history["episode_rewards"]) - 1:
+                        self.training_history[metric_name].append(np.nan)
