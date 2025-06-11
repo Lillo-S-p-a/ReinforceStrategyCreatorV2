@@ -108,6 +108,38 @@ class DQN(ModelBase):
         # Initialize metrics calculator for trading-specific metrics (lazy import to avoid circular dependency)
         from ...evaluation.metrics import MetricsCalculator
         self.metrics_calculator = MetricsCalculator(config.get("metrics_config", {}))
+
+        # Initialize shapes based on observation and action spaces set by ModelBase
+        if hasattr(self, 'observation_space') and self.observation_space is not None and \
+           hasattr(self.observation_space, 'shape'):
+            self.input_shape = self.observation_space.shape
+            self.logger.info(f"DQN.__init__: Set input_shape from observation_space: {self.input_shape}")
+        else:
+            # Fallback if observation_space or its shape isn't set, try from config
+            input_dim = config.get("input_dim")
+            if input_dim is not None:
+                self.input_shape = (input_dim,)
+                self.logger.info(f"DQN.__init__: Set input_shape from config input_dim: {self.input_shape}")
+            else:
+                self.input_shape = None # Or raise error
+                self.logger.warning("DQN.__init__: input_shape could not be determined from observation_space or config.")
+
+        if hasattr(self, 'action_space') and self.action_space is not None and \
+           hasattr(self.action_space, 'n'):
+            self.output_shape = (self.action_space.n,)
+            self.n_actions = self.action_space.n
+            self.logger.info(f"DQN.__init__: Set output_shape from action_space: {self.output_shape}, n_actions: {self.n_actions}")
+        else:
+            # Fallback if action_space or its n isn't set, try from config
+            output_dim = config.get("output_dim")
+            if output_dim is not None:
+                self.output_shape = (output_dim,)
+                self.n_actions = output_dim
+                self.logger.info(f"DQN.__init__: Set output_shape and n_actions from config output_dim: {self.output_shape}, {self.n_actions}")
+            else:
+                self.output_shape = None # Or raise error
+                self.n_actions = None # Or raise error
+                self.logger.warning("DQN.__init__: output_shape and n_actions could not be determined from action_space or config.")
         
         # Training history - expanded to include trading metrics and RL-specific metrics
         self.training_history = {
@@ -895,32 +927,56 @@ class DQN(ModelBase):
             state: Dictionary containing model state
         """
         # Restore shapes first
-        if state.get("input_shape"):
-            self.input_shape = tuple(state["input_shape"])
-        if state.get("output_shape"):
-            self.output_shape = tuple(state["output_shape"])
-        if state.get("n_actions") is not None:
-            self.n_actions = state["n_actions"]
+        # Restore shapes first. Ensure these attributes are set on self.
+        # These will be None if not in state or if state had them as None.
+        _input_shape_from_state = state.get("input_shape")
+        self.input_shape = tuple(_input_shape_from_state) if _input_shape_from_state is not None else None
         
+        _output_shape_from_state = state.get("output_shape")
+        self.output_shape = tuple(_output_shape_from_state) if _output_shape_from_state is not None else None
+        
+        self.n_actions = state.get("n_actions")
+
+        # If shapes were not in state (or were None), try to derive from observation/action space
+        # (which should be set by ModelBase.__init__ from config)
+        if self.input_shape is None and hasattr(self, 'observation_space') and self.observation_space is not None:
+            if hasattr(self.observation_space, 'shape'):
+                self.input_shape = self.observation_space.shape
+                self.logger.info(f"DQN.set_model_state: Derived input_shape from observation_space: {self.input_shape}")
+            else:
+                self.logger.warning("DQN.set_model_state: observation_space found but has no 'shape' attribute.")
+
+        if self.output_shape is None and hasattr(self, 'action_space') and self.action_space is not None:
+            if hasattr(self.action_space, 'n'): # For discrete action spaces
+                self.output_shape = (self.action_space.n,)
+                # If n_actions wasn't in state, derive it here too
+                if self.n_actions is None:
+                    self.n_actions = self.action_space.n
+                self.logger.info(f"DQN.set_model_state: Derived output_shape from action_space: {self.output_shape}. n_actions set to: {self.n_actions}")
+            else:
+                self.logger.warning("DQN.set_model_state: action_space found but has no 'n' attribute for discrete actions.")
+        
+        # If n_actions is still None, but output_shape is available (e.g. loaded from state, and it's a 1-tuple)
+        if self.n_actions is None and self.output_shape is not None and len(self.output_shape) == 1:
+            self.n_actions = self.output_shape[0]
+            self.logger.info(f"DQN.set_model_state: Derived n_actions from loaded output_shape[0]: {self.n_actions}")
+
         # Restore networks
         self.q_network = state.get("q_network")
         self.target_network = state.get("target_network")
         
-        # Ensure networks are properly initialized if they're missing structure
         self.logger.info(f"DQN.set_model_state: Before network init check. self.q_network is None: {self.q_network is None}, self.target_network is None: {self.target_network is None}")
-        self.logger.info(f"DQN.set_model_state: hasattr input_shape: {hasattr(self, 'input_shape')}, output_shape: {hasattr(self, 'output_shape')}")
-        if hasattr(self, 'input_shape') and self.input_shape: self.logger.info(f"DQN.set_model_state: self.input_shape: {self.input_shape}")
-        if hasattr(self, 'output_shape') and self.output_shape: self.logger.info(f"DQN.set_model_state: self.output_shape: {self.output_shape}")
+        self.logger.info(f"DQN.set_model_state: Current self.input_shape: {self.input_shape}, self.output_shape: {self.output_shape}, self.n_actions: {self.n_actions}")
 
         if self.q_network is None or self.target_network is None:
             self.logger.info(f"DQN.set_model_state: q_network or target_network is None after loading from state.")
-            if hasattr(self, 'input_shape') and self.input_shape and \
-               hasattr(self, 'output_shape') and self.output_shape:
+            # Now check if input_shape and output_shape are valid (not None) to proceed with build
+            if self.input_shape and self.output_shape:
                 self.logger.info(f"DQN.set_model_state: input_shape and output_shape are available. Calling self.build() with input_shape={self.input_shape}, output_shape={self.output_shape}.")
                 self.build(self.input_shape, self.output_shape)
                 self.logger.info(f"DQN.set_model_state: After self.build(), self.q_network is None: {self.q_network is None}")
             else:
-                 self.logger.warning("DQN.set_model_state: Cannot build networks: input_shape or output_shape not set on self or are None.")
+                 self.logger.warning("DQN.set_model_state: Cannot build networks: input_shape or output_shape are still None after attempting to load/derive.")
         else:
             self.logger.info("DQN.set_model_state: q_network and target_network were loaded from state. Ensuring weights are numpy arrays.")
         
