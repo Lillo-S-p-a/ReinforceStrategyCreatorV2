@@ -496,7 +496,7 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default="configs/base/pipeline.yaml",
+        default="reinforcestrategycreator_pipeline/configs/base/pipeline.yaml",
         help="Path to configuration file"
     )
     parser.add_argument(
