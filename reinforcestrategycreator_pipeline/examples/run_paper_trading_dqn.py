@@ -446,33 +446,42 @@ class DQNPaperTradingRunner:
                     data.index = pd.to_datetime(data.index)
                 data = data.sort_index()
 
-                for symbol in symbols:
-                    # yfinance with group_by='ticker' returns columns as ('TICKER', 'PriceType')
-                    # e.g., ('AAPL', 'Close').
-                    # YFinanceDataSource.auto_adjust is True by default, so 'Close' should be adjusted.
-                    price_column_key = (symbol, 'Close')
-
-                    if price_column_key in data.columns:
-                        # Get the series for this symbol's close price
-                        symbol_price_series = data[price_column_key].dropna()
-                        if not symbol_price_series.empty:
-                            latest_price = symbol_price_series.iloc[-1]
-                            market_data[symbol] = float(latest_price)
-                            self.logger.debug(f"Latest price for {symbol} ('Close'): {latest_price}")
-                        else:
-                            self.logger.warning(f"No 'Close' price data found for {symbol} after dropna.")
-                    elif symbol in data.columns and not isinstance(data.columns, pd.MultiIndex):
-                        # Fallback for single ticker case where columns might not be MultiIndex
-                        # (YFinanceDataSource attempts to flatten this, but this adds robustness)
-                        symbol_price_series = data[symbol].dropna() # Assuming this column is the price
-                        if not symbol_price_series.empty:
-                            latest_price = symbol_price_series.iloc[-1]
-                            market_data[symbol] = float(latest_price)
-                            self.logger.debug(f"Latest price for {symbol} (single series): {latest_price}")
-                        else:
-                            self.logger.warning(f"No price data found for {symbol} (single series) after dropna.")
+                if len(symbols) == 1 and not isinstance(data.columns, pd.MultiIndex) and 'Close' in data.columns:
+                    # Single symbol, non-MultiIndex case
+                    symbol = symbols[0] # Get the single symbol name
+                    symbol_price_series = data['Close'].dropna()
+                    if not symbol_price_series.empty:
+                        latest_price = symbol_price_series.iloc[-1]
+                        market_data[symbol] = float(latest_price)
+                        self.logger.debug(f"Latest price for single symbol {symbol} ('Close'): {latest_price}")
                     else:
-                        self.logger.warning(f"Could not find price column for {symbol}. Tried key: {price_column_key}. Available columns: {list(data.columns)}")
+                        self.logger.warning(f"No 'Close' price data found for single symbol {symbol} after dropna.")
+                else:
+                    # Multi-symbol case or if yfinance returns MultiIndex even for single symbol
+                    for symbol in symbols:
+                        price_column_key = (symbol, 'Close')
+                        if price_column_key in data.columns:
+                            # Get the series for this symbol's close price
+                            symbol_price_series = data[price_column_key].dropna()
+                            if not symbol_price_series.empty:
+                                latest_price = symbol_price_series.iloc[-1]
+                                market_data[symbol] = float(latest_price)
+                                self.logger.debug(f"Latest price for {symbol} ('Close'): {latest_price}")
+                            else:
+                                self.logger.warning(f"No 'Close' price data found for {symbol} with key {price_column_key} after dropna.")
+                        else:
+                            # Fallback for cases where a single symbol might still not be in ('SYMBOL', 'Close') format
+                            # but directly as 'Close' if the DataFrame was unexpectedly simple.
+                            if 'Close' in data.columns and len(symbols) == 1 and symbols[0] == symbol:
+                                symbol_price_series = data['Close'].dropna()
+                                if not symbol_price_series.empty:
+                                    latest_price = symbol_price_series.iloc[-1]
+                                    market_data[symbol] = float(latest_price)
+                                    self.logger.debug(f"Latest price for {symbol} (fallback 'Close' column): {latest_price}")
+                                else:
+                                    self.logger.warning(f"No 'Close' price data found for {symbol} (fallback) after dropna.")
+                            else:
+                                self.logger.warning(f"Could not find price column for {symbol}. Tried key: {price_column_key} and direct 'Close'. Available columns: {list(data.columns)}")
 
                 if market_data: # if we successfully extracted some prices
                     return market_data
