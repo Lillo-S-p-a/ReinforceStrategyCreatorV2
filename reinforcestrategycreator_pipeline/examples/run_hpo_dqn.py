@@ -216,7 +216,7 @@ def run_dqn_hpo():
         "early_stopping_patience": 5, # For HPO trials
         "save_checkpoints": False, # Usually false for HPO trials to save space/time
         "save_best_only": False,
-        "monitor_metric": "episode_reward", # Metric to monitor for early stopping and for HPO
+        "monitor_metric": "episode_rewards", # Metric to monitor for early stopping and for HPO
         "monitor_mode": "max" # "max" for reward, "min" for loss
     }
     logger.info(f"Training config for HPO trials: {training_config_hpo}")
@@ -259,7 +259,7 @@ def run_dqn_hpo():
         results_file_path = results.get("results_file_path", "N/A")
         logger.info(f"HPO results file saved at: {results_file_path}")
         logger.info(f"Best parameters found: {json.dumps(results['best_params'], indent=2)}")
-        logger.info(f"Best score ({results['metric_name']}): {results['best_score']:.4f}")
+        logger.info(f"Best score ({training_config_hpo['monitor_metric']}): {results['best_score']:.4f}")
         
         # Analyze results
         logger.info("Analyzing HPO results...")
@@ -268,7 +268,7 @@ def run_dqn_hpo():
         logger.info(f"\n--- HPO Run Summary ({results.get('name', 'N/A')}) ---")
         logger.info(f"Total trials: {analysis.get('total_trials', 'N/A')}")
         logger.info(f"Best trial ID: {analysis.get('best_trial_id', 'N/A')}")
-        logger.info(f"Best score ({results['metric_name']}): {analysis.get('best_score', 'N/A'):.4f}")
+        logger.info(f"Best score ({training_config_hpo['monitor_metric']}): {analysis.get('best_score', 'N/A'):.4f}")
         
         logger.info("\nTop K Trials:")
         for i, trial in enumerate(analysis.get("top_k_trials", [])):

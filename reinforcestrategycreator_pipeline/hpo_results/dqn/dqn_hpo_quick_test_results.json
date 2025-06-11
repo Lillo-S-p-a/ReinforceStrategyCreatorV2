@@ -1,0 +1,213 @@
+{
+  "run_name": "dqn_hpo_quick_test",
+  "timestamp": "2025-06-10T22:37:37.817742",
+  "num_trials": 5,
+  "metric": "episode_rewards",
+  "mode": "max",
+  "best_params": {
+    "learning_rate": 1.464279564671269e-05,
+    "buffer_size": 500000,
+    "learning_starts": 1000,
+    "batch_size": 128,
+    "tau": 0.09940736756706026,
+    "gamma": 0.9095760234825612,
+    "train_freq": 8,
+    "gradient_steps": 1,
+    "target_update_interval": 5000,
+    "exploration_fraction": 0.47663939709766984,
+    "exploration_initial_eps": 0.8074183065834679,
+    "exploration_final_eps": 0.03174857090987361
+  },
+  "best_score": 8713.279080507511,
+  "all_trials": [
+    {
+      "trial_id": "a899f_00000",
+      "params": {
+        "learning_rate": 1.464279564671269e-05,
+        "buffer_size": 500000,
+        "learning_starts": 1000,
+        "batch_size": 128,
+        "tau": 0.09940736756706026,
+        "gamma": 0.9095760234825612,
+        "train_freq": 8,
+        "gradient_steps": 1,
+        "target_update_interval": 5000,
+        "exploration_fraction": 0.47663939709766984,
+        "exploration_initial_eps": 0.8074183065834679,
+        "exploration_final_eps": 0.03174857090987361
+      },
+      "metric": 8713.279080507511,
+      "status": "TERMINATED",
+      "iterations": 11
+    },
+    {
+      "trial_id": "a899f_00001",
+      "params": {
+        "learning_rate": 1.405159708643807e-05,
+        "buffer_size": 10000,
+        "learning_starts": 1000,
+        "batch_size": 256,
+        "tau": 0.06428061567450824,
+        "gamma": 0.9444139319942874,
+        "train_freq": 4,
+        "gradient_steps": 4,
+        "target_update_interval": 10000,
+        "exploration_fraction": 0.24404805741075636,
+        "exploration_initial_eps": 0.7192539318996705,
+        "exploration_final_eps": 0.04087490360039277
+      },
+      "metric": 1400.4480999700572,
+      "status": "TERMINATED",
+      "iterations": 11
+    },
+    {
+      "trial_id": "a899f_00002",
+      "params": {
+        "learning_rate": 0.0006106776729143893,
+        "buffer_size": 500000,
+        "learning_starts": 1000,
+        "batch_size": 256,
+        "tau": 0.012953139874366516,
+        "gamma": 0.9415722996986736,
+        "train_freq": 1,
+        "gradient_steps": 2,
+        "target_update_interval": 10000,
+        "exploration_fraction": 0.26370074527656334,
+        "exploration_initial_eps": 0.5821936140342827,
+        "exploration_final_eps": 0.09521009358960277
+      },
+      "metric": 8615.868670005428,
+      "status": "TERMINATED",
+      "iterations": 11
+    },
+    {
+      "trial_id": "a899f_00003",
+      "params": {
+        "learning_rate": 0.002498829646263326,
+        "buffer_size": 100000,
+        "learning_starts": 50000,
+        "batch_size": 256,
+        "tau": 0.08217065765381994,
+        "gamma": 0.9129933883117577,
+        "train_freq": 4,
+        "gradient_steps": 8,
+        "target_update_interval": 1000,
+        "exploration_fraction": 0.4123013825774258,
+        "exploration_initial_eps": 0.9979824360954768,
+        "exploration_final_eps": 0.045004095343768855
+      },
+      "metric": -2091.29450878867,
+      "status": "TERMINATED",
+      "iterations": 11
+    },
+    {
+      "trial_id": "a899f_00004",
+      "params": {
+        "learning_rate": 0.00022140881087276762,
+        "buffer_size": 1000000,
+        "learning_starts": 1000,
+        "batch_size": 64,
+        "tau": 0.032530772321401,
+        "gamma": 0.9871936037634055,
+        "train_freq": 16,
+        "gradient_steps": 1,
+        "target_update_interval": 20000,
+        "exploration_fraction": 0.193876717560023,
+        "exploration_initial_eps": 0.7284082774539372,
+        "exploration_final_eps": 0.07473608130379272
+      },
+      "metric": -9262.37949039533,
+      "status": "TERMINATED",
+      "iterations": 11
+    }
+  ],
+  "search_algorithm": "random",
+  "scheduler": null,
+  "param_space": {
+    "learning_rate": {
+      "type": "loguniform",
+      "low": 1e-05,
+      "high": 0.01
+    },
+    "buffer_size": {
+      "type": "choice",
+      "values": [
+        10000,
+        50000,
+        100000,
+        500000,
+        1000000
+      ]
+    },
+    "learning_starts": {
+      "type": "choice",
+      "values": [
+        1000,
+        5000,
+        10000,
+        50000
+      ]
+    },
+    "batch_size": {
+      "type": "choice",
+      "values": [
+        32,
+        64,
+        128,
+        256
+      ]
+    },
+    "tau": {
+      "type": "uniform",
+      "low": 0.001,
+      "high": 0.1
+    },
+    "gamma": {
+      "type": "uniform",
+      "low": 0.9,
+      "high": 0.999
+    },
+    "train_freq": {
+      "type": "choice",
+      "values": [
+        1,
+        4,
+        8,
+        16
+      ]
+    },
+    "gradient_steps": {
+      "type": "choice",
+      "values": [
+        1,
+        2,
+        4,
+        8
+      ]
+    },
+    "target_update_interval": {
+      "type": "choice",
+      "values": [
+        1000,
+        5000,
+        10000,
+        20000
+      ]
+    },
+    "exploration_fraction": {
+      "type": "uniform",
+      "low": 0.05,
+      "high": 0.5
+    },
+    "exploration_initial_eps": {
+      "type": "uniform",
+      "low": 0.5,
+      "high": 1.0
+    },
+    "exploration_final_eps": {
+      "type": "uniform",
+      "low": 0.01,
+      "high": 0.1
+    }
+  }
+}
