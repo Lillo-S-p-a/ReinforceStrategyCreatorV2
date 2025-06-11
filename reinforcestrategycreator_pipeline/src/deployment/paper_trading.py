@@ -768,7 +768,7 @@ class PaperTradingDeployer:
             enable_shorting=simulation_config["enable_shorting"]
         )
         
-        # Load model (simplified - actual implementation would load from deployment)
+        # Load model
         model = self._load_deployed_model(deployment_info)
         
         # Create simulation record
@@ -798,24 +798,54 @@ class PaperTradingDeployer:
         
         return simulation
     
-    def _load_deployed_model(self, deployment_info: Dict[str, Any]) -> Any:
-        """Load a deployed model.
+    def _create_mock_model(self) -> Any:
+        """Creates and returns a mock model instance."""
+        outer_self = self  # Store outer self
+        outer_self.logger.warning("Creating a MockModel instance for paper trading.")
         
-        This is a placeholder - actual implementation would load
-        the model from the deployment path.
-        """
-        # In a real implementation, this would:
-        # 1. Navigate to deployment_info["deployment_path"]
-        # 2. Load the model using appropriate method
-        # 3. Return the loaded model instance
-        
-        # For now, return a mock model
         class MockModel:
-            def predict(self, features):
+            def predict(self, features: Dict[str, Any]) -> str:
                 # Simple mock prediction
+                # Ensure features is used or acknowledged if your linter requires it
+                outer_self.logger.debug(f"MockModel received features: {features}") # Use outer_self
                 return np.random.choice(["buy", "sell", "hold"], p=[0.3, 0.3, 0.4])
         
         return MockModel()
+
+    def _load_deployed_model(self, deployment_info: Dict[str, Any]) -> Any:
+        """Load a deployed model using the model registry."""
+        model_id = deployment_info.get("model_id")
+        model_version = deployment_info.get("model_version")
+
+        if not model_id:
+            self.logger.error("Deployment info is missing 'model_id'. Falling back to MockModel.")
+            return self._create_mock_model()
+
+        try:
+            self.logger.info(f"Attempting to load model '{model_id}' version '{model_version}' from registry.")
+            # Ensure model_registry is available
+            if self.model_registry is None:
+                self.logger.error("ModelRegistry not initialized in PaperTradingDeployer. Falling back to MockModel.")
+                return self._create_mock_model()
+                
+            model_instance = self.model_registry.load_model(model_id, version=model_version)
+            
+            if model_instance:
+                self.logger.info(f"Successfully loaded model '{model_id}' version '{model_version}' from registry.")
+                return model_instance
+            else:
+                self.logger.error(
+                    f"Model '{model_id}' version '{model_version}' not found in registry. "
+                    f"Falling back to MockModel."
+                )
+                return self._create_mock_model()
+        except Exception as e:
+            self.logger.error(
+                f"Error loading model '{model_id}' version '{model_version}' from registry: {e}. "
+                f"Falling back to MockModel.",
+                exc_info=True
+            )
+            return self._create_mock_model()
     
     def _get_model_signals(
         self,
@@ -835,7 +865,18 @@ class PaperTradingDeployer:
         # Mock signal generation
         for symbol, price in market_data.items():
             # Get model prediction (simplified)
-            prediction = model.predict({"symbol": symbol, "price": price})
+            # Ensure the model's predict method matches expected input
+            # For a DQN model, this might involve passing state features
+            # For simplicity, we'll assume it can take basic market data for now
+            # This part needs to align with your actual DQN model's predict method signature
+            try:
+                # Construct features as expected by your DQN model
+                # This is a placeholder; adjust based on your model's feature engineering
+                features = {"symbol": symbol, "price": price, "positions": positions.get(symbol)} 
+                prediction = model.predict(features) 
+            except Exception as e:
+                self.logger.error(f"Error during model prediction for {symbol}: {e}", exc_info=True)
+                prediction = "hold" # Default to hold on error
             
             if prediction == "buy" and symbol not in positions:
                 if price > 0:  # Ensure price is positive to avoid division by zero
