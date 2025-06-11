@@ -634,7 +634,9 @@ class PaperTradingDeployer:
             json.dump(results, f, indent=2)
         
         # Save to artifact store
-        artifact_id = self.artifact_store.save_artifact(
+        report_artifact_id = f"paper_trading_results_{simulation_id}"
+        returned_artifact_metadata = self.artifact_store.save_artifact(
+            artifact_id=report_artifact_id,
             artifact_path=results_file,
             artifact_type=ArtifactType.REPORT,
             metadata={
@@ -644,10 +646,12 @@ class PaperTradingDeployer:
             },
             tags=["paper_trading", simulation["model_id"]]
         )
+        # Use the artifact_id from the returned metadata for logging, as it's the canonical one.
+        artifact_id_for_log = returned_artifact_metadata.artifact_id
         
         self.logger.info(
             f"Stopped paper trading simulation {simulation_id}. "
-            f"Results saved to {results_file} (artifact_id: {artifact_id})"
+            f"Results saved to {results_file} (artifact_id: {artifact_id_for_log})"
         )
         
         return results
@@ -714,7 +718,7 @@ class PaperTradingDeployer:
         
         # Get model predictions/signals
         # This is a simplified example - actual implementation would depend on model interface
-        signals = self._get_model_signals(model, market_data, engine.get_positions())
+        signals = self._get_model_signals(model, market_data, engine.get_positions(), engine.initial_capital, engine.max_position_size)
         
         # Submit orders based on signals
         for signal in signals:
@@ -817,7 +821,9 @@ class PaperTradingDeployer:
         self,
         model: Any,
         market_data: Dict[str, float],
-        positions: Dict[str, Position]
+        positions: Dict[str, Position],
+        engine_initial_capital: float,
+        engine_max_position_size_ratio: float
     ) -> List[Dict[str, Any]]:
         """Get trading signals from model.
         
@@ -832,12 +838,26 @@ class PaperTradingDeployer:
             prediction = model.predict({"symbol": symbol, "price": price})
             
             if prediction == "buy" and symbol not in positions:
-                signals.append({
-                    "symbol": symbol,
-                    "side": "buy",
-                    "quantity": 100,  # Fixed quantity for simplicity
-                    "order_type": "market"
-                })
+                if price > 0:  # Ensure price is positive to avoid division by zero
+                    max_allowed_value = engine_initial_capital * engine_max_position_size_ratio
+                    dynamic_quantity = int(max_allowed_value / price)  # Use int for whole shares
+                    
+                    if dynamic_quantity > 0:  # Only trade if we can afford at least one share
+                        signals.append({
+                            "symbol": symbol,
+                            "side": "buy",
+                            "quantity": dynamic_quantity,  # Use dynamic quantity
+                            "order_type": "market"
+                        })
+                    else:
+                        self.logger.info(
+                            f"Calculated buy quantity for {symbol} is 0 or less ({dynamic_quantity}), skipping order. "
+                            f"Max value: {max_allowed_value:.2f}, Price: {price:.2f}"
+                        )
+                else:
+                    self.logger.warning(
+                        f"Price for {symbol} is not positive ({price:.2f}), cannot calculate buy quantity."
+                    )
             elif prediction == "sell" and symbol in positions:
                 position = positions[symbol]
                 signals.append({

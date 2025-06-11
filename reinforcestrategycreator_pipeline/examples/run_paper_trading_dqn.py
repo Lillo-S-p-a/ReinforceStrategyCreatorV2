@@ -292,7 +292,7 @@ class DQNPaperTradingRunner:
             Simulation configuration dictionary
         """
         if symbols is None:
-            symbols = ["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA"]
+            symbols = ["SPY"]
         
         return {
             "initial_capital": initial_capital,
@@ -324,7 +324,7 @@ class DQNPaperTradingRunner:
             raise ValueError("Model not loaded. Call load_optimized_model() first.")
         
         if symbols is None:
-            symbols = ["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA"]
+            symbols = ["SPY"]
         
         self.logger.info(f"Starting paper trading simulation for {duration_hours} hours")
         self.logger.info(f"Trading symbols: {symbols}")
@@ -523,7 +523,7 @@ def main():
     parser.add_argument(
         "--symbols", 
         nargs="+", 
-        default=["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA"],
+        default=["SPY"],
         help="Symbols to trade"
     )
     parser.add_argument(
