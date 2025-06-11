@@ -907,12 +907,26 @@ class DQN(ModelBase):
         self.target_network = state.get("target_network")
         
         # Ensure networks are properly initialized if they're missing structure
+        self.logger.info(f"DQN.set_model_state: Before network init check. self.q_network is None: {self.q_network is None}, self.target_network is None: {self.target_network is None}")
+        self.logger.info(f"DQN.set_model_state: hasattr input_shape: {hasattr(self, 'input_shape')}, output_shape: {hasattr(self, 'output_shape')}")
+        if hasattr(self, 'input_shape') and self.input_shape: self.logger.info(f"DQN.set_model_state: self.input_shape: {self.input_shape}")
+        if hasattr(self, 'output_shape') and self.output_shape: self.logger.info(f"DQN.set_model_state: self.output_shape: {self.output_shape}")
+
         if self.q_network is None or self.target_network is None:
-            if hasattr(self, 'input_shape') and hasattr(self, 'output_shape'):
-                self._initialize_networks(self.input_shape, self.output_shape)
+            self.logger.info(f"DQN.set_model_state: q_network or target_network is None after loading from state.")
+            if hasattr(self, 'input_shape') and self.input_shape and \
+               hasattr(self, 'output_shape') and self.output_shape:
+                self.logger.info(f"DQN.set_model_state: input_shape and output_shape are available. Calling self.build() with input_shape={self.input_shape}, output_shape={self.output_shape}.")
+                self.build(self.input_shape, self.output_shape)
+                self.logger.info(f"DQN.set_model_state: After self.build(), self.q_network is None: {self.q_network is None}")
+            else:
+                 self.logger.warning("DQN.set_model_state: Cannot build networks: input_shape or output_shape not set on self or are None.")
+        else:
+            self.logger.info("DQN.set_model_state: q_network and target_network were loaded from state. Ensuring weights are numpy arrays.")
         
         # Convert lists back to numpy arrays and ensure proper structure
-        if self.q_network and "weights" in self.q_network:
+        # This block should execute regardless of the above, if q_network was loaded from state.
+        if self.q_network and isinstance(self.q_network.get("weights"), dict):
             # Ensure weights is a dictionary
             if isinstance(self.q_network["weights"], dict):
                 self.q_network["weights"] = {
