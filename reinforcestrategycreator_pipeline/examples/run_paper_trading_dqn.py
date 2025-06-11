@@ -55,17 +55,19 @@ class DQNPaperTradingRunner:
             ]
         )
         self.logger = logging.getLogger(__name__)
+        self.logger.info(f"DQNPaperTradingRunner received config_path: '{config_path}'") # DEBUG
         
         # Load configuration
         self.config_manager = ConfigManager()
-        if config_path:
-            self.config_manager.load_config(config_path)
+        self.config_manager.load_config(config_path)  # Ensure config is loaded
         
         # Initialize components
-        self.artifact_store = LocalFileSystemStore()
+        # Get artifact store root path from config or use default
+        artifact_store_path = self._get_artifact_store_path()
+        self.artifact_store = LocalFileSystemStore(artifact_store_path)
         self.data_manager = DataManager(self.config_manager, self.artifact_store)
         self.model_factory = ModelFactory()
-        self.model_registry = ModelRegistry()
+        self.model_registry = ModelRegistry(artifact_store=self.artifact_store)
         
         # Initialize deployment components
         self.deployment_manager = DeploymentManager(
@@ -83,6 +85,29 @@ class DQNPaperTradingRunner:
         self.best_model_path = None
         self.best_hyperparams = None
         self.model = None
+        
+    def _get_artifact_store_path(self) -> str:
+        """Get artifact store root path from config or use default."""
+        try:
+            # Try to get from config first
+            config = self.config_manager.get_config()
+            if hasattr(config, 'artifact_store'):
+                if isinstance(config.artifact_store, str):
+                    return config.artifact_store
+                elif hasattr(config.artifact_store, 'root_path'):
+                    return config.artifact_store.root_path
+        except Exception:
+            # If config access fails, use default
+            pass
+        
+        # Default path for paper trading artifacts
+        default_path = './rsc_pipeline_artifacts/paper_trading'
+        
+        # Ensure the directory exists
+        import os
+        os.makedirs(default_path, exist_ok=True)
+        
+        return default_path
         
     def find_best_hpo_model(self) -> Dict[str, Any]:
         """Find the best model from HPO results.
@@ -188,7 +213,7 @@ class DQNPaperTradingRunner:
         
         # Create DQN model with optimized hyperparameters
         model_config = {
-            "model_type": "dqn",
+            "model_type": "DQN",  # Use uppercase to match registration
             "hyperparameters": self.best_hyperparams,
             "input_dim": 10,  # Adjust based on your feature space
             "output_dim": 3,  # Buy, Sell, Hold
@@ -196,7 +221,7 @@ class DQNPaperTradingRunner:
         }
         
         # Create model using factory
-        self.model = self.model_factory.create_model(model_config)
+        self.model = self.model_factory.create_from_config(model_config)
         
         # Load the trained parameters
         if hasattr(self.model, 'load_state'):
@@ -218,31 +243,40 @@ class DQNPaperTradingRunner:
             Dictionary of configured data sources
         """
         # Setup live data source
+        live_source_config = {
+            "tickers": symbols,
+            "interval": "1m",  # 1-minute intervals for paper trading
+            # max_retries and retry_delay are not standard yfinance constructor args
+            # They would need to be handled within YFinanceDataSource if custom logic is intended
+        }
         live_source = YFinanceDataSource(
-            symbols=symbols,
-            interval="1m",  # 1-minute intervals for paper trading
-            max_retries=3,
-            retry_delay=1.0
+            source_id="yfinance_live_paper_trading", # Provide a source_id
+            config=live_source_config
         )
         
-        # Configure data manager
-        data_config = {
+        # Configure data manager (this part seems okay, assuming DataManager uses this config)
+        # However, the DataManager itself might expect a different structure for its own config
+        # For now, focusing on YFinanceDataSource instantiation.
+        # The data_config for DataManager might need adjustment based on how DataManager
+        # is designed to use these sources.
+        data_manager_config_for_dm = { # Renamed to avoid confusion
             "sources": {
-                "live": {
-                    "type": "yfinance_live",
-                    "symbols": symbols,
-                    "interval": "1m"
+                "live": { # This key "live" should match how DataManager expects to find it
+                    "type": "yfinance", # This should match a type DataManager can handle
+                                         # or be a direct instance if DataManager supports it.
+                                         # Assuming DataManager can use the instance directly for now.
+                    "instance": live_source # Or pass config for DataManager to create it
                 }
             },
             "features": [
-                "close", "volume", "sma_5", "sma_20", "rsi", 
+                "close", "volume", "sma_5", "sma_20", "rsi",
                 "macd", "bb_upper", "bb_lower", "returns"
             ]
         }
         
         return {
-            "live_source": live_source,
-            "config": data_config
+            "live_source": live_source, # This is the YFinanceDataSource instance
+            "config": data_manager_config_for_dm # This is the config for DataManager
         }
     
     def create_simulation_config(self, 
@@ -303,21 +337,36 @@ class DQNPaperTradingRunner:
         sim_config = self.create_simulation_config(initial_capital, symbols)
         
         # Register model in registry (simplified)
-        model_id = f"dqn_optimized_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        self.model_registry.register_model(
-            model_id=model_id,
-            model=self.model,
-            metadata={
-                "type": "dqn",
-                "hyperparameters": self.best_hyperparams,
-                "checkpoint_path": str(self.best_model_path),
-                "created_at": datetime.now().isoformat()
-            }
-        )
+        # Define model name and other metadata for registration
+        model_name = f"dqn_optimized_paper_trade" # More descriptive name
         
-        # Deploy to paper trading
+        # Prepare additional metadata, ensuring correct type
+        additional_model_metadata = {
+            "source_script": Path(__file__).name,
+            "hpo_checkpoint_path": str(self.best_model_path),
+            # "type" is derived from model.model_type by the registry
+            # "hyperparameters" are also derived by the registry
+            # "created_at" is handled by the registry
+        }
+
+        # Register model in registry
+        # The register_model method will generate its own model_id and version
+        registered_model_id = self.model_registry.register_model(
+            model=self.model,
+            model_name=model_name,
+            # version will be auto-generated
+            tags=["paper_trading", "dqn", "optimized"],
+            description="DQN model optimized via HPO, registered for paper trading.",
+            # parent_model_id can be added if applicable
+            # metrics can be added if pre-evaluation is done
+            # dataset_info can be added if relevant
+            additional_metadata=additional_model_metadata
+        )
+        self.logger.info(f"Model registered with ID: {registered_model_id}")
+        
+        # Deploy to paper trading using the ID returned by the registry
         simulation_id = self.paper_trading_deployer.deploy_to_paper_trading(
-            model_id=model_id,
+            model_id=registered_model_id, # Use the ID from registration
             simulation_config=sim_config
         )
         
@@ -372,45 +421,82 @@ class DQNPaperTradingRunner:
         
         return results
     
-    def _get_current_market_data(self, symbols: list, data_source) -> Dict[str, float]:
+    def _get_current_market_data(self, symbols: list, data_source: YFinanceDataSource) -> Optional[Dict[str, float]]:
         """Get current market data for symbols.
         
         Args:
             symbols: List of symbols
-            data_source: Data source instance
+            data_source: Data source instance (YFinanceDataSource)
             
         Returns:
-            Dictionary of symbol -> current price
+            Dictionary of symbol -> current price, or fallback to simulated prices.
         """
         try:
-            # Get latest data from source
-            data = data_source.get_latest_data()
+            self.logger.debug(f"Fetching latest market data for symbols: {symbols} using 1m interval, 2d period.")
+            # Fetch recent data. Using "2d" period and "1m" interval to get recent ticks.
+            # YFinanceDataSource.load_data will handle multiple tickers.
+            # Pass tickers explicitly to override any defaults in data_source's own config.
+            data = data_source.load_data(tickers=symbols, period="2d", interval="1m")
             
             if data is not None and not data.empty:
-                # Extract current prices (last close price for each symbol)
                 market_data = {}
-                for symbol in symbols:
-                    if symbol in data.columns:
-                        # Get the most recent price
-                        latest_price = data[symbol].dropna().iloc[-1] if not data[symbol].dropna().empty else None
-                        if latest_price is not None:
-                            market_data[symbol] = float(latest_price)
                 
-                return market_data
+                # Ensure the index is datetime for proper sorting and selection
+                if not isinstance(data.index, pd.DatetimeIndex):
+                    data.index = pd.to_datetime(data.index)
+                data = data.sort_index()
+
+                for symbol in symbols:
+                    # yfinance with group_by='ticker' returns columns as ('TICKER', 'PriceType')
+                    # e.g., ('AAPL', 'Close').
+                    # YFinanceDataSource.auto_adjust is True by default, so 'Close' should be adjusted.
+                    price_column_key = (symbol, 'Close')
+
+                    if price_column_key in data.columns:
+                        # Get the series for this symbol's close price
+                        symbol_price_series = data[price_column_key].dropna()
+                        if not symbol_price_series.empty:
+                            latest_price = symbol_price_series.iloc[-1]
+                            market_data[symbol] = float(latest_price)
+                            self.logger.debug(f"Latest price for {symbol} ('Close'): {latest_price}")
+                        else:
+                            self.logger.warning(f"No 'Close' price data found for {symbol} after dropna.")
+                    elif symbol in data.columns and not isinstance(data.columns, pd.MultiIndex):
+                        # Fallback for single ticker case where columns might not be MultiIndex
+                        # (YFinanceDataSource attempts to flatten this, but this adds robustness)
+                        symbol_price_series = data[symbol].dropna() # Assuming this column is the price
+                        if not symbol_price_series.empty:
+                            latest_price = symbol_price_series.iloc[-1]
+                            market_data[symbol] = float(latest_price)
+                            self.logger.debug(f"Latest price for {symbol} (single series): {latest_price}")
+                        else:
+                            self.logger.warning(f"No price data found for {symbol} (single series) after dropna.")
+                    else:
+                        self.logger.warning(f"Could not find price column for {symbol}. Tried key: {price_column_key}. Available columns: {list(data.columns)}")
+
+                if market_data: # if we successfully extracted some prices
+                    return market_data
+                else:
+                    self.logger.warning(f"Market data dictionary is empty after processing symbols: {symbols}. Raw data columns: {list(data.columns)}. Falling back to simulated prices.")
+                    return {s: np.random.uniform(100, 200) for s in symbols}
+
+            else: # data is None or empty
+                self.logger.warning(f"No data returned by data_source.load_data for symbols: {symbols}. Falling back to simulated prices.")
+                return {s: np.random.uniform(100, 200) for s in symbols}
             
         except Exception as e:
-            self.logger.error(f"Error getting market data: {e}")
-        
-        # Fallback: return simulated prices
-        return {symbol: np.random.uniform(100, 200) for symbol in symbols}
+            self.logger.error(f"Error getting current market data: {e}", exc_info=True)
+            self.logger.info("Falling back to simulated prices due to exception.")
+            return {s: np.random.uniform(100, 200) for s in symbols}
 
 
 def main():
     """Main entry point for paper trading script."""
     parser = argparse.ArgumentParser(description="Run paper trading with optimized DQN model")
     parser.add_argument(
-        "--config", 
-        type=str, 
+        "--config",
+        type=str,
+        default="reinforcestrategycreator_pipeline/configs/base/pipeline.yaml",
         help="Path to configuration file"
     )
     parser.add_argument(
@@ -444,6 +530,7 @@ def main():
     logging.getLogger().setLevel(getattr(logging, args.log_level))
     
     try:
+        print(f"DEBUG: args.config from argparse: '{args.config}'") # DEBUG
         # Initialize runner
         runner = DQNPaperTradingRunner(config_path=args.config)
         
