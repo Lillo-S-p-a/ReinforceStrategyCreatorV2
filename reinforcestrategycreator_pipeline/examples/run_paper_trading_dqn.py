@@ -537,6 +537,18 @@ def main():
     
     # Set logging level
     logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    # Set specific loggers to DEBUG for detailed output during paper trading
+    loggers_to_debug = [
+        "src.models.implementations.dqn",
+        "src.models.registry",
+        "src.deployment.paper_trading",
+        "src.deployment.manager",
+        "__main__"  # Ensure main script logs are also verbose
+    ]
+    for logger_name in loggers_to_debug:
+        logging.getLogger(logger_name).setLevel(logging.DEBUG)
+    logging.info(f"Explicitly set loggers to DEBUG: {loggers_to_debug}")
     
     try:
         print(f"DEBUG: args.config from argparse: '{args.config}'") # DEBUG
