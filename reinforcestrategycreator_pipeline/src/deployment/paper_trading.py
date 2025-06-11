@@ -315,12 +315,12 @@ class TradingSimulationEngine:
             # Check 2: If cash is positive, check against max_position_size limit based on cash.
             # This limit is on the value of a single potential position.
             if self.cash > 0:
-                max_allowed_order_value = self.cash * self.max_position_size
+                max_allowed_order_value = self.initial_capital * self.max_position_size
                 if calculated_order_value > max_allowed_order_value:
                     raise ValueError(
                         f"Order value {calculated_order_value:.2f} for {order.symbol} "
                         f"exceeds max position value limit ({max_allowed_order_value:.2f} = "
-                        f"{self.cash:.2f} cash * {self.max_position_size:.2f} max_pos_size_ratio)."
+                        f"{self.initial_capital:.2f} initial_capital * {self.max_position_size:.2f} max_pos_size_ratio)."
                     )
         
         # Check if shorting is allowed (existing logic with clearer message)
