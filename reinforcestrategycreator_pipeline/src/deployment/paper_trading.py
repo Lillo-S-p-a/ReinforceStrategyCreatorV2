@@ -130,12 +130,14 @@ class TradingSimulationEngine:
         # Setup logging
         self.logger = logging.getLogger(__name__)
     
-    def submit_order(self, order: Order) -> str:
+    def submit_order(self, order: Order, current_market_price: Optional[float] = None) -> str: # Added current_market_price
         """Submit an order for execution.
         
         Args:
             order: Order to submit
-            
+            current_market_price: Optional current market price for the order's symbol,
+                                  used for market order validation.
+                                  
         Returns:
             Order ID
             
@@ -143,17 +145,20 @@ class TradingSimulationEngine:
             ValueError: If order validation fails
         """
         # Validate order
-        self._validate_order(order)
+        self._validate_order(order, current_market_price) # Pass current_market_price
         
         # Check risk limits
         if self.risk_limit_hit:
             order.status = OrderStatus.REJECTED
-            self.logger.warning(f"Order {order.order_id} rejected due to risk limit")
+            self.logger.warning(f"Order {order.order_id} for {order.symbol} rejected due to risk limit being hit.") # Added symbol
+            self.order_history.append(order) # Also log rejected orders to history
+            if order.order_id in self.orders: # Remove if it was added (it shouldn't be if rejected before adding)
+                del self.orders[order.order_id]
             return order.order_id
         
         # Add to pending orders
         self.orders[order.order_id] = order
-        self.logger.info(f"Order submitted: {order.order_id}")
+        self.logger.info(f"Order submitted: {order.order_id} for {order.symbol} ({order.side.value} {order.quantity} @ {order.price or 'Market'})") # Enhanced log
         
         return order.order_id
     
@@ -276,25 +281,64 @@ class TradingSimulationEngine:
         self.risk_limit_hit = False
         self.logger.info("Daily risk limits reset")
     
-    def _validate_order(self, order: Order) -> None:
-        """Validate order parameters."""
-        # Check position size limit
-        order_value = order.quantity * (order.price or 0)
-        if order_value > self.cash * self.max_position_size:
-            raise ValueError(f"Order size exceeds maximum position size limit")
+    def _validate_order(self, order: Order, current_market_price: Optional[float] = None) -> None:
+        """Validate order parameters, including position sizing against cash and limits."""
         
-        # Check if shorting is allowed
+        calculated_order_value = 0.0
+        price_to_use_for_value_calc = 0.0
+
+        if order.order_type == OrderType.MARKET:
+            if current_market_price is not None:
+                price_to_use_for_value_calc = current_market_price
+            else:
+                self.logger.warning(
+                    f"Market order {order.order_id} for {order.symbol} validation is using price 0 "
+                    f"due to missing current_market_price. This may lead to incorrect validation if cash is negative."
+                )
+                price_to_use_for_value_calc = 0
+        elif order.price is not None: # For LIMIT or STOP_LIMIT where order.price is set
+            price_to_use_for_value_calc = order.price
+        # If order.price is None and not a market order with current_market_price,
+        # price_to_use_for_value_calc remains 0.
+
+        calculated_order_value = abs(order.quantity * price_to_use_for_value_calc) # Use abs value for checks
+
+        # Position Sizing and Cash Check
+        if order.side == OrderSide.BUY:
+            # Check 1: If trying to spend money when cash is zero or negative
+            if self.cash <= 0 and calculated_order_value > 0:
+                 raise ValueError(
+                     f"Cannot place BUY order for {order.symbol} (estimated value: {calculated_order_value:.2f}) "
+                     f"with non-positive cash ({self.cash:.2f})."
+                 )
+            
+            # Check 2: If cash is positive, check against max_position_size limit based on cash.
+            # This limit is on the value of a single potential position.
+            if self.cash > 0:
+                max_allowed_order_value = self.cash * self.max_position_size
+                if calculated_order_value > max_allowed_order_value:
+                    raise ValueError(
+                        f"Order value {calculated_order_value:.2f} for {order.symbol} "
+                        f"exceeds max position value limit ({max_allowed_order_value:.2f} = "
+                        f"{self.cash:.2f} cash * {self.max_position_size:.2f} max_pos_size_ratio)."
+                    )
+        
+        # Check if shorting is allowed (existing logic with clearer message)
         if not self.enable_shorting and order.side == OrderSide.SELL:
             position = self.positions.get(order.symbol)
-            if not position or position.quantity < order.quantity:
-                raise ValueError("Short selling not allowed")
+            # If no position, or trying to sell more than owned
+            if not position or (position.quantity < order.quantity and position.quantity >= 0):
+                 raise ValueError(
+                    f"Short selling not allowed for {order.symbol}, or insufficient shares to sell "
+                    f"(current: {position.quantity if position else 0}, trying to sell: {order.quantity})."
+                )
         
-        # Validate order type parameters
+        # Validate order type parameters (existing logic with clearer messages)
         if order.order_type in [OrderType.LIMIT, OrderType.STOP_LIMIT] and order.price is None:
-            raise ValueError(f"{order.order_type.value} order requires price")
+            raise ValueError(f"{order.order_type.value} order for {order.symbol} requires a price.")
         
         if order.order_type in [OrderType.STOP, OrderType.STOP_LIMIT] and order.stop_price is None:
-            raise ValueError(f"{order.order_type.value} order requires stop price")
+            raise ValueError(f"{order.order_type.value} order for {order.symbol} requires a stop_price.")
     
     def _should_fill_order(self, order: Order, current_price: float) -> bool:
         """Check if order should be filled at current price."""
@@ -685,9 +729,16 @@ class PaperTradingDeployer:
             )
             
             try:
-                engine.submit_order(order)
+                # Pass current market price for the specific symbol for validation of market orders
+                current_price_for_symbol = market_data.get(order.symbol)
+                if order.order_type == OrderType.MARKET and current_price_for_symbol is None:
+                    self.logger.warning(
+                        f"Market data not available for {order.symbol} at order submission time. "
+                        f"Order {order.order_id} might be validated with price 0 by the engine."
+                    )
+                engine.submit_order(order, current_market_price=current_price_for_symbol)
             except ValueError as e:
-                self.logger.error(f"Failed to submit order: {e}")
+                self.logger.error(f"Failed to submit order for {order.symbol}: {e}") # Added symbol to log
         
         # Process market data
         engine.process_market_data(market_data)
