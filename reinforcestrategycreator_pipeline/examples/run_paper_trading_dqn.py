@@ -386,13 +386,15 @@ class DQNPaperTradingRunner:
                 
                 # Check if it's time for an update
                 if (current_time - last_update).total_seconds() >= update_interval:
-                    # Get current market data
-                    market_data = self._get_current_market_data(symbols, data_sources["live_source"])
+                    # Get current market data and features
+                    market_data_tuple = self._get_current_market_data(symbols, data_sources["live_source"])
                     
-                    if market_data:
+                    if market_data_tuple:
+                        market_data, prepared_feature_vectors = market_data_tuple
+                        
                         # Process market update
                         self.paper_trading_deployer.process_market_update(
-                            simulation_id, market_data
+                            simulation_id, market_data, prepared_feature_vectors
                         )
                         
                         # Log current status
@@ -421,82 +423,103 @@ class DQNPaperTradingRunner:
         
         return results
     
-    def _get_current_market_data(self, symbols: list, data_source: YFinanceDataSource) -> Optional[Dict[str, float]]:
-        """Get current market data for symbols.
+    def _get_current_market_data(
+        self, symbols: list, data_source: YFinanceDataSource
+    ) -> Optional[Tuple[Dict[str, float], Dict[str, np.ndarray]]]:
+        """Get current market data and features for symbols.
         
         Args:
             symbols: List of symbols
             data_source: Data source instance (YFinanceDataSource)
             
         Returns:
-            Dictionary of symbol -> current price, or fallback to simulated prices.
+            A tuple containing:
+                - Dictionary of symbol -> current price
+                - Dictionary of symbol -> latest feature vector (NumPy array)
+            Returns None if data fetching or processing fails critically.
+            Fallback to simulated prices/features if minor errors occur.
         """
+        latest_prices: Dict[str, float] = {}
+        latest_feature_vectors: Dict[str, np.ndarray] = {}
+        simulated_prices = {s: np.random.uniform(100, 200) for s in symbols}
+
         try:
-            self.logger.debug(f"Fetching latest market data for symbols: {symbols} using 1m interval, 2d period.")
-            # Fetch recent data. Using "2d" period and "1m" interval to get recent ticks.
-            # YFinanceDataSource.load_data will handle multiple tickers.
-            # Pass tickers explicitly to override any defaults in data_source's own config.
-            data = data_source.load_data(tickers=symbols, period="2d", interval="1m")
-            
-            if data is not None and not data.empty:
-                market_data = {}
+            self.logger.debug(f"Fetching latest raw market data for symbols: {symbols} using 1m interval, 2d period.")
+            raw_market_df_all_symbols = data_source.load_data(tickers=symbols, period="2d", interval="1m")
+
+            if raw_market_df_all_symbols is None or raw_market_df_all_symbols.empty:
+                self.logger.warning(f"No raw data returned for symbols: {symbols}. Using simulated prices and no features.")
+                return simulated_prices, {s: np.array([]) for s in symbols} # Empty array for features
+
+            # Ensure index is datetime
+            if not isinstance(raw_market_df_all_symbols.index, pd.DatetimeIndex):
+                raw_market_df_all_symbols.index = pd.to_datetime(raw_market_df_all_symbols.index)
+            raw_market_df_all_symbols = raw_market_df_all_symbols.sort_index()
+
+            for symbol in symbols:
+                symbol_raw_df: Optional[pd.DataFrame] = None
                 
-                # Ensure the index is datetime for proper sorting and selection
-                if not isinstance(data.index, pd.DatetimeIndex):
-                    data.index = pd.to_datetime(data.index)
-                data = data.sort_index()
+                if len(symbols) == 1 and not isinstance(raw_market_df_all_symbols.columns, pd.MultiIndex):
+                    # Single symbol, non-MultiIndex DataFrame
+                    if not raw_market_df_all_symbols.empty:
+                        symbol_raw_df = raw_market_df_all_symbols.copy()
+                elif isinstance(raw_market_df_all_symbols.columns, pd.MultiIndex) and symbol in raw_market_df_all_symbols.columns.levels[0]:
+                    # Multi-symbol DataFrame, select columns for the current symbol
+                    symbol_raw_df = raw_market_df_all_symbols[symbol].copy()
+                else: # Symbol not found or unexpected DataFrame structure
+                    self.logger.warning(f"Could not isolate raw data for symbol {symbol} from fetched data. Columns: {raw_market_df_all_symbols.columns}")
+                    latest_prices[symbol] = simulated_prices[symbol]
+                    latest_feature_vectors[symbol] = np.array([]) # Empty feature vector
+                    continue
 
-                if len(symbols) == 1 and not isinstance(data.columns, pd.MultiIndex) and 'Close' in data.columns:
-                    # Single symbol, non-MultiIndex case
-                    symbol = symbols[0] # Get the single symbol name
-                    symbol_price_series = data['Close'].dropna()
-                    if not symbol_price_series.empty:
-                        latest_price = symbol_price_series.iloc[-1]
-                        market_data[symbol] = float(latest_price)
-                        self.logger.debug(f"Latest price for single symbol {symbol} ('Close'): {latest_price}")
+                if symbol_raw_df is None or symbol_raw_df.empty:
+                    self.logger.warning(f"Raw data for symbol {symbol} is empty. Using simulated price and no features.")
+                    latest_prices[symbol] = simulated_prices[symbol]
+                    latest_feature_vectors[symbol] = np.array([])
+                    continue
+                
+                # Get latest price from raw data
+                if 'Close' in symbol_raw_df.columns and not symbol_raw_df['Close'].dropna().empty:
+                    latest_prices[symbol] = float(symbol_raw_df['Close'].dropna().iloc[-1])
+                else:
+                    self.logger.warning(f"No 'Close' price for {symbol} in raw data. Using simulated price.")
+                    latest_prices[symbol] = simulated_prices[symbol]
+
+                # Transform raw data to engineered features
+                try:
+                    # Assuming data_manager is configured with the correct feature pipeline
+                    # The source_id here is for DataManager's internal logic if it uses it
+                    # (e.g., for caching or specific pipeline selection)
+                    engineered_features_df = self.data_manager.transform_data(
+                        symbol_raw_df.copy(), # Pass a copy to avoid modifying original
+                        source_id=f"live_features_{symbol}"
+                    )
+                    
+                    if engineered_features_df is not None and not engineered_features_df.empty:
+                        # Ensure all expected feature columns are present, fill NaNs if necessary
+                        # This step depends on how your feature pipeline handles missing initial values
+                        # For simplicity, we'll take the last row and assume it's mostly complete.
+                        # Models should ideally handle NaNs if they can occur.
+                        feature_vector = engineered_features_df.iloc[-1].values
+                        latest_feature_vectors[symbol] = feature_vector
+                        self.logger.debug(f"Generated feature vector for {symbol} with shape {feature_vector.shape}")
                     else:
-                        self.logger.warning(f"No 'Close' price data found for single symbol {symbol} after dropna.")
-                else:
-                    # Multi-symbol case or if yfinance returns MultiIndex even for single symbol
-                    for symbol in symbols:
-                        price_column_key = (symbol, 'Close')
-                        if price_column_key in data.columns:
-                            # Get the series for this symbol's close price
-                            symbol_price_series = data[price_column_key].dropna()
-                            if not symbol_price_series.empty:
-                                latest_price = symbol_price_series.iloc[-1]
-                                market_data[symbol] = float(latest_price)
-                                self.logger.debug(f"Latest price for {symbol} ('Close'): {latest_price}")
-                            else:
-                                self.logger.warning(f"No 'Close' price data found for {symbol} with key {price_column_key} after dropna.")
-                        else:
-                            # Fallback for cases where a single symbol might still not be in ('SYMBOL', 'Close') format
-                            # but directly as 'Close' if the DataFrame was unexpectedly simple.
-                            if 'Close' in data.columns and len(symbols) == 1 and symbols[0] == symbol:
-                                symbol_price_series = data['Close'].dropna()
-                                if not symbol_price_series.empty:
-                                    latest_price = symbol_price_series.iloc[-1]
-                                    market_data[symbol] = float(latest_price)
-                                    self.logger.debug(f"Latest price for {symbol} (fallback 'Close' column): {latest_price}")
-                                else:
-                                    self.logger.warning(f"No 'Close' price data found for {symbol} (fallback) after dropna.")
-                            else:
-                                self.logger.warning(f"Could not find price column for {symbol}. Tried key: {price_column_key} and direct 'Close'. Available columns: {list(data.columns)}")
+                        self.logger.warning(f"Engineered features for {symbol} are empty. No feature vector generated.")
+                        latest_feature_vectors[symbol] = np.array([])
+                except Exception as fe_e:
+                    self.logger.error(f"Error during feature engineering for {symbol}: {fe_e}", exc_info=True)
+                    latest_feature_vectors[symbol] = np.array([]) # Fallback to empty features
 
-                if market_data: # if we successfully extracted some prices
-                    return market_data
-                else:
-                    self.logger.warning(f"Market data dictionary is empty after processing symbols: {symbols}. Raw data columns: {list(data.columns)}. Falling back to simulated prices.")
-                    return {s: np.random.uniform(100, 200) for s in symbols}
+            if not latest_prices: # If all symbols failed to get prices
+                 self.logger.warning(f"Completely failed to get any market prices. Returning only simulated prices.")
+                 return simulated_prices, {s: np.array([]) for s in symbols}
 
-            else: # data is None or empty
-                self.logger.warning(f"No data returned by data_source.load_data for symbols: {symbols}. Falling back to simulated prices.")
-                return {s: np.random.uniform(100, 200) for s in symbols}
-            
+            return latest_prices, latest_feature_vectors
+
         except Exception as e:
-            self.logger.error(f"Error getting current market data: {e}", exc_info=True)
-            self.logger.info("Falling back to simulated prices due to exception.")
-            return {s: np.random.uniform(100, 200) for s in symbols}
+            self.logger.error(f"Critical error in _get_current_market_data: {e}", exc_info=True)
+            self.logger.info("Falling back to all simulated prices and no features due to critical exception.")
+            return simulated_prices, {s: np.array([]) for s in symbols} # Fallback
 
 
 def main():

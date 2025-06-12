@@ -697,13 +697,15 @@ class PaperTradingDeployer:
     def process_market_update(
         self,
         simulation_id: str,
-        market_data: Dict[str, float]
+        market_data: Dict[str, float],
+        prepared_features_map: Dict[str, np.ndarray] # New parameter
     ) -> None:
         """Process market data update for a simulation.
         
         Args:
             simulation_id: ID of the simulation
             market_data: Dictionary of symbol -> price
+            prepared_features_map: Dictionary of symbol -> prepared numpy array of features
         """
         if simulation_id not in self.active_simulations:
             raise ValueError(f"Simulation {simulation_id} not found")
@@ -717,11 +719,35 @@ class PaperTradingDeployer:
         model = simulation["model"]
         
         # Get model predictions/signals
-        # This is a simplified example - actual implementation would depend on model interface
-        signals = self._get_model_signals(model, market_data, engine.get_positions(), engine.initial_capital, engine.max_position_size)
+        signals_to_submit: List[Dict[str, Any]] = []
+        current_engine_positions = engine.get_positions() # Get once before loop
+
+        for symbol, price in market_data.items():
+            if symbol not in prepared_features_map:
+                self.logger.warning(
+                    f"No prepared features for symbol {symbol} in process_market_update. "
+                    f"Skipping signal generation for this symbol."
+                )
+                continue
+
+            symbol_features = prepared_features_map[symbol]
+            
+            # Call _get_model_signals for each symbol
+            signal = self._get_model_signals(
+                model,
+                symbol,
+                price,
+                symbol_features,
+                current_engine_positions,
+                engine.initial_capital,
+                engine.max_position_size # This is the ratio, consistent with _get_model_signals
+            )
+
+            if signal:
+                signals_to_submit.append(signal)
         
         # Submit orders based on signals
-        for signal in signals:
+        for signal_data in signals_to_submit:
             order = Order(
                 order_id=f"order_{simulation_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
                 symbol=signal["symbol"],
@@ -850,62 +876,108 @@ class PaperTradingDeployer:
     def _get_model_signals(
         self,
         model: Any,
-        market_data: Dict[str, float],
-        positions: Dict[str, Position],
+        symbol: str,  # Process one symbol at a time
+        price: float, # Current price for this symbol
+        prepared_symbol_features: np.ndarray, # Prepared features for this symbol
+        current_positions: Dict[str, Position], # Current overall positions
         engine_initial_capital: float,
         engine_max_position_size_ratio: float
-    ) -> List[Dict[str, Any]]:
-        """Get trading signals from model.
+    ) -> Optional[Dict[str, Any]]: # Returns a single signal or None
+        """Get a trading signal from the model for a single symbol.
         
-        This is a simplified example - actual implementation would
-        depend on the specific model interface and strategy.
-        """
-        signals = []
-        
-        # Mock signal generation
-        for symbol, price in market_data.items():
-            # Get model prediction (simplified)
-            # Ensure the model's predict method matches expected input
-            # For a DQN model, this might involve passing state features
-            # For simplicity, we'll assume it can take basic market data for now
-            # This part needs to align with your actual DQN model's predict method signature
-            try:
-                # Construct features as expected by your DQN model
-                # This is a placeholder; adjust based on your model's feature engineering
-                features = {"symbol": symbol, "price": price, "positions": positions.get(symbol)} 
-                prediction = model.predict(features) 
-            except Exception as e:
-                self.logger.error(f"Error during model prediction for {symbol}: {e}", exc_info=True)
-                prediction = "hold" # Default to hold on error
+        Args:
+            model: The trading model.
+            symbol: The symbol to generate a signal for.
+            price: The current market price of the symbol.
+            prepared_symbol_features: NumPy array of features for the model.
+            current_positions: Dictionary of current portfolio positions.
+            engine_initial_capital: Initial capital of the trading engine.
+            engine_max_position_size_ratio: Max position size ratio from the engine.
             
-            if prediction == "buy" and symbol not in positions:
-                if price > 0:  # Ensure price is positive to avoid division by zero
-                    max_allowed_value = engine_initial_capital * engine_max_position_size_ratio
-                    dynamic_quantity = int(max_allowed_value / price)  # Use int for whole shares
-                    
-                    if dynamic_quantity > 0:  # Only trade if we can afford at least one share
-                        signals.append({
-                            "symbol": symbol,
-                            "side": "buy",
-                            "quantity": dynamic_quantity,  # Use dynamic quantity
-                            "order_type": "market"
-                        })
-                    else:
-                        self.logger.info(
-                            f"Calculated buy quantity for {symbol} is 0 or less ({dynamic_quantity}), skipping order. "
-                            f"Max value: {max_allowed_value:.2f}, Price: {price:.2f}"
-                        )
-                else:
-                    self.logger.warning(
-                        f"Price for {symbol} is not positive ({price:.2f}), cannot calculate buy quantity."
-                    )
-            elif prediction == "sell" and symbol in positions:
-                position = positions[symbol]
-                signals.append({
-                    "symbol": symbol,
-                    "side": "sell",
-                    "quantity": position.quantity,
-                    "order_type": "market"
-                })
+        Returns:
+            A signal dictionary if a trade is advised, otherwise None.
+        """
         
-        return signals
+        prediction_action: str
+        try:
+            # Ensure features are in the correct shape for the model, e.g., (1, num_features)
+            if not isinstance(prepared_symbol_features, np.ndarray):
+                self.logger.error(
+                    f"Prepared features for {symbol} are not a numpy array, but {type(prepared_symbol_features)}. "
+                    f"Cannot predict. Features: {prepared_symbol_features}"
+                )
+                return None # Cannot proceed without numpy array
+
+            if prepared_symbol_features.ndim == 1:
+                reshaped_features = prepared_symbol_features.reshape(1, -1)
+            elif prepared_symbol_features.ndim == 2 and prepared_symbol_features.shape[0] == 1:
+                reshaped_features = prepared_symbol_features # Already in (1, num_features) format
+            else:
+                self.logger.warning(
+                    f"Features for {symbol} have unexpected shape {prepared_symbol_features.shape}. "
+                    f"Attempting to use as is, but model might expect (1, num_features)."
+                )
+                reshaped_features = prepared_symbol_features
+
+            prediction_output = model.predict(reshaped_features)
+            
+            # Assuming prediction_output is the action string like "buy", "sell", "hold"
+            # If it's an array of probabilities or logits, further processing is needed here.
+            # For now, directly use it if it's a string, or try to interpret if it's a common format.
+            if isinstance(prediction_output, (list, np.ndarray)):
+                 # Example: if model outputs action index for [buy, sell, hold]
+                if len(prediction_output.shape) == 2 and prediction_output.shape[0] == 1: # e.g. [[0]] or [[action_idx]]
+                    action_idx = int(prediction_output[0,0])
+                elif len(prediction_output.shape) == 1 and prediction_output.shape[0] == 1: # e.g. [0] or [action_idx]
+                    action_idx = int(prediction_output[0])
+                else: # Try to get the most likely action if it's a probability distribution
+                    action_idx = np.argmax(prediction_output)
+
+                action_map = {0: "buy", 1: "sell", 2: "hold"} # Example mapping
+                if hasattr(model, 'action_space_map') and isinstance(model.action_space_map, dict):
+                    action_map = model.action_space_map # Use model's map if available
+                
+                prediction_action = action_map.get(action_idx, "hold")
+                self.logger.debug(f"Model output for {symbol}: {prediction_output}, interpreted action_idx: {action_idx}, action: {prediction_action}")
+
+            elif isinstance(prediction_output, str):
+                prediction_action = prediction_output
+            else:
+                self.logger.error(f"Unexpected prediction output type for {symbol}: {type(prediction_output)}. Defaulting to 'hold'.")
+                prediction_action = "hold"
+
+        except Exception as e:
+            self.logger.error(f"Error during model prediction for {symbol}: {e}", exc_info=True)
+            prediction_action = "hold" # Default to hold on error
+        
+        if prediction_action == "buy" and symbol not in current_positions:
+            if price > 0:
+                max_allowed_value = engine_initial_capital * engine_max_position_size_ratio
+                dynamic_quantity = int(max_allowed_value / price)
+                
+                if dynamic_quantity > 0:
+                    return {
+                        "symbol": symbol,
+                        "side": "buy",
+                        "quantity": dynamic_quantity,
+                        "order_type": "market"
+                    }
+                else:
+                    self.logger.info(
+                        f"Calculated buy quantity for {symbol} is 0 or less ({dynamic_quantity}), skipping order. "
+                        f"Max value: {max_allowed_value:.2f}, Price: {price:.2f}"
+                    )
+            else:
+                self.logger.warning(
+                    f"Price for {symbol} is not positive ({price:.2f}), cannot calculate buy quantity."
+                )
+        elif prediction_action == "sell" and symbol in current_positions:
+            position = current_positions[symbol]
+            return {
+                "symbol": symbol,
+                "side": "sell",
+                "quantity": position.quantity,
+                "order_type": "market"
+            }
+            
+        return None # No signal generated
