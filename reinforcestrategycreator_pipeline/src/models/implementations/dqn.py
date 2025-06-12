@@ -76,23 +76,28 @@ class DQN(ModelBase):
         Args:
             config: Model configuration
         """
-        super().__init__(config)
+        super().__init__(config) # This sets self.hyperparameters and self.logger
+
+        # Store the full config for get_model_state and registry
+        self.model_init_config = config.copy() # Store a copy
+        self.logger.debug(f"DQN.__init__: Stored model_init_config: {self.model_init_config}")
         
-        # Extract hyperparameters
-        self.hidden_layers = self.hyperparameters.get("hidden_layers", [256, 128, 64]) # Default from task description implies 2-layer, but code default is 3
+        # Extract hyperparameters (already done by super().__init__, but ensure they are accessible)
+        # self.hyperparams is set by super().__init__(config)
+        self.hidden_layers = self.hyperparameters.get("hidden_layers", [256, 128, 64])
         self.activation = self.hyperparameters.get("activation", "relu")
         self.dropout_rate = self.hyperparameters.get("dropout_rate", 0.2)
         self.double_dqn = self.hyperparameters.get("double_dqn", True)
         self.dueling_dqn = self.hyperparameters.get("dueling_dqn", False)
         self.prioritized_replay = self.hyperparameters.get("prioritized_replay", True)
         
-        # Learning and Optimizer settings
+        # Learning and Optimizer settings from hyperparameters
         self.learning_rate = self.hyperparameters.get("learning_rate", 0.001)
         self.beta1 = self.hyperparameters.get("adam_beta1", 0.9)
         self.beta2 = self.hyperparameters.get("adam_beta2", 0.999)
-        self.epsilon = self.hyperparameters.get("adam_epsilon", 1e-8)
+        self.epsilon = self.hyperparameters.get("adam_epsilon", 1e-8) # Adam epsilon, not exploration epsilon
 
-        # Memory settings
+        # Memory settings from hyperparameters
         self.memory_size = self.hyperparameters.get("memory_size", 10000)
         self.update_frequency = self.hyperparameters.get("update_frequency", 4)
         self.target_update_frequency = self.hyperparameters.get("target_update_frequency", 100)
@@ -101,85 +106,79 @@ class DQN(ModelBase):
         self.replay_buffer = ReplayBuffer(self.memory_size)
         self.q_network = None
         self.target_network = None
-        self.optimizer = None # This might be redundant with optimizer_state
+        self.optimizer = None
         self.steps = 0
         self.episodes = 0
         
-        # Initialize metrics calculator for trading-specific metrics (lazy import to avoid circular dependency)
         from ...evaluation.metrics import MetricsCalculator
-        self.metrics_calculator = MetricsCalculator(config.get("metrics_config", {}))
+        self.metrics_calculator = MetricsCalculator(self.model_init_config.get("metrics_config", {}))
 
-        # Initialize shapes based on observation and action spaces set by ModelBase
-        if hasattr(self, 'observation_space') and self.observation_space is not None and \
-           hasattr(self.observation_space, 'shape'):
+        # Structural parameters from model_init_config (not hyperparameters dict)
+        self.input_dim = self.model_init_config.get("input_dim")
+        self.output_dim = self.model_init_config.get("output_dim")
+
+        # Initialize self.hidden_dims, preferring model_init_config, then hyperparameters
+        self.hidden_dims = self.model_init_config.get("hidden_dims")
+        if self.hidden_dims is None:
+            # Fallback to hidden_layers from hyperparameters if hidden_dims not in model_init_config
+            self.hidden_dims = self.hyperparameters.get("hidden_layers", [256, 128, 64])
+            self.logger.info(f"DQN.__init__: 'hidden_dims' not in model_init_config. Using 'hidden_layers' from hyperparameters for self.hidden_dims: {self.hidden_dims}")
+        else:
+            self.logger.info(f"DQN.__init__: Set self.hidden_dims from model_init_config: {self.hidden_dims}")
+
+        # self.hidden_layers is already set from self.hyperparameters (line 87).
+        # Log if the source for self.hidden_layers (hyperparameters) and final self.hidden_dims differ.
+        # The network build process will use self.hidden_dims.
+        if self.hyperparameters.get("hidden_layers") != self.hidden_dims:
+            self.logger.warning(
+                f"DQN.__init__: Value for 'hidden_layers' from hyperparameters ({self.hyperparameters.get('hidden_layers')}) "
+                f"differs from final 'self.hidden_dims' ({self.hidden_dims}). "
+                f"The network will be built using self.hidden_dims: {self.hidden_dims}."
+            )
+        
+        self.input_shape: Optional[Tuple[int, ...]] = None
+        self.output_shape: Optional[Tuple[int, ...]] = None
+        self.n_actions: Optional[int] = None
+
+        if self.input_dim is not None:
+            self.input_shape = (self.input_dim,)
+            self.logger.info(f"DQN.__init__: Set input_shape from input_dim: {self.input_shape}")
+        elif hasattr(self, 'observation_space') and self.observation_space is not None and hasattr(self.observation_space, 'shape'):
             self.input_shape = self.observation_space.shape
             self.logger.info(f"DQN.__init__: Set input_shape from observation_space: {self.input_shape}")
         else:
-            # Fallback if observation_space or its shape isn't set, try from config
-            input_dim = config.get("input_dim")
-            if input_dim is not None:
-                self.input_shape = (input_dim,)
-                self.logger.info(f"DQN.__init__: Set input_shape from config input_dim: {self.input_shape}")
-            else:
-                self.input_shape = None # Or raise error
-                self.logger.warning("DQN.__init__: input_shape could not be determined from observation_space or config.")
+            self.logger.warning("DQN.__init__: input_shape could not be determined.")
 
-        if hasattr(self, 'action_space') and self.action_space is not None and \
-           hasattr(self.action_space, 'n'):
+        if self.output_dim is not None:
+            self.output_shape = (self.output_dim,)
+            self.n_actions = self.output_dim
+            self.logger.info(f"DQN.__init__: Set output_shape and n_actions from output_dim: {self.output_shape}, {self.n_actions}")
+        elif hasattr(self, 'action_space') and self.action_space is not None and hasattr(self.action_space, 'n'):
             self.output_shape = (self.action_space.n,)
             self.n_actions = self.action_space.n
             self.logger.info(f"DQN.__init__: Set output_shape from action_space: {self.output_shape}, n_actions: {self.n_actions}")
         else:
-            # Fallback if action_space or its n isn't set, try from config
-            output_dim = config.get("output_dim")
-            if output_dim is not None:
-                self.output_shape = (output_dim,)
-                self.n_actions = output_dim
-                self.logger.info(f"DQN.__init__: Set output_shape and n_actions from config output_dim: {self.output_shape}, {self.n_actions}")
-            else:
-                self.output_shape = None # Or raise error
-                self.n_actions = None # Or raise error
-                self.logger.warning("DQN.__init__: output_shape and n_actions could not be determined from action_space or config.")
+            self.logger.warning("DQN.__init__: output_shape and n_actions could not be determined.")
         
-        # Training history - expanded to include trading metrics and RL-specific metrics
+        self.is_model_built = False # Explicitly set to False initially
+        
+        # self.config is used by ModelRegistry. It should be the model_init_config.
+        # This is already set by super().__init__(config) if config is passed,
+        # but we ensure it's our copy.
+        self.config = self.model_init_config
+
+
+        # Training history - expanded
         self.training_history = {
-            # Core RL metrics
-            "episode_rewards": [],
-            "episode_lengths": [],
-            "losses": [],
-            "epsilon_values": [],
-            # Additional RL-specific metrics
-            "rl_episode_reward": [],      # Same as episode_rewards but explicitly named for RL
-            "rl_episode_length": [],      # Same as episode_lengths but explicitly named for RL
-            "rl_loss": [],                # Q-learning loss per training step
-            "rl_entropy": [],             # Exploration entropy (epsilon-based for DQN)
-            "rl_learning_rate": [],       # Current learning rate
-            "rl_value_estimates": [],     # Average Q-values per episode
-            "rl_td_error": [],            # Temporal Difference error
-            "rl_kl_divergence": [],       # KL divergence (approximated for DQN)
-            "rl_explained_variance": [],  # Explained variance of value function
-            "rl_success_rate": [],        # Success rate (profitable episodes)
-            # Portfolio tracking for metrics calculation
-            "portfolio_values": [],
-            "episode_returns": [],
-            "trades": [],
-            # Trading-specific metrics (calculated per episode)
-            "sharpe_ratio": [],
-            "sortino_ratio": [],
-            "max_drawdown": [],
-            "calmar_ratio": [],
-            "win_rate": [],
-            "profit_factor": [],
-            "average_win": [],
-            "average_loss": [],
-            "expectancy": [],
-            "volatility": [],
-            "downside_deviation": [],
-            "value_at_risk": [],
-            "conditional_value_at_risk": [],
-            "pnl": [],
-            "pnl_percentage": [],
-            "total_return": []
+            "episode_rewards": [], "episode_lengths": [], "losses": [], "epsilon_values": [],
+            "rl_episode_reward": [], "rl_episode_length": [], "rl_loss": [], "rl_entropy": [],
+            "rl_learning_rate": [], "rl_value_estimates": [], "rl_td_error": [], "rl_kl_divergence": [],
+            "rl_explained_variance": [], "rl_success_rate": [], "portfolio_values": [],
+            "episode_returns": [], "trades": [], "sharpe_ratio": [], "sortino_ratio": [],
+            "max_drawdown": [], "calmar_ratio": [], "win_rate": [], "profit_factor": [],
+            "average_win": [], "average_loss": [], "expectancy": [], "volatility": [],
+            "downside_deviation": [], "value_at_risk": [], "conditional_value_at_risk": [],
+            "pnl": [], "pnl_percentage": [], "total_return": []
         }
     
     def build(self, input_shape: Tuple[int, ...], output_shape: Tuple[int, ...]) -> None:
@@ -248,7 +247,7 @@ class DQN(ModelBase):
         prev_size = input_size
         
         # Hidden layers
-        for i, hidden_size in enumerate(self.hidden_layers):
+        for i, hidden_size in enumerate(self.hidden_dims):
             weights[f"W{i}"] = np.random.randn(prev_size, hidden_size) * 0.01
             weights[f"b{i}"] = np.zeros(hidden_size)
             prev_size = hidden_size
@@ -287,7 +286,7 @@ class DQN(ModelBase):
             raise ValueError("Network weights must be a dictionary")
         
         # Check if required weight keys exist
-        for i in range(len(self.hidden_layers)):
+        for i in range(len(self.hidden_dims)): # Use hidden_dims
             if f"W{i}" not in weights or f"b{i}" not in weights:
                 raise KeyError(f"Missing weight key W{i} or b{i} in network weights. Available keys: {list(weights.keys())}")
         
@@ -300,7 +299,7 @@ class DQN(ModelBase):
         if np.isnan(x).any(): self.logger.warning(f"_forward: NaN in input state x: {x}")
 
         # Hidden layers
-        for i in range(len(self.hidden_layers)):
+        for i in range(len(self.hidden_dims)): # Use hidden_dims
             x_prev = x
             W = weights[f"W{i}"]
             b = weights[f"b{i}"]
@@ -682,7 +681,7 @@ class DQN(ModelBase):
         
         # Generalized check for all weight matrices
         all_param_keys_for_check = []
-        for i in range(len(self.hidden_layers)):
+        for i in range(len(self.hidden_dims)): # Use hidden_dims
             all_param_keys_for_check.extend([f"W{i}", f"b{i}"])
         all_param_keys_for_check.extend(["W_out", "b_out"])
 
@@ -699,7 +698,7 @@ class DQN(ModelBase):
 
         # Hidden layers
         current_A = X_batch
-        for l_idx in range(len(self.hidden_layers)):
+        for l_idx in range(len(self.hidden_dims)): # Use hidden_dims
             Wl = current_weights[f"W{l_idx}"]
             bl = current_weights[f"b{l_idx}"]
             
@@ -716,7 +715,7 @@ class DQN(ModelBase):
         b_out = current_weights["b_out"]
         # The input to the output layer is the activation of the last hidden layer,
         # or X_batch if there are no hidden layers.
-        input_to_output_layer = A_layers[len(self.hidden_layers) - 1] if self.hidden_layers else X_batch
+        input_to_output_layer = A_layers[len(self.hidden_dims) - 1] if self.hidden_dims else X_batch # Use hidden_dims
         
         Z_layers["out"] = input_to_output_layer @ W_out + b_out
         current_q_values_all_actions = Z_layers["out"] # Q-values are pre-activation of output
@@ -731,7 +730,7 @@ class DQN(ModelBase):
 
         # --- Backward pass ---
         grads = {}
-        num_hidden_layers = len(self.hidden_layers)
+        num_hidden_layers = len(self.hidden_dims) # Use hidden_dims
 
         # Gradient of loss w.r.t. Z_out (output layer pre-activation)
         # dL/dQ_selected * dQ_selected/dZ_out (where dQ_selected/dZ_out is 1 for the selected action, 0 otherwise)
@@ -784,7 +783,7 @@ class DQN(ModelBase):
         t = opt_state["t"]
         
         param_keys_for_adam = []
-        for i in range(len(self.hidden_layers)):
+        for i in range(len(self.hidden_dims)): # Use hidden_dims
             param_keys_for_adam.extend([f"W{i}", f"b{i}"])
         param_keys_for_adam.extend(["W_out", "b_out"])
 
@@ -872,156 +871,140 @@ class DQN(ModelBase):
         }
     
     def get_model_state(self) -> Dict[str, Any]:
-        """Get the current state of the model for serialization.
+        """Get the current state of the model for saving."""
+        self.logger.debug(f"DQN.get_model_state called. self.q_network is {'set' if self.q_network else 'None'}")
+        model_weights = None
+        if self.q_network and isinstance(self.q_network, dict) and "weights" in self.q_network:
+            model_weights = self.q_network["weights"]
+            self.logger.debug(f"DQN.get_model_state: Extracted weights from self.q_network['weights']. Keys: {list(model_weights.keys()) if model_weights else 'None'}")
         
-        Returns:
-            Dictionary containing model state
-        """
-        # Create deep copies of networks to avoid modifying the original
-        import copy
-        
-        state = {
-            "q_network": copy.deepcopy(self.q_network) if self.q_network else None,
-            "target_network": copy.deepcopy(self.target_network) if self.target_network else None,
-            "steps": self.steps,
-            "episodes": self.episodes,
-            "training_history": self.training_history,
-            "input_shape": self.input_shape if hasattr(self, "input_shape") else None,
-            "output_shape": self.output_shape if hasattr(self, "output_shape") else None,
-            "n_actions": self.n_actions if hasattr(self, "n_actions") else None
+        # Return the config used to initialize, plus current weights and built status
+        # This ensures ModelRegistry can re-create the model structure correctly.
+        state_to_save = {
+            "creation_config": self.model_init_config, # The full config dict used at __init__
+            "model_weights": model_weights,
+            "is_model_built": self.is_model_built
         }
-        
-        # Convert numpy arrays to lists for JSON serialization
-        if state["q_network"] and "weights" in state["q_network"]:
-            weights_dict = {}
-            for k, v in state["q_network"]["weights"].items():
-                # Handle both numpy arrays and lists
-                if isinstance(v, np.ndarray):
-                    weights_dict[k] = v.tolist()
-                elif isinstance(v, list):
-                    weights_dict[k] = v
-                else:
-                    # For any other type, try to convert to list
-                    weights_dict[k] = list(v)
-            state["q_network"]["weights"] = weights_dict
-        
-        if state["target_network"] and "weights" in state["target_network"]:
-            weights_dict = {}
-            for k, v in state["target_network"]["weights"].items():
-                # Handle both numpy arrays and lists
-                if isinstance(v, np.ndarray):
-                    weights_dict[k] = v.tolist()
-                elif isinstance(v, list):
-                    weights_dict[k] = v
-                else:
-                    # For any other type, try to convert to list
-                    weights_dict[k] = list(v)
-            state["target_network"]["weights"] = weights_dict
-        
-        return state
-    
-    def set_model_state(self, state: Dict[str, Any]) -> None:
-        """Set the model state from a dictionary.
-        
-        Args:
-            state: Dictionary containing model state
-        """
-        # Restore shapes first
-        # Restore shapes first. Ensure these attributes are set on self.
-        # These will be None if not in state or if state had them as None.
-        _input_shape_from_state = state.get("input_shape")
-        self.input_shape = tuple(_input_shape_from_state) if _input_shape_from_state is not None else None
-        
-        _output_shape_from_state = state.get("output_shape")
-        self.output_shape = tuple(_output_shape_from_state) if _output_shape_from_state is not None else None
-        
-        self.n_actions = state.get("n_actions")
+        self.logger.debug(f"DQN.get_model_state: Returning state with keys: {list(state_to_save.keys())}")
+        return state_to_save
 
-        # If shapes were not in state (or were None), try to derive from observation/action space
-        # (which should be set by ModelBase.__init__ from config)
-        if self.input_shape is None and hasattr(self, 'observation_space') and self.observation_space is not None:
-            if hasattr(self.observation_space, 'shape'):
-                self.input_shape = self.observation_space.shape
-                self.logger.info(f"DQN.set_model_state: Derived input_shape from observation_space: {self.input_shape}")
+    def set_model_state(self, state: Dict[str, Any]):
+        """Load the model state from a dictionary."""
+        self.logger.info(f"DQN.set_model_state called. Current self.is_model_built: {self.is_model_built}")
+        self.logger.debug(f"DQN.set_model_state: Received state keys: {list(state.keys())}")
+
+        # Prioritize creation_config from state for dimensions if this instance wasn't fully initialized
+        # This is key for when ModelRegistry re-creates the model
+        creation_config = state.get("creation_config")
+        if isinstance(creation_config, dict):
+            self.logger.info("DQN.set_model_state: Using 'creation_config' from state to ensure dimensions.")
+            self.input_dim = creation_config.get("input_dim", self.input_dim)
+            self.output_dim = creation_config.get("output_dim", self.output_dim)
+            # Explicitly handle hidden_dims
+            loaded_hidden_dims = creation_config.get("hidden_dims")
+            if loaded_hidden_dims is not None:
+                self.hidden_dims = loaded_hidden_dims
+                self.logger.info(f"DQN.set_model_state: Updated self.hidden_dims from creation_config: {self.hidden_dims}")
             else:
-                self.logger.warning("DQN.set_model_state: observation_space found but has no 'shape' attribute.")
+                # If not in creation_config, self.hidden_dims should have been set by __init__.
+                # We log if it's unexpectedly missing, then try to recover.
+                if not hasattr(self, 'hidden_dims'): # Check existence first
+                    self.logger.error("DQN.set_model_state: CRITICAL - self.hidden_dims was not set by __init__ and also not found in creation_config. Attempting recovery.")
+                    current_hyperparameters = getattr(self, 'hyperparameters', {})
+                    self.hidden_dims = current_hyperparameters.get("hidden_layers", [256, 128, 64])
+                    self.logger.warning(f"DQN.set_model_state: Recovered self.hidden_dims to: {self.hidden_dims}")
+                # If hasattr is true, self.hidden_dims already exists from __init__.
+                # If self.hidden_dims was None after __init__ (which current __init__ logic should prevent),
+                # it would remain None here, and build() would use that.
+                # This is acceptable as build() will use whatever self.hidden_dims is.
+            # Restore hyperparameters from the creation_config as well
+            self.hyperparameters = creation_config.get("hyperparameters", self.hyperparameters)
+            self.logger.info(f"DQN.set_model_state: Hyperparameters set from creation_config: {self.hyperparameters}")
 
-        if self.output_shape is None and hasattr(self, 'action_space') and self.action_space is not None:
-            if hasattr(self.action_space, 'n'): # For discrete action spaces
-                self.output_shape = (self.action_space.n,)
-                # If n_actions wasn't in state, derive it here too
-                if self.n_actions is None:
-                    self.n_actions = self.action_space.n
-                self.logger.info(f"DQN.set_model_state: Derived output_shape from action_space: {self.output_shape}. n_actions set to: {self.n_actions}")
-            else:
-                self.logger.warning("DQN.set_model_state: action_space found but has no 'n' attribute for discrete actions.")
-        
-        # If n_actions is still None, but output_shape is available (e.g. loaded from state, and it's a 1-tuple)
-        if self.n_actions is None and self.output_shape is not None and len(self.output_shape) == 1:
-            self.n_actions = self.output_shape[0]
-            self.logger.info(f"DQN.set_model_state: Derived n_actions from loaded output_shape[0]: {self.n_actions}")
 
-        # Restore networks
-        self.q_network = state.get("q_network")
-        self.target_network = state.get("target_network")
-        
-        self.logger.info(f"DQN.set_model_state: Before network init check. self.q_network is None: {self.q_network is None}, self.target_network is None: {self.target_network is None}")
-        self.logger.info(f"DQN.set_model_state: Current self.input_shape: {self.input_shape}, self.output_shape: {self.output_shape}, self.n_actions: {self.n_actions}")
+            if self.input_dim and (self.input_shape is None or self.input_shape[0] != self.input_dim):
+                self.input_shape = (self.input_dim,)
+                self.logger.info(f"DQN.set_model_state: Set/Updated self.input_shape={self.input_shape} from creation_config.")
+            if self.output_dim and (self.output_shape is None or self.output_shape[0] != self.output_dim or self.n_actions is None):
+                self.output_shape = (self.output_dim,)
+                self.n_actions = self.output_dim
+                self.logger.info(f"DQN.set_model_state: Set/Updated self.output_shape={self.output_shape}, self.n_actions={self.n_actions} from creation_config.")
+        else: # Fallback if creation_config is not there (e.g. raw HPO params)
+            self.logger.info("DQN.set_model_state: 'creation_config' not in state. Using direct state keys for dimensions if available.")
+            if 'input_dim' in state and (self.input_dim != state['input_dim'] or self.input_shape is None):
+                self.input_dim = state['input_dim']
+                self.input_shape = (self.input_dim,)
+            if 'output_dim' in state and (self.output_dim != state['output_dim'] or self.output_shape is None):
+                self.output_dim = state['output_dim']
+                self.output_shape = (self.output_dim,)
+                self.n_actions = self.output_dim
+            if 'hidden_dims' in state: self.hidden_dims = state['hidden_dims']
+            if 'hyperparameters' in state: self.hyperparameters.update(state['hyperparameters'])
 
-        if self.q_network is None or self.target_network is None:
-            self.logger.info(f"DQN.set_model_state: q_network or target_network is None after loading from state.")
-            # Now check if input_shape and output_shape are valid (not None) to proceed with build
+
+        # Build network if not already built or if essential shapes are now available
+        if not self.q_network:
             if self.input_shape and self.output_shape:
-                self.logger.info(f"DQN.set_model_state: input_shape and output_shape are available. Calling self.build() with input_shape={self.input_shape}, output_shape={self.output_shape}.")
-                self.build(self.input_shape, self.output_shape)
-                self.logger.info(f"DQN.set_model_state: After self.build(), self.q_network is None: {self.q_network is None}")
+                self.logger.info(f"DQN.set_model_state: Calling self.build() with input_shape={self.input_shape}, output_shape={self.output_shape}, hidden_dims={self.hidden_dims}.")
+                self.build(self.input_shape, self.output_shape) # Pass shapes to build
             else:
-                 self.logger.warning("DQN.set_model_state: Cannot build networks: input_shape or output_shape are still None after attempting to load/derive.")
+                self.logger.error("DQN.set_model_state: Critical: input_shape or output_shape not available after checking state. Cannot build network.")
+                self.is_model_built = False # Explicitly set
+                return # Cannot proceed without building
+        
+        # Load weights
+        weights_to_load_source = None
+        if "model_weights" in state and state["model_weights"] is not None: # Loading from get_model_state output
+            weights_to_load_source = state["model_weights"]
+            self.logger.info("DQN.set_model_state: Found 'model_weights' in state, will use these for loading.")
+        elif isinstance(state, dict) and not any(k in state for k in ["model_weights", "creation_config", "is_model_built"]):
+            # Heuristic for raw HPO params (a dict of weights without our specific state keys)
+            weights_to_load_source = state
+            self.logger.info("DQN.set_model_state: No 'model_weights' or 'creation_config'. Assuming 'state' itself is a flat weight dictionary (raw HPO params).")
+        
+        if weights_to_load_source and self.q_network and isinstance(self.q_network.get("weights"), dict):
+            self.logger.info(f"DQN.set_model_state: Attempting to load weights. Source has {len(weights_to_load_source)} items.")
+            target_weights_struct = self.q_network["weights"]
+            loaded_weights_count = 0
+            
+            # Assuming weights_to_load_source is a flat dict {name: array}
+            # And target_weights_struct is also {name: array}
+            for key_name_target, target_weight_arr_template in target_weights_struct.items():
+                if key_name_target in weights_to_load_source:
+                    try:
+                        source_weight_array = np.array(weights_to_load_source[key_name_target])
+                        target_shape = target_weight_arr_template.shape
+                        target_dtype = target_weight_arr_template.dtype
+
+                        if target_shape != source_weight_array.shape:
+                            self.logger.warning(f"DQN.set_model_state: Shape mismatch for {key_name_target}. Target: {target_shape}, Source: {source_weight_array.shape}. Attempting reshape.")
+                            source_weight_array = source_weight_array.reshape(target_shape)
+                        
+                        target_weights_struct[key_name_target] = source_weight_array.astype(target_dtype)
+                        loaded_weights_count += 1
+                        self.logger.debug(f"DQN.set_model_state: Loaded weight for {key_name_target}")
+                    except Exception as e:
+                        self.logger.error(f"DQN.set_model_state: Error loading weight for {key_name_target}: {e}", exc_info=True)
+                else:
+                    self.logger.warning(f"DQN.set_model_state: Target weight key '{key_name_target}' not found in source weights. Available source keys: {list(weights_to_load_source.keys())}")
+
+            self.logger.info(f"DQN.set_model_state: Loaded {loaded_weights_count} weight arrays into q_network.")
+            
+            if self.target_network: # Ensure target network is also updated
+                self.logger.info("DQN.set_model_state: Updating target_network from q_network.")
+                self._update_target_network()
         else:
-            self.logger.info("DQN.set_model_state: q_network and target_network were loaded from state. Ensuring weights are numpy arrays.")
+            self.logger.warning("DQN.set_model_state: No weights_to_load_source identified or q_network structure invalid. Weights not loaded.")
         
-        # Convert lists back to numpy arrays and ensure proper structure
-        # This block should execute regardless of the above, if q_network was loaded from state.
-        if self.q_network and isinstance(self.q_network.get("weights"), dict):
-            # Ensure weights is a dictionary
-            if isinstance(self.q_network["weights"], dict):
-                self.q_network["weights"] = {
-                    k: np.array(v) if not isinstance(v, np.ndarray) else v
-                    for k, v in self.q_network["weights"].items()
-                }
-            else:
-                # If weights is not a dict, reinitialize
-                if hasattr(self, 'input_shape') and hasattr(self, 'output_shape'):
-                    self.q_network["weights"] = self._initialize_weights(self.input_shape, self.output_shape)
+        # Restore built status from state if available, otherwise rely on self.build() outcome
+        # self.is_model_built should be True if self.build() was successful and q_network exists
+        self.is_model_built = state.get("is_model_built", self.q_network is not None)
         
-        if self.target_network and "weights" in self.target_network:
-            # Ensure weights is a dictionary
-            if isinstance(self.target_network["weights"], dict):
-                self.target_network["weights"] = {
-                    k: np.array(v) if not isinstance(v, np.ndarray) else v
-                    for k, v in self.target_network["weights"].items()
-                }
-            else:
-                # If weights is not a dict, reinitialize
-                if hasattr(self, 'input_shape') and hasattr(self, 'output_shape'):
-                    self.target_network["weights"] = self._initialize_weights(self.input_shape, self.output_shape)
+        if not self.q_network: # Final safety check
+             self.is_model_built = False
+             self.logger.error("DQN.set_model_state: CRITICAL - self.q_network is None at the end of set_model_state.")
         
-        # Restore other attributes
-        self.steps = state.get("steps", 0)
-        self.episodes = state.get("episodes", 0)
-        self.training_history = state.get("training_history", {
-            "episode_rewards": [],
-            "episode_lengths": [],
-            "losses": [],
-            "epsilon_values": []
-        })
-        if state.get("output_shape"):
-            self.output_shape = tuple(state["output_shape"])
-        if state.get("n_actions") is not None:
-            self.n_actions = state["n_actions"]
-        
-        # Reinitialize replay buffer
-        self.replay_buffer = ReplayBuffer(self.memory_size)
+        self.logger.info(f"DQN.set_model_state completed. Model built status: {self.is_model_built}")
     
     def _calculate_rl_metrics(self, episode_reward: float, episode_length: int,
                              losses: List[float], epsilon: float,
