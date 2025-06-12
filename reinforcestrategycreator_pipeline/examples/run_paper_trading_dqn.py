@@ -28,6 +28,7 @@ sys.path.insert(0, str(project_root))
 
 from src.config.manager import ConfigManager
 from src.data.manager import DataManager
+from src.data.transformer import DataTransformer # Added
 from src.data.yfinance_source import YFinanceDataSource
 from src.deployment.manager import DeploymentManager
 from src.deployment.paper_trading import PaperTradingDeployer, Order, OrderSide, OrderType
@@ -66,6 +67,12 @@ class DQNPaperTradingRunner:
         artifact_store_path = self._get_artifact_store_path()
         self.artifact_store = LocalFileSystemStore(artifact_store_path)
         self.data_manager = DataManager(self.config_manager, self.artifact_store)
+        
+        # Initialize DataTransformer
+        self.logger.debug(f"Data transformation config from pipeline_config: {self.config_manager.get_config().data.transformation if self.config_manager.get_config().data else None}")
+        self.data_transformer = DataTransformer(config=self.config_manager.get_config().data.transformation if self.config_manager.get_config().data else None)
+        self.logger.info("DataTransformer initialized.")
+
         self.model_factory = ModelFactory()
         self.model_registry = ModelRegistry(artifact_store=self.artifact_store)
         
@@ -487,28 +494,46 @@ class DQNPaperTradingRunner:
 
                 # Transform raw data to engineered features
                 try:
-                    # Assuming data_manager is configured with the correct feature pipeline
-                    # The source_id here is for DataManager's internal logic if it uses it
-                    # (e.g., for caching or specific pipeline selection)
-                    engineered_features_df = self.data_manager.transform_data(
-                        symbol_raw_df.copy(), # Pass a copy to avoid modifying original
-                        source_id=f"live_features_{symbol}"
-                    )
-                    
-                    if engineered_features_df is not None and not engineered_features_df.empty:
-                        # Ensure all expected feature columns are present, fill NaNs if necessary
-                        # This step depends on how your feature pipeline handles missing initial values
-                        # For simplicity, we'll take the last row and assume it's mostly complete.
-                        # Models should ideally handle NaNs if they can occur.
-                        feature_vector = engineered_features_df.iloc[-1].values
-                        latest_feature_vectors[symbol] = feature_vector
-                        self.logger.debug(f"Generated feature vector for {symbol} with shape {feature_vector.shape}")
+                    self.logger.debug(f"Raw data for {symbol} before transformation:\n{symbol_raw_df.tail()}")
+                    engineered_features_df = self.data_transformer.transform(symbol_raw_df.copy())
+                    self.logger.debug(f"Engineered features for {symbol} after transformation:\n{engineered_features_df.tail()}")
+
+                    if engineered_features_df.empty:
+                        self.logger.warning(f"No features generated for {symbol} after transformation. Skipping.")
+                        features_array = np.array([], dtype=np.float32)
                     else:
-                        self.logger.warning(f"Engineered features for {symbol} are empty. No feature vector generated.")
-                        latest_feature_vectors[symbol] = np.array([])
-                except Exception as fe_e:
-                    self.logger.error(f"Error during feature engineering for {symbol}: {fe_e}", exc_info=True)
-                    latest_feature_vectors[symbol] = np.array([]) # Fallback to empty features
+                        # Select only the configured scaling_columns (which should be the 10 expected features)
+                        expected_feature_columns = self.config_manager.get_config().data.transformation.scaling_columns
+                        if expected_feature_columns:
+                            # Ensure all expected columns are present in the engineered_features_df
+                            missing_cols = [col for col in expected_feature_columns if col not in engineered_features_df.columns]
+                            if missing_cols:
+                                self.logger.warning(f"Missing expected feature columns for {symbol} after transformation: {missing_cols}. Using available columns.")
+                                # Use only available columns from the expected list
+                                available_expected_cols = [col for col in expected_feature_columns if col in engineered_features_df.columns]
+                                if not available_expected_cols:
+                                    self.logger.error(f"No expected feature columns are available for {symbol}. Falling back to empty features.")
+                                    features_array = np.array([], dtype=np.float32)
+                                else:
+                                    selected_features_df = engineered_features_df[available_expected_cols]
+                                    latest_features = selected_features_df.iloc[-1]
+                                    features_array = latest_features.values.astype(np.float32)
+                            else:
+                                selected_features_df = engineered_features_df[expected_feature_columns]
+                                latest_features = selected_features_df.iloc[-1]
+                                features_array = latest_features.values.astype(np.float32)
+                        else:
+                            # If no scaling_columns are defined, use all available features (original behavior)
+                            self.logger.warning(f"No scaling_columns defined in transformation config. Using all available columns from engineered_features_df for {symbol}.")
+                            latest_features = engineered_features_df.iloc[-1]
+                            features_array = latest_features.values.astype(np.float32)
+                        
+                        self.logger.debug(f"Generated final feature vector for {symbol} with shape {features_array.shape}")
+                    
+                    latest_feature_vectors[symbol] = features_array
+                except Exception as e:
+                    self.logger.error(f"Error processing data or transforming features for {symbol}: {e}", exc_info=True)
+                    latest_feature_vectors[symbol] = np.array([], dtype=np.float32) # Fallback
 
             if not latest_prices: # If all symbols failed to get prices
                  self.logger.warning(f"Completely failed to get any market prices. Returning only simulated prices.")
