@@ -2,7 +2,9 @@
 
 ## Overview
 
-The `test_model_selection_improvements.py` script is a comprehensive testing framework designed to evaluate and compare different model selection and training approaches for reinforcement learning trading strategies. It systematically tests and benchmarks multiple methodologies:
+The `test_model_selection_improvements.py` script is a comprehensive testing framework designed to evaluate and compare different model selection and training approaches for reinforcement learning trading strategies **within a simulated paper trading environment**. It systematically tests and benchmarks multiple methodologies:
+
+> **Note on Trading Environment:** All testing, model evaluation, and performance metrics discussed in this document are based on the system's **simulated paper trading environment**. This environment uses frequently refreshed real market data for feature engineering and signal generation, with subsequent order execution simulated. The system is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
 
 1. **Original Approach**: Uses only Sharpe ratio for model selection with basic training techniques.
 2. **Enhanced Approach**: Employs multi-metric selection criteria combined with advanced training techniques (transfer learning and ensemble models).
