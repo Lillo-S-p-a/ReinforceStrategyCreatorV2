@@ -18,7 +18,25 @@ data:
   cache_dir: "./cache/data"
   validation_enabled: true
   transformation:
-    add_technical_indicators: false
+    add_technical_indicators: true
+    technical_indicators:
+      - "sma_20"  # Specific SMA
+      - "ema_20"  # Specific EMA
+      - "rsi"
+      - "macd" # Calculate all MACD components, 'macd' will be selected later
+      - "bb_middle" # Bollinger Band Middle
+    scaling_method: "standard"
+    scaling_columns: # Explicitly list the 10 features to be scaled and used
+      - "Open"
+      - "High"
+      - "Low"
+      - "Close"
+      - "Volume"
+      - "sma_20"
+      - "ema_20"
+      - "rsi"
+      - "macd" # The TechnicalIndicatorTransformer names the MACD line 'macd'
+      - "bb_middle"
 
 # Model configuration
 model:

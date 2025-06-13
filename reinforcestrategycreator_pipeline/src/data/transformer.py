@@ -52,26 +52,63 @@ class TechnicalIndicatorTransformer(TransformerBase):
         
         Args:
             indicators: List of indicators to calculate. If None, calculates all.
+                        Can include specific periods like 'sma_20', 'ema_10'.
         """
-        self.indicators = indicators or [
-            'sma', 'ema', 'rsi', 'macd', 'bollinger_bands',
+        self.requested_indicators = indicators or [ # Store what was requested
+            'sma', 'ema', 'rsi', 'macd', 'bollinger_bands', # Default to generic if nothing specific
             'atr', 'adx', 'aroon', 'historical_volatility'
         ]
+        
+        # Default parameters, can be overridden by specific requests
         self.params = {
-            'sma_periods': [5, 20, 50],
-            'ema_periods': [5, 20],
+            'sma_periods': [], # Will be populated from requested_indicators
+            'ema_periods': [], # Will be populated
             'rsi_period': 14,
             'macd_fast': 12,
             'macd_slow': 26,
             'macd_signal': 9,
-            'bb_period': 20,
+            'bb_period': 20, # For bb_middle, bb_upper, bb_lower
             'bb_std': 2,
             'atr_period': 14,
             'adx_period': 14,
             'aroon_period': 14,
             'hist_vol_period': 20
         }
+
+        self.active_indicators = set() # To track which generic indicators to run
+
+        for ind_request in self.requested_indicators:
+            parts = ind_request.split('_')
+            base_ind = parts[0]
+            
+            if base_ind == 'sma' and len(parts) > 1 and parts[1].isdigit():
+                self.params['sma_periods'].append(int(parts[1]))
+                self.active_indicators.add('sma')
+            elif base_ind == 'ema' and len(parts) > 1 and parts[1].isdigit():
+                self.params['ema_periods'].append(int(parts[1]))
+                self.active_indicators.add('ema')
+            elif base_ind == 'bb' and len(parts) > 1 and parts[1] in ['upper', 'middle', 'lower']:
+                # bb_period is already set in defaults, this just activates bollinger_bands
+                self.active_indicators.add('bollinger_bands') # Generic trigger
+            elif base_ind in ['rsi', 'macd', 'atr', 'adx', 'aroon', 'historical_volatility']:
+                self.active_indicators.add(base_ind)
+            elif base_ind in self.params: # e.g. if 'sma' is passed, use default periods
+                 self.active_indicators.add(base_ind)
+                 if base_ind == 'sma' and not self.params['sma_periods']: # if 'sma' requested but no specific periods yet
+                     self.params['sma_periods'] = [5, 20, 50] # Default periods
+                 if base_ind == 'ema' and not self.params['ema_periods']:
+                     self.params['ema_periods'] = [5, 20]
+            else:
+                logger.warning(f"Unknown or unhandled indicator format: {ind_request}")
         
+        # Ensure uniqueness if defaults were added
+        if 'sma' in self.active_indicators:
+            self.params['sma_periods'] = sorted(list(set(self.params['sma_periods'])))
+        if 'ema' in self.active_indicators:
+            self.params['ema_periods'] = sorted(list(set(self.params['ema_periods'])))
+
+        logger.debug(f"TechnicalIndicatorTransformer initialized. Active indicators: {self.active_indicators}, Params: {self.params}")
+
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
         """Calculate technical indicators on the data.
         
@@ -93,24 +130,24 @@ class TechnicalIndicatorTransformer(TransformerBase):
             raise ValueError("DataFrame must contain 'high', 'low', and 'close' columns")
         
         # Calculate each indicator
-        if 'sma' in self.indicators:
+        if 'sma' in self.active_indicators:
             for period in self.params['sma_periods']:
                 result[f'sma_{period}'] = SMAIndicator(
                     close=result[close_col], window=period
                 ).sma_indicator()
                 
-        if 'ema' in self.indicators:
+        if 'ema' in self.active_indicators:
             for period in self.params['ema_periods']:
                 result[f'ema_{period}'] = EMAIndicator(
                     close=result[close_col], window=period
                 ).ema_indicator()
                 
-        if 'rsi' in self.indicators:
+        if 'rsi' in self.active_indicators:
             result['rsi'] = RSIIndicator(
                 close=result[close_col], window=self.params['rsi_period']
             ).rsi()
             
-        if 'macd' in self.indicators:
+        if 'macd' in self.active_indicators:
             macd = MACD(
                 close=result[close_col],
                 window_slow=self.params['macd_slow'],
@@ -121,7 +158,7 @@ class TechnicalIndicatorTransformer(TransformerBase):
             result['macd_signal'] = macd.macd_signal()
             result['macd_diff'] = macd.macd_diff()
             
-        if 'bollinger_bands' in self.indicators:
+        if 'bollinger_bands' in self.active_indicators:
             bb = BollingerBands(
                 close=result[close_col],
                 window=self.params['bb_period'],
@@ -131,7 +168,7 @@ class TechnicalIndicatorTransformer(TransformerBase):
             result['bb_middle'] = bb.bollinger_mavg()
             result['bb_lower'] = bb.bollinger_lband()
             
-        if 'atr' in self.indicators and high_col and low_col:
+        if 'atr' in self.active_indicators and high_col and low_col:
             result.ta.atr(
                 high=result[high_col],
                 low=result[low_col],
@@ -140,7 +177,7 @@ class TechnicalIndicatorTransformer(TransformerBase):
                 append=True
             )
             
-        if 'adx' in self.indicators and high_col and low_col:
+        if 'adx' in self.active_indicators and high_col and low_col:
             result.ta.adx(
                 high=result[high_col],
                 low=result[low_col],
@@ -149,21 +186,22 @@ class TechnicalIndicatorTransformer(TransformerBase):
                 append=True
             )
             
-        if 'aroon' in self.indicators and high_col and low_col:
+        if 'aroon' in self.active_indicators and high_col and low_col:
             result.ta.aroon(
                 high=result[high_col],
-                low=result[low_col],
+                low=result[low_col], # This was missing high=, low= before, fixed.
+                close=result[close_col], # Added close for aroon as it's often used.
                 length=self.params['aroon_period'],
                 append=True
             )
             
-        if 'historical_volatility' in self.indicators:
+        if 'historical_volatility' in self.active_indicators:
             returns = result[close_col].pct_change()
             result['hist_volatility'] = returns.rolling(
                 window=self.params['hist_vol_period']
             ).std() * np.sqrt(252)  # Annualized
             
-        logger.info(f"Calculated {len(self.indicators)} technical indicators")
+        logger.info(f"Calculated {len(self.active_indicators)} types of technical indicators based on {len(self.requested_indicators)} requests.")
         return result
     
     def _find_column(self, columns: pd.Index, target: str) -> Optional[str]:

@@ -182,15 +182,30 @@ class LocalFileSystemStore(ArtifactStore):
             destination_path = Path(temp_dir) / data_path.name
         else:
             destination_path = Path(destination_path)
-        
+            # If destination_path is a directory, the actual file will be inside it
+            is_dest_dir = True # Assume it's a directory if provided
+            if destination_path.suffix: # A simple check if it looks like a file path
+                try:
+                    if destination_path.is_file() or not destination_path.exists(): # if it is a file or doesn't exist, treat as file path
+                        is_dest_dir = False
+                except OSError: # Handle cases like invalid characters in path for .is_file()
+                    is_dest_dir = False
+
         # Copy artifact
         if data_path.is_dir():
             shutil.copytree(data_path, destination_path, dirs_exist_ok=True)
+            final_artifact_path = destination_path
         else:
-            destination_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(data_path, destination_path)
+            if is_dest_dir: # If destination is a directory, copy file into it
+                destination_path.mkdir(parents=True, exist_ok=True)
+                final_artifact_path = destination_path / data_path.name
+                shutil.copy2(data_path, final_artifact_path)
+            else: # If destination is a file path, copy to that path
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(data_path, destination_path)
+                final_artifact_path = destination_path
         
-        return destination_path
+        return final_artifact_path
     
     def get_artifact_metadata(
         self,

@@ -81,6 +81,7 @@ class ModelPackager:
             # Load model to temporary location
             model_path = self.model_registry.artifact_store.load_artifact(
                 artifact_id=model_id,
+                artifact_type=ArtifactType.MODEL,  # Added missing artifact_type
                 version=model_version,
                 destination_path=package_path / "model"
             )

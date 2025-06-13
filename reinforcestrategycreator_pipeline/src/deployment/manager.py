@@ -382,8 +382,12 @@ class DeploymentManager:
             # Load package from artifact store
             package_path = self.artifact_store.load_artifact(
                 artifact_id=package_id,
+                artifact_type=ArtifactType.OTHER,  # Added missing artifact_type
                 destination_path=temp_dir
             )
+            self.logger.info(f"Package path from load_artifact: {package_path}") # DEBUG LOG
+            self.logger.info(f"Is package_path a directory? {Path(package_path).is_dir()}") # DEBUG LOG
+            self.logger.info(f"Is package_path a file? {Path(package_path).is_file()}") # DEBUG LOG
             
             # Extract tarball
             with tarfile.open(package_path, "r:gz") as tar:

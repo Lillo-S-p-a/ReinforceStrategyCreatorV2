@@ -19,3 +19,8 @@ reinforcestrategycreator_pipeline/artifacts
 checkpoints/*
 cache
 artifacts/
+deployments/
+hpo_results/
+paper_trading_results/
+paper_trading/
+paper_trading_dqn.log

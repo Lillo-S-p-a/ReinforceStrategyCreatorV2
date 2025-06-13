@@ -20,12 +20,19 @@ class ConfigManager:
         Initialize the configuration manager.
         
         Args:
-            config_dir: Base directory for configuration files
+            config_dir: Base directory for configuration files. This will be used as the
+                        project root for resolving relative config paths by the ConfigLoader.
+                        If None, ConfigLoader defaults to CWD.
             environment: Environment to use (development, staging, production)
         """
-        self.config_dir = Path(config_dir) if config_dir else Path("configs")
+        self.config_dir = Path(config_dir).resolve() if config_dir else Path("configs").resolve() # Keep self.config_dir for now, might be used elsewhere
         self.environment = self._resolve_environment(environment)
-        self.loader = ConfigLoader(base_path=self.config_dir)
+        
+        # If config_dir is provided, it acts as the root for config loading for the loader.
+        # Otherwise, ConfigLoader will default its project_root to Path.cwd().
+        loader_project_root = Path(config_dir).resolve() if config_dir else None
+        self.loader = ConfigLoader(project_root=loader_project_root)
+        
         self.validator = ConfigValidator(model_class=PipelineConfig)
         self._config: Optional[PipelineConfig] = None
         self._raw_config: Optional[Dict[str, Any]] = None
