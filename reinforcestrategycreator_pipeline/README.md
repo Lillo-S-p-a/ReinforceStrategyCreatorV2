@@ -8,14 +8,15 @@ This project implements a comprehensive pipeline for training, evaluating, and d
 
 ## Features
 
-- **Modular Architecture**: Clear separation of concerns with dedicated components for data management, model training, evaluation, and deployment
-- **Hyperparameter Optimization**: Integrated support for Ray Tune and Optuna
-- **Cross-Validation**: Robust model selection with multiple metrics
-- **Monitoring**: Real-time performance tracking with Datadog integration
-- **Deployment Ready**: Support for paper trading and live deployment
-- **Extensible**: Easy to add new models, data sources, and evaluation metrics
+- **Modular Architecture**: Clear separation of concerns with dedicated components for data management, model training, evaluation, and deployment.
+- **Hyperparameter Optimization**: Integrated support for Ray Tune and Optuna.
+- **Cross-Validation**: Robust model selection with multiple metrics.
+- **Monitoring**: Real-time performance tracking with Datadog integration (monitoring the simulation environment and pipeline).
+- **Simulated Paper Trading**: Support for deploying and testing models in a simulated paper trading environment that uses frequently refreshed real market data and simulated order execution. (Note: Live brokerage connection for actual paper/live trading is a future goal and not currently implemented).
+- **Extensible**: Easy to add new models, data sources, and evaluation metrics.
 
 ## Project Structure
+> **Note on Trading Environment:** The `deployment/` directory and related components are designed for **simulated paper trading**. This involves using frequently refreshed real market data for feature engineering and signal generation, with subsequent order execution simulated. It is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
 
 ```
 reinforcestrategycreator_pipeline/
@@ -26,7 +27,7 @@ reinforcestrategycreator_pipeline/
 │   ├── models/         # Model implementations
 │   ├── training/       # Training engine
 │   ├── evaluation/     # Evaluation framework
-│   ├── deployment/     # Deployment manager
+│   ├── deployment/     # Deployment manager (simulated paper trading)
 │   ├── monitoring/     # Monitoring service
 │   ├── config/         # Configuration management
 │   └── artifacts/      # Artifact storage

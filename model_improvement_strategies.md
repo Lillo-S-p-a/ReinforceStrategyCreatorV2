@@ -1,5 +1,7 @@
 # Model Improvement Strategies for RL Trading
 
+> **Note on Current System Status:** All strategies, testing, and deployment discussions in this document pertain to a **simulated paper trading environment**. The system currently uses frequently refreshed real market data for feature engineering and signal generation, with subsequent order execution simulated. It is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
+
 This document outlines the improvements implemented in the `run_improved_backtesting.py` script and provides suggestions for further enhancing the performance of reinforcement learning trading models.
 
 ## Current Improvements

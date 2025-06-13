@@ -2,6 +2,8 @@
 
 Generated on: 2025-05-18 13:48:20
 
+> **Note on Trading Environment:** The performance analysis in this report is based on **simulated paper trading**. The system uses frequently refreshed real market data for feature engineering and signal generation, and then simulates order execution. It is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
+
 This report provides a comprehensive analysis of model performance compared to benchmark strategies across various market scenarios.
 
 ## Performance Summary

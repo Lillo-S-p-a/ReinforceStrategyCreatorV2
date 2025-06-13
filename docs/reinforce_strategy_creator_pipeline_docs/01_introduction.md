@@ -2,6 +2,7 @@
 
 ### 1.1. Purpose of the Pipeline
 The ReinforceStrategyCreator Pipeline is a production-grade, modular system designed for the comprehensive development of reinforcement learning (RL) trading strategies. Its primary purpose is to transform the existing test harness into a robust, maintainable pipeline suitable for production use and paper trading. It facilitates the training, rigorous evaluation, and deployment of RL models tailored for financial markets.
+> **Note on Trading Environment:** The ReinforceStrategyCreator Pipeline is designed for **simulated paper trading**. This involves using frequently refreshed real market data for feature engineering and signal generation, with subsequent order execution simulated. It is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
 
 ### 1.2. Target Audience
 This documentation is intended for:

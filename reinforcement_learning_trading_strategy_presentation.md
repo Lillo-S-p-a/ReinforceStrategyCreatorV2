@@ -2,9 +2,10 @@
 
 ## 1. Executive Summary
 
-- We developed and analyzed a trading strategy using Reinforcement Learning (RL).
-- The goal was to train an agent to make profitable trades based on market data and technical indicators.
-- Analysis shows the agent learned a strategy, but further optimization and validation are needed for real-world application.
+- We developed and analyzed a trading strategy using Reinforcement Learning (RL) within a **simulated paper trading environment**.
+- The goal was to train an agent to make profitable trades based on market data (refreshed frequently) and technical indicators, with order execution simulated.
+- Analysis shows the agent learned a strategy within this simulated context. Further optimization, validation, and integration with a live brokerage are needed for real-world application.
+- **Note:** The system is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
 
 ## 2. Key Metrics & Visualizations
 
@@ -31,10 +32,10 @@
 
 ## 3. Significant Findings
 
-- **Learning Confirmed:** The agent demonstrated the ability to learn and adapt its strategy based on rewards.
+- **Learning Confirmed (Simulated Environment):** The agent demonstrated the ability to learn and adapt its strategy based on rewards within the **simulated paper trading environment**.
 - **[Specific Finding 1]:** (e.g., Agent shows a tendency to hold during high volatility - *interpret from plots*)
 - **[Specific Finding 2]:** (e.g., Profitability was observed in the simulated period, but requires benchmark comparison - *interpret from plots*)
-- **Limitations Noted:** Performance is sensitive to data, market conditions, and simulation accuracy (slippage, costs).
+- **Limitations Noted:** Performance is sensitive to data, market conditions, and the accuracy of the **simulated paper trading environment** (e.g., assumptions about slippage, costs). Live brokerage integration is a future step.
 
 ## 4. Top Recommendations
 

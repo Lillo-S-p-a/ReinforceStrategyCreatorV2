@@ -25,6 +25,7 @@ Follow these steps to set up the ReinforceStrategyCreator Pipeline environment:
     pip install -e ".[dev]"
     ```
 
+> **Note on Trading Environment:** The examples and quick start guides provided here are for a **simulated paper trading environment**. This involves using frequently refreshed real market data for feature engineering and signal generation, with subsequent order execution simulated. It is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
 ### 2.2. Quick Start Example
 To run the pipeline with a default configuration, you can use the following Python script. This typically involves initializing the `ModelPipeline` orchestrator with the path to a base configuration file and then calling its `run()` method.
 

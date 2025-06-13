@@ -2,7 +2,7 @@
 
 ## Purpose of the System
 
-ReinforceStrategyCreatorV2 is an advanced financial trading strategy development platform that leverages reinforcement learning (RL) to create, train, and evaluate automated trading strategies. The system simulates market interactions using historical financial data and employs deep reinforcement learning algorithms to develop strategies that can adapt to market conditions and make profitable trading decisions. This platform serves as a comprehensive framework for algorithmic trading research and development, combining machine learning, technical analysis, and financial performance metrics into a single, integrated system.
+ReinforceStrategyCreatorV2 is an advanced financial trading strategy development platform that leverages reinforcement learning (RL) to create, train, and evaluate automated trading strategies. The system currently supports **simulated paper trading**, where market interactions are simulated using frequently refreshed real market data (e.g., fetching the last 2 days of 1-minute candles from Yahoo Finance at each decision interval) for feature engineering and signal generation, with order execution then simulated. It employs deep reinforcement learning algorithms to develop strategies that can adapt to these simulated market conditions and make profitable trading decisions. This platform serves as a comprehensive framework for algorithmic trading research and development, combining machine learning, technical analysis, and financial performance metrics into a single, integrated system. **Note: The system is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.**
 
 ## Goals of the System
 
@@ -16,9 +16,9 @@ The primary goals of ReinforceStrategyCreatorV2 are:
 
 4. **Visualize Trading Performance**: Deliver intuitive visualizations of trading behavior, portfolio performance, and decision patterns to aid in strategy refinement.
 
-5. **Support Research and Development**: Provide an extensible platform for experimenting with different RL algorithms, technical indicators, and market conditions.
+5. **Support Research and Development**: Provide an extensible platform for experimenting with different RL algorithms, technical indicators, and market conditions within the **simulated paper trading environment**.
 
-6. **Enable Production Deployment**: Allow successful strategies to be saved, exported, and deployed for actual trading or further testing.
+6. **Enable Simulated Deployment**: Allow successful strategies to be saved, exported, and deployed for further testing within the **simulated paper trading environment**. Future development aims to connect to live brokerage accounts.
 
 ## Key Functionalities
 
@@ -34,11 +34,11 @@ ReinforceStrategyCreatorV2 provides the following key functionalities:
    - Computes historical volatility metrics
    - Normalizes data for machine learning consumption
 
-3. **Trading Simulation Environment**:
-   - Implements a gym-compatible environment for RL training
-   - Simulates market interactions with realistic constraints
-   - Supports customizable parameters for initial balance, transaction fees, position sizing, and risk controls
-   - Implements stop-loss and take-profit mechanisms
+3. **Trading Simulation Environment (Simulated Paper Trading)**:
+   - Implements a gym-compatible environment for RL training that simulates paper trading.
+   - Simulates market interactions using frequently refreshed real market data with realistic constraints. Order execution is simulated.
+   - Supports customizable parameters for initial balance, transaction fees, position sizing, and risk controls within the simulation.
+   - Implements stop-loss and take-profit mechanisms within the simulation.
 
 4. **Reinforcement Learning Framework**:
    - Utilizes Deep Q-Network (DQN) implementation with experience replay and target networks
@@ -59,9 +59,9 @@ ReinforceStrategyCreatorV2 provides the following key functionalities:
 
 ## Core Features
 
-### 1. Advanced Trading Environment
-- **Realistic Market Simulation**: Models the financial market with accurate price dynamics and trading mechanics
-- **Risk Management Controls**: Implements stop-loss and take-profit mechanisms to limit downside risk
+### 1. Advanced Trading Environment (Simulated Paper Trading)
+- **Realistic Market Simulation**: Models the financial market with accurate price dynamics and trading mechanics using frequently refreshed real market data for feature engineering and signal generation, with subsequent order execution simulated.
+- **Risk Management Controls**: Implements stop-loss and take-profit mechanisms to limit downside risk within the simulation.
 - **Customizable Trading Parameters**: Configurable transaction fees, initial capital, and trading constraints
 - **Position Sizing**: Supports multiple position sizing approaches (fixed fractional, all-in)
 
@@ -84,10 +84,10 @@ ReinforceStrategyCreatorV2 provides the following key functionalities:
 - **Trade Visualization**: Charts showing entry/exit points and portfolio value over time
 
 ### 5. Model Management
-- **Model Saving/Loading**: Ability to save and load trained RL models
-- **Production Deployment**: Framework for deploying models to production environments
-- **Version Tracking**: Logs model versions with associated performance metrics
-- **Model Comparison**: Tools for comparing different models and their performance
+- **Model Saving/Loading**: Ability to save and load trained RL models.
+- **Simulated Deployment**: Framework for deploying models to the **simulated paper trading environment**. (Note: Live brokerage deployment is a future goal and not currently supported).
+- **Version Tracking**: Logs model versions with associated performance metrics from simulated trading.
+- **Model Comparison**: Tools for comparing different models and their performance in simulation.
 
 ### 6. Interactive Dashboard
 - **Performance Visualization**: Multi-faceted view of strategy performance
@@ -111,4 +111,4 @@ ReinforceStrategyCreatorV2 is designed for:
 
 6. **Financial Education**: Instructors and students studying algorithmic trading and machine learning applications in finance.
 
-By serving these diverse user groups, ReinforceStrategyCreatorV2 aims to bridge the gap between cutting-edge reinforcement learning research and practical financial strategy development, providing the tools necessary to develop, test, and deploy sophisticated trading strategies in a controlled environment.
+By serving these diverse user groups, ReinforceStrategyCreatorV2 aims to bridge the gap between cutting-edge reinforcement learning research and practical financial strategy development, providing the tools necessary to develop, test, and deploy sophisticated trading strategies in a **controlled, simulated paper trading environment**. Future work will focus on enabling live brokerage integration.

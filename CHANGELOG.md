@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Note
+- The system currently supports **simulated paper trading**. This involves using frequently refreshed real market data (e.g., fetching the last 2 days of 1-minute candles from Yahoo Finance at each decision interval) for feature engineering and signal generation. Order execution is then simulated based on this data. This provides an advanced form of backtesting or forward testing by mimicking the flow of new data. However, the system is **not yet connected to a live brokerage (like Interactive Brokers) for real-time order submission, execution against a live market feed, or management of a live paper trading account with a broker.**
+
 ## [1.4.0] - 2025-05-26
 
 ### Added

@@ -80,6 +80,8 @@ The dashboard provides several views to analyze the trading agent's behavior and
 
 Explore the different sections using the sidebar navigation!
 
+> **Note on Paper Trading:** The trading activity visualized in this dashboard represents **simulated paper trading**. The system uses frequently refreshed real market data for feature engineering and signal generation, and then simulates order execution. It is not yet connected to a live brokerage for real-time order submission or management of a live paper trading account.
+
 ---
 
 Enjoy analyzing the trading strategies!
